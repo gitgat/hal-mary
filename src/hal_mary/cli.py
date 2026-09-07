@@ -36,6 +36,10 @@ EXIT_NOT_CONFIGURED = 2
 #: A job that ran and failed. Same value as an ESPN failure on purpose: to a
 #: shell script or a cron line, "it did not work" is one outcome.
 EXIT_JOB_FAILED = 1
+#: ``doctor`` found something fatal, or ``backup`` could not write. Both are read
+#: by ``deploy/install.sh`` and ``deploy/deploy.sh``, which stop on nonzero.
+EXIT_PREFLIGHT_FAILED = 1
+EXIT_BACKUP_FAILED = 1
 
 
 def load_cli_settings() -> Any:
@@ -68,6 +72,20 @@ def run_draft_sync(conn: sqlite3.Connection, client: Any) -> list[dict[str, Any]
     from hal_mary.espn import sync_draft
 
     return sync_draft(conn, client)
+
+
+def run_doctor_checks(settings: Any) -> Any:
+    """The preflight, as a seam so the CLI can be tested without a box."""
+    from hal_mary.doctor import run_checks
+
+    return run_checks(settings)
+
+
+def run_backup(settings: Any) -> Any:
+    """The database snapshot, as a seam. See :mod:`hal_mary.backup`."""
+    from hal_mary.backup import backup_database
+
+    return backup_database(settings)
 
 
 def build_runner(settings: Any, conn: sqlite3.Connection) -> Any:
@@ -184,6 +202,74 @@ def _cmd_job(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_doctor(_args: argparse.Namespace) -> int:
+    """Report whether this box could actually run hal-mary.
+
+    Exits nonzero only for something fatal, so ``install.sh`` and ``deploy.sh``
+    can gate on it while a missing memory directory still lets a deploy through.
+    ``serve`` never runs this: see :mod:`hal_mary.doctor` for why the service
+    boots degraded rather than refusing.
+    """
+    from hal_mary.config import ConfigError
+    from hal_mary.doctor import render, worst_exit_code
+
+    try:
+        settings = load_cli_settings()
+    except ConfigError as exc:
+        # The command someone runs *because* config.toml is the problem may not
+        # answer with a traceback.
+        print(f"cannot run checks: {exc}", file=sys.stderr)
+        return EXIT_NOT_CONFIGURED
+
+    checks = run_doctor_checks(settings)
+    print(render(checks))
+    return worst_exit_code(checks)
+
+
+def _cmd_backup(_args: argparse.Namespace) -> int:
+    """Snapshot the database. Run nightly by deploy/hal-mary-backup.timer."""
+    settings = load_cli_settings()
+    try:
+        result = run_backup(settings)
+    except (OSError, sqlite3.Error) as exc:
+        print(f"backup failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return EXIT_BACKUP_FAILED
+
+    print(f"Wrote {result.path} ({result.size_bytes:,} bytes)")
+    if result.pruned:
+        print(f"  pruned {len(result.pruned)} old backup(s): {result.pruned[0].name} ...")
+    return EXIT_OK
+
+
+def _cmd_migrate(_args: argparse.Namespace) -> int:
+    """Apply pending schema migrations and say which ran.
+
+    ``serve`` migrates on startup too, so this exists for ``deploy.sh``: a
+    migration that fails should stop a deploy at the step named "migrate",
+    before the tests and before the restart, rather than inside a service that
+    then crash-loops.
+    """
+    from hal_mary import db
+
+    settings = load_cli_settings()
+    conn = db.connect(settings.db_path)
+    try:
+        applied = db.migrate(conn)
+    except sqlite3.Error as exc:
+        print(f"migration failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return EXIT_JOB_FAILED
+    finally:
+        conn.close()
+
+    if not applied:
+        print(f"{settings.db_path}: schema already current")
+    else:
+        print(f"{settings.db_path}: applied {len(applied)} migration(s)")
+        for name in applied:
+            print(f"  {name}")
+    return EXIT_OK
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     settings = load_cli_settings()
     if not (settings.web_password or "").strip():
@@ -235,6 +321,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hal-mary", description=DESCRIPTION, epilog=EPILOG)
     subcommands = parser.add_subparsers(
         dest="command", metavar="{sync,espn-check,serve,job,cowork-config}"
+
+        dest="command", metavar="{sync,espn-check,serve,job,doctor,migrate,backup}"
     )
 
     sync = subcommands.add_parser("sync", help="pull league state and draft picks from ESPN")
@@ -268,6 +356,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the machine form instead of the paste-into-the-form one",
     )
     cowork_config.set_defaults(handler=_cmd_cowork_config)
+
+    doctor = subcommands.add_parser(
+        "doctor",
+        help="check this box can actually run hal-mary; exits nonzero on a fatal problem",
+    )
+    doctor.set_defaults(handler=_cmd_doctor)
+
+    migrate = subcommands.add_parser("migrate", help="apply pending database migrations")
+    migrate.set_defaults(handler=_cmd_migrate)
+
+    backup = subcommands.add_parser(
+        "backup", help="snapshot the database and prune to the retention window"
+    )
+    backup.set_defaults(handler=_cmd_backup)
 
     return parser
 
