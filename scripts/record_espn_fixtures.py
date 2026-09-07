@@ -12,8 +12,10 @@ first time cookies exist, read the diff, and commit it.
 Credentials come from the environment (or ``.env``) via ``hal_mary.config`` and
 are **never written to a file**. Every payload goes through :func:`scrub` first,
 which removes the live cookie values, redacts anything under a credential-shaped
-key, and replaces SWIDs, member names and team names with stable pseudonyms — so
-the fixtures still hang together without carrying a single real person's name.
+key, and replaces SWIDs, member names, team names and team abbreviations with
+stable pseudonyms — so the fixtures still hang together without carrying a single
+real person's name. Team logos, which are user-supplied URLs, are dropped
+outright rather than sanitised.
 
 One thing it deliberately keeps is the **league's own name**, which is far more
 useful in a fixture than `Team 1` and is not personal data in the way a member's
@@ -60,10 +62,51 @@ PERSON_NAME_KEYS = frozenset({"firstName", "lastName", "displayName", "nickName"
 #: costs nothing, because the library resolves pro teams by id.
 TEAM_NAME_KEYS = frozenset({"location", "nickname"})
 
-#: A bare ``name`` is only a team name when it sits on a team-shaped object. The
-#: league's own name and the division names are not personal data and are much
-#: more useful in a fixture kept intact.
-TEAM_MARKER_KEYS = frozenset({"owners", "playoffSeed", "roster"})
+#: ``abbrev`` is not a separate fact: ESPN *derives* it from the team name, so
+#: "Caroline's Chaos" becomes ``CARO`` and would sail through every other
+#: pseudonym untouched. Its own family, because a three-letter tag replaced by
+#: "Team 3" would look wrong everywhere it is displayed.
+TEAM_ABBREV_KEYS = frozenset({"abbrev"})
+
+#: Replaced outright rather than pseudonymised.
+#:
+#: ``logo`` is a user-supplied URL: custom logos are externally hosted and the
+#: path routinely carries a name or a profile-image id. It has a ``://`` so no
+#: token pattern catches it, and sanitising a URL piecemeal is a losing game.
+#:
+#: The rest are free-form prose written by real people. No view recorded here
+#: carries them today — but if anyone later records a message board or activity
+#: view, they arrive with it, and the failure mode is silent.
+REDACTED_VALUE_KEYS = frozenset(
+    {"logo", "logoUrl", "message", "messages", "text", "note", "notes", "comment"}
+)
+
+#: What makes a dict team-shaped, and therefore its ``name`` a person's problem.
+#:
+#: Deliberately broad. 2023-and-later payloads send a team's ``name`` with no
+#: ``owners``, ``roster`` or ``playoffSeed`` alongside it, so a narrow marker set
+#: silently keeps the real value. Erring wide costs an NFL team's name in the
+#: pro-schedule fixture, which nothing reads — the library resolves pro teams by
+#: id — while erring narrow costs somebody's name in git forever.
+#:
+#: What this deliberately does *not* match: the league's own ``settings.name``
+#: and the division names, which are not personal data in the way a member's
+#: name is and are much of the reason to re-record at all.
+TEAM_MARKER_KEYS = frozenset(
+    {
+        "abbrev",
+        "divisionId",
+        "location",
+        "logo",
+        "nickname",
+        "owners",
+        "playoffSeed",
+        "record",
+        "roster",
+        "transactionCounter",
+        "waiverRank",
+    }
+)
 
 #: ESPN member ids are SWIDs: a UUID in braces. They are personal identifiers,
 #: so they are pseudonymised rather than dropped — the fixtures need the teams
@@ -110,6 +153,7 @@ def scrub(payload: Any, secrets: list[str] | None = None) -> Any:
     swids = _Pseudonyms("{{00000000-0000-0000-0000-{n:012d}}}")
     people = _Pseudonyms("Person {n}")
     team_names = _Pseudonyms("Team {n}")
+    team_abbrevs = _Pseudonyms("TM{n:02d}")
 
     def scrub_string(value: str, key: str | None) -> str:
         if key and SECRET_KEY_RE.search(key):
@@ -123,11 +167,13 @@ def scrub(payload: Any, secrets: list[str] | None = None) -> Any:
         return value
 
     def scrub_field(name: str, value: Any, is_team: bool) -> Any:
-        if SECRET_KEY_RE.search(name):
+        if SECRET_KEY_RE.search(name) or name in REDACTED_VALUE_KEYS:
             return REDACTED
         if isinstance(value, str) and value:
             if name in PERSON_NAME_KEYS:
                 return people.for_value(value)
+            if name in TEAM_ABBREV_KEYS:
+                return team_abbrevs.for_value(value)
             if name in TEAM_NAME_KEYS or (name == "name" and is_team):
                 return team_names.for_value(value)
         return walk(value, name)

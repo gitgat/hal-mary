@@ -448,6 +448,12 @@ class EspnClient:
         second poll does not hammer an ESPN that is already struggling, and
         short enough that names come back within a pick or two of ESPN
         recovering.
+
+        **The cooldown is per-instance, and so is the cache it protects.** Both
+        only work because the draft loop holds one long-lived client for the
+        whole draft. A caller that builds a fresh ``EspnClient`` on every poll
+        gets neither: it rebuilds the name map from scratch every five seconds
+        when ESPN is healthy, and retries a failing ESPN just as often.
         """
         if self._name_map is None and time.monotonic() < self._name_map_retry_after:
             return {}

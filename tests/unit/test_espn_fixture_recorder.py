@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -17,6 +18,10 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "record_espn_fixtures.py"
+
+
+def load_fixture(name):
+    return json.loads((REPO / "tests" / "fixtures" / "espn" / name).read_text(encoding="utf-8"))
 
 
 def _load_script():
@@ -37,6 +42,7 @@ def recorder():
 
 REAL_S2 = "AEBxyzVeryLongOpaqueCookieValue%2Bwith%2Fpadding%3D" * 3
 REAL_SWID = "{1A2B3C4D-5E6F-7788-99AA-BBCCDDEEFF00}"
+SWID_SHAPE = re.compile(r"\{[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\}")
 OTHER_SWID = "{FFEEDDCC-BBAA-9988-7766-554433221100}"
 
 
@@ -115,19 +121,55 @@ def test_team_names_are_pseudonymised(recorder):
         "teams": [
             {
                 "id": 1,
-                "abbrev": "HAL",
+                "abbrev": "CARO",
                 "owners": [REAL_SWID],
                 "location": "Caroline's",
                 "nickname": "Chaos",
                 "name": "Caroline's Chaos",
+                "logo": "https://example.com/u/caroline-reed/avatar.png",
             }
         ]
     }
 
-    scrubbed = json.dumps(recorder.scrub(payload))
+    scrubbed = recorder.scrub(payload)
+    text = json.dumps(scrubbed)
 
-    assert "Caroline" not in scrubbed
-    assert "Chaos" not in scrubbed
+    assert "Caroline" not in text
+    assert "Chaos" not in text
+    # ESPN derives abbrev from the team name, so "Caroline's Chaos" becomes CARO
+    # and survives every other pseudonym.
+    assert "CARO" not in text
+    assert scrubbed["teams"][0]["abbrev"]
+    # A custom logo is a user-supplied URL whose path can carry a name or a
+    # profile-image id, and it has a :// so no token pattern catches it.
+    assert scrubbed["teams"][0]["logo"] == recorder.REDACTED
+
+
+def test_abbrevs_are_pseudonymised_consistently(recorder):
+    payload = {"teams": [{"abbrev": "CARO"}, {"abbrev": "DANA"}, {"abbrev": "CARO"}]}
+
+    teams = recorder.scrub(payload)["teams"]
+
+    assert teams[0]["abbrev"] == teams[2]["abbrev"]
+    assert teams[0]["abbrev"] != teams[1]["abbrev"]
+
+
+def test_a_team_carrying_only_a_name_still_loses_it(recorder):
+    """2023-and-later payloads send `name` with no owners, roster or playoffSeed."""
+    payload = {"teams": [{"id": 1, "abbrev": "CARO", "name": "Caroline's Chaos"}]}
+
+    assert "Caroline" not in json.dumps(recorder.scrub(payload))
+
+
+def test_free_form_text_keys_are_redacted(recorder):
+    """No view we record carries these today; the failure mode if one is added is silent."""
+    payload = {
+        "message": "Dana said she would veto the trade",
+        "text": "see you at Caroline's on Sunday",
+        "note": "Marcus owes the pot $20",
+    }
+
+    assert set(recorder.scrub(payload).values()) == {recorder.REDACTED}
 
 
 def test_the_league_and_division_names_are_kept(recorder):
@@ -175,13 +217,50 @@ def test_the_scrubber_walks_nested_lists_and_dicts(recorder):
 
 
 def test_ordinary_league_data_is_left_alone(recorder):
+    """Everything that is neither a credential nor a person stays readable."""
     payload = {
         "id": 1234567,
-        "settings": {"name": "The Gridiron Gauntlet", "size": 10},
-        "teams": [{"id": 1, "abbrev": "HAL", "record": {"wins": 3}}],
+        "seasonId": 2025,
+        "scoringPeriodId": 4,
+        "settings": {
+            "name": "The Gridiron Gauntlet",
+            "size": 10,
+            "draftSettings": {"type": "SNAKE", "pickOrder": [3, 1, 4, 2]},
+        },
+        "teams": [{"id": 1, "playoffSeed": 2, "record": {"overall": {"wins": 3}}}],
     }
 
     assert recorder.scrub(payload) == payload
+
+
+def test_the_scrubber_reaches_every_identity_field_of_a_real_league_payload(recorder):
+    """Run it over a whole league response, not a payload shaped by my assumptions.
+
+    The `abbrev` and `logo` leaks were both invisible to hand-written test
+    payloads and both present in this fixture. Asserting against the real shape
+    is what catches the next one.
+    """
+    scrubbed = recorder.scrub(load_fixture("roster.json"))
+
+    for team in scrubbed["teams"]:
+        assert re.fullmatch(r"TM\d+", team["abbrev"]), team["abbrev"]
+        assert team["logo"] == recorder.REDACTED
+        assert team["name"].startswith("Team ")
+        assert team["location"].startswith("Team ")
+        assert team["nickname"].startswith("Team ")
+
+    for member in scrubbed["members"]:
+        assert member["firstName"].startswith("Person ")
+        assert member["lastName"].startswith("Person ")
+        assert member["displayName"].startswith("Person ")
+        assert SWID_SHAPE.fullmatch(member["id"])
+
+    # Owner ids still point at the members they belong to.
+    owners = {owner for team in scrubbed["teams"] for owner in team["owners"]}
+    assert owners == {member["id"] for member in scrubbed["members"]}
+
+    # And the league keeps its own name, which is the point of re-recording.
+    assert scrubbed["settings"]["name"] == "The Gridiron Gauntlet"
 
 
 # --- recording -------------------------------------------------------------

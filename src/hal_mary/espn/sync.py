@@ -97,15 +97,24 @@ def _prune_sync_runs(conn: sqlite3.Connection, kind: str) -> None:
     One indexed delete per sync, usually removing a single row. Only this kind is
     touched, so a draft poll cannot evict the league sync that the staleness
     banner is reporting on.
+
+    A failure here is swallowed on purpose. This runs on the error path too, and
+    a locked database during housekeeping must not replace the ESPN failure that
+    is the actual news — an operator told "database is locked" while ESPN is
+    down goes looking in the wrong place. The cost of losing a prune is that the
+    table stays one row longer until the next sync.
     """
-    conn.execute(
-        """
-        DELETE FROM sync_runs
-        WHERE kind = ?
-          AND id NOT IN (SELECT id FROM sync_runs WHERE kind = ? ORDER BY id DESC LIMIT ?)
-        """,
-        (kind, kind, SYNC_RUN_KEEP),
-    )
+    try:
+        conn.execute(
+            """
+            DELETE FROM sync_runs
+            WHERE kind = ?
+              AND id NOT IN (SELECT id FROM sync_runs WHERE kind = ? ORDER BY id DESC LIMIT ?)
+            """,
+            (kind, kind, SYNC_RUN_KEEP),
+        )
+    except sqlite3.Error:
+        pass
 
 
 def _require_no_open_transaction(conn: sqlite3.Connection, name: str) -> None:
