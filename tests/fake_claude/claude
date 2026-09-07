@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""A stand-in for the real ``claude`` binary, for tests.
+
+The unit suite must never spawn the real CLI: it costs money, needs auth, and
+takes 15-25 seconds a call. Tests point ``settings.claude.binary`` at this
+script and drive it entirely through the environment:
+
+``HAL_MARY_FAKE_FIXTURE``
+    Path to a ``.jsonl`` file. Its lines are echoed to stdout verbatim, one per
+    line, which is exactly what ``--output-format stream-json`` looks like.
+    Unset means no stdout at all (a crashed CLI).
+``HAL_MARY_FAKE_EXIT``
+    Exit code, default ``0``.
+``HAL_MARY_FAKE_SLEEP``
+    Seconds to sleep before writing anything, default ``0``. Lets the timeout
+    path be tested in a second instead of in fifteen minutes.
+``HAL_MARY_FAKE_STDERR``
+    Text to write to stderr, so the "nonzero exit captures stderr" path is
+    exercisable.
+``HAL_MARY_FAKE_ARGV_OUT``
+    If set, ``sys.argv[1:]`` is written there as JSON, so tests can assert on
+    the argv the runner constructed.
+``HAL_MARY_FAKE_STDIN_OUT``
+    If set, everything read from stdin is written there, so tests can assert
+    the prompt travelled over stdin and not in argv.
+
+stdin is always drained, whether or not it is recorded: a real CLI reads its
+prompt, and a fake that did not would let the writer block on a full pipe.
+"""
+
+import json
+import os
+import sys
+import time
+
+
+def main() -> int:
+    argv_out = os.environ.get("HAL_MARY_FAKE_ARGV_OUT")
+    if argv_out:
+        with open(argv_out, "w", encoding="utf-8") as handle:
+            json.dump(sys.argv[1:], handle)
+
+    stdin_data = sys.stdin.read()
+    stdin_out = os.environ.get("HAL_MARY_FAKE_STDIN_OUT")
+    if stdin_out:
+        with open(stdin_out, "w", encoding="utf-8") as handle:
+            handle.write(stdin_data)
+
+    sleep_s = float(os.environ.get("HAL_MARY_FAKE_SLEEP", "0"))
+    if sleep_s:
+        time.sleep(sleep_s)
+
+    fixture = os.environ.get("HAL_MARY_FAKE_FIXTURE")
+    if fixture:
+        with open(fixture, encoding="utf-8") as handle:
+            for line in handle:
+                sys.stdout.write(line.rstrip("\n") + "\n")
+                sys.stdout.flush()
+
+    stderr_text = os.environ.get("HAL_MARY_FAKE_STDERR")
+    if stderr_text:
+        sys.stderr.write(stderr_text)
+        sys.stderr.flush()
+
+    return int(os.environ.get("HAL_MARY_FAKE_EXIT", "0"))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
