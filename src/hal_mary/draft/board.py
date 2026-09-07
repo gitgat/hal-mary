@@ -233,64 +233,100 @@ def apply_picks(board: list[dict], picks: list[dict]) -> tuple[list[dict], list[
     3. the name normalized with the suffix stripped, which is what joins
        "Marvin Harrison Jr." to "Marvin Harrison".
 
-    Stages 2 and 3 require a *unique* hit. Two board rows that a stage cannot
-    tell apart make the pick unmatched rather than a guess -- guessing marks a
-    player gone who is still there, which is the worst failure this system has.
-    A board row already claimed by an earlier pick in the same call is not
-    claimed again, so a duplicated name surfaces as an unmatched pick.
+    Every stage requires a *unique* hit. Two board rows that a stage cannot tell
+    apart make the pick unmatched rather than a guess -- guessing marks a player
+    gone who is still there, which is the worst failure this system has.
+
+    A board row already claimed by a *different* pick in the same call is not
+    claimed again: the second pick comes back unmatched. Two picks are the same
+    pick when they carry the same ``overall_pick``, or -- for hand-entered picks
+    that have none -- when they name the same player, so a double tap on the
+    manual button is not a false alarm. See :func:`_pick_identity`.
 
     Re-applying the same picks to an already-updated board changes nothing,
     which is what lets the draft loop re-read the whole draft on every poll.
 
     Matched entries get ``drafted=True``, ``drafted_by_team_id`` from the pick
-    (``None`` for a hand-entered pick) and ``drafted_at`` from ``seen_at``.
+    and ``drafted_at`` from ``seen_at``. Neither is overwritten with ``None``:
+    a hand-entered pick, which knows the player but not the team, leaves an
+    attribution ESPN already supplied intact.
     """
     updated = [dict(entry) for entry in board]
 
-    by_id: dict[Any, int] = {}
+    by_id: dict[Any, list[int]] = {}
     by_tight: dict[str, list[int]] = {}
     by_loose: dict[str, list[int]] = {}
     for index, entry in enumerate(updated):
         player_id = entry.get("player_id")
-        if player_id is not None and player_id not in by_id:
-            by_id[player_id] = index
+        if player_id is not None:
+            by_id.setdefault(player_id, []).append(index)
         name = entry.get("name")
         if name:
             by_tight.setdefault(normalize_name(name, strip_suffix=False), []).append(index)
             by_loose.setdefault(normalize_name(name), []).append(index)
 
-    claimed: set[int] = set()
+    claimed: dict[int, tuple[str, Any]] = {}
     unmatched: list[dict] = []
     for pick in picks:
         index = _match_pick(pick, by_id, by_tight, by_loose)
-        if index is None or (index in claimed and not _is_same_pick(updated[index], pick)):
+        identity = _pick_identity(pick)
+        if index is None or (index in claimed and claimed[index] != identity):
             unmatched.append(pick)
             continue
-        claimed.add(index)
+        claimed[index] = identity
+        entry = updated[index]
+        team_id = pick.get("team_id")
+        seen_at = pick.get("seen_at")
         updated[index] = {
-            **updated[index],
+            **entry,
             "drafted": True,
-            "drafted_by_team_id": pick.get("team_id"),
-            "drafted_at": pick.get("seen_at"),
+            # A hand-entered pick knows the player and not the team. It must not
+            # blank an attribution ESPN already supplied for the same row.
+            "drafted_by_team_id": (
+                team_id if team_id is not None else entry.get("drafted_by_team_id")
+            ),
+            "drafted_at": seen_at if seen_at is not None else entry.get("drafted_at"),
         }
     return updated, unmatched
 
 
+def _pick_identity(pick: dict) -> tuple[str, Any]:
+    """What makes two entries in the picks list *the same pick*.
+
+    The pick number when there is one. For a hand-entered pick there is none, so
+    the player's name stands in: tapping the same player twice is one pick told
+    twice, while two taps naming different players are two picks and the second
+    one landing on an already-claimed row is a real signal.
+
+    Judging this by ``team_id`` instead is how a second pick disappears without
+    a trace: one team's two picks compare equal, and so do two hand-entered
+    picks, whose team ids are both ``None``.
+    """
+    overall_pick = pick.get("overall_pick")
+    if overall_pick is not None:
+        return ("overall_pick", overall_pick)
+    name = pick.get("player_name") or pick.get("name") or ""
+    return ("name", normalize_name(name, strip_suffix=False))
+
+
 def _match_pick(
     pick: dict,
-    by_id: dict[Any, int],
+    by_id: dict[Any, list[int]],
     by_tight: dict[str, list[int]],
     by_loose: dict[str, list[int]],
 ) -> int | None:
     player_id = pick.get("player_id")
     if player_id is not None and player_id in by_id:
-        return by_id[player_id]
+        # Ambiguous here too: two board rows sharing an id make the first one a
+        # coin flip, exactly as for a shared name.
+        candidates = by_id[player_id]
+        return candidates[0] if len(candidates) == 1 else None
 
     name = pick.get("player_name") or pick.get("name")
     if not name:
         return None
     for index_by_key, strip in ((by_tight, False), (by_loose, True)):
-        candidates = index_by_key.get(normalize_name(name, strip_suffix=strip))
+        candidates = index_by_key.get(normalize_name(name, strip_suffix=strip), [])
         if not candidates:
             continue
         if len(candidates) == 1:
@@ -298,12 +334,6 @@ def _match_pick(
         # Ambiguous: board rows this stage cannot tell apart. Refuse to guess.
         return None
     return None
-
-
-def _is_same_pick(entry: dict, pick: dict) -> bool:
-    """True when the board row already records exactly this pick, so re-applying
-    it is idempotent rather than a second claim on the same row."""
-    return _is_drafted(entry) and entry.get("drafted_by_team_id") == pick.get("team_id")
 
 
 def _is_drafted(entry: dict) -> bool:
@@ -363,19 +393,27 @@ def _slot_positions(slot: str) -> frozenset[str]:
     return _MULTI_POSITION_SLOTS.get(key, frozenset({key}))
 
 
-def scarcity(board: list[dict], *, within_tiers: int = 2) -> dict[str, int]:
-    """Return, per position, how many undrafted players sit in the best
-    ``within_tiers`` tiers still on the board at that position.
+def scarcity(board: list[dict], *, within_tiers: int = 2) -> dict[str, dict[str, int | None]]:
+    """Return, per position, how deep the cliff is below the best player left.
+
+    ``{position: {"best_tier": int | None, "count": int}}`` -- ``best_tier`` is
+    the best tier still undrafted at that position and ``count`` is how many
+    undrafted players sit within ``within_tiers`` tiers of it.
 
     The window is measured from each position's *best remaining* tier, not from
-    tier 1. Counting absolute tiers reads 0 for everything by the fourth round
-    and stops saying anything; counting from the best that is left keeps
-    answering the question the advisor actually asks -- "if I wait eighteen
-    picks, will anyone at this level still be here?".
+    tier 1. Absolute tiers answer "how many elite players are left", which is
+    zero forever from the fourth round on and cannot drive a decision; measuring
+    from the best that is left answers "how deep is the cliff below the player I
+    would take right now", which is the question the advisor asks.
+
+    The count alone is not enough to act on -- two left at tier 1 and two left
+    at tier 6 call for opposite decisions -- so ``best_tier`` travels with it.
 
     Every position present on the board appears in the result, including
-    positions with 0 left. Rows with no ``tier`` are treated as worse than any
-    tiered row, so they are counted only when nothing tiered remains.
+    positions with none left, which report ``{"best_tier": None, "count": 0}``.
+    Rows with no ``tier`` are treated as worse than any tiered row, so they are
+    counted only when nothing tiered remains; a position whose best remaining
+    row is untiered reports ``best_tier`` as ``None`` rather than inventing one.
 
     Raises ``ValueError`` if ``within_tiers`` is below 1.
     """
@@ -391,14 +429,17 @@ def scarcity(board: list[dict], *, within_tiers: int = 2) -> dict[str, int]:
         if not _is_drafted(entry):
             tiers_by_position[position].append(_tier_of(entry))
 
-    counts: dict[str, int] = {}
+    result: dict[str, dict[str, int | None]] = {}
     for position, tiers in tiers_by_position.items():
         if not tiers:
-            counts[position] = 0
+            result[position] = {"best_tier": None, "count": 0}
             continue
-        cutoff = min(tiers) + within_tiers - 1
-        counts[position] = sum(1 for tier in tiers if tier <= cutoff)
-    return counts
+        best = min(tiers)
+        result[position] = {
+            "best_tier": None if best == _UNRANKED else best,
+            "count": sum(1 for tier in tiers if tier <= best + within_tiers - 1),
+        }
+    return result
 
 
 def available(

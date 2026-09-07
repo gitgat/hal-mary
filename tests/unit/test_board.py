@@ -273,7 +273,7 @@ def _board_row(player_id, name, position="WR", tier=1, rank=1):
     }
 
 
-def _pick(overall, name, team_id=101, player_id=None):
+def _pick(overall, name, team_id=101, player_id=None, seen_at="2026-09-07T12:00:00Z"):
     return {
         "overall_pick": overall,
         "round_num": 1,
@@ -281,7 +281,7 @@ def _pick(overall, name, team_id=101, player_id=None):
         "team_id": team_id,
         "player_id": player_id,
         "player_name": name,
-        "seen_at": "2026-09-07T12:00:00Z",
+        "seen_at": seen_at,
     }
 
 
@@ -419,6 +419,72 @@ def test_apply_picks_will_not_claim_one_board_row_for_two_different_picks():
     assert [p["overall_pick"] for p in unmatched] == [2]
 
 
+def test_a_second_pick_on_one_row_is_reported_even_when_the_same_team_made_both():
+    """Two picks by one team landing on the same board row is a real signal --
+    a missing board entry, or a name our matching cannot separate. Judging
+    'same pick' by team id makes it vanish with no trace at all, which is worse
+    than a plain miss: the unmatched list exists precisely to catch this."""
+    board = [_board_row(-1, "Michael Carter", "RB")]
+    picks = [
+        _pick(5, "Michael Carter", team_id=5, seen_at="2026-09-07T12:00:00Z"),
+        _pick(60, "Michael Carter II", team_id=5, seen_at="2026-09-07T13:00:00Z"),
+    ]
+
+    updated, unmatched = apply_picks(board, picks)
+
+    assert [p["overall_pick"] for p in unmatched] == [60]
+    assert updated[0]["drafted_by_team_id"] == 5
+    assert updated[0]["drafted_at"] == "2026-09-07T12:00:00Z", "the later pick overwrote the row"
+
+
+def test_two_hand_entered_picks_on_one_row_are_not_conflated():
+    """Neither carries a pick number and neither carries a team, so a team-id
+    comparison says None == None and swallows the second. This is the manual
+    fallback path, the one we rely on when ESPN is unavailable."""
+    board = [_board_row(-1, "Michael Carter", "RB")]
+    picks = [{"player_name": "Michael Carter"}, {"player_name": "Michael Carter II"}]
+
+    updated, unmatched = apply_picks(board, picks)
+
+    assert unmatched == [picks[1]]
+    assert updated[0]["drafted"] is True
+
+
+def test_tapping_the_same_player_twice_by_hand_is_still_one_pick():
+    """A double tap on the manual button is the same pick told twice, not a
+    second player, so it must not raise a false alarm."""
+    board = [_board_row(-1, "Michael Carter", "RB")]
+    picks = [{"player_name": "Michael Carter"}, {"player_name": "Michael Carter"}]
+
+    _updated, unmatched = apply_picks(board, picks)
+
+    assert unmatched == []
+
+
+def test_apply_picks_refuses_a_player_id_that_two_board_rows_share():
+    """Stage 1 refuses an ambiguous id for the same reason stages 2 and 3 refuse
+    an ambiguous name: matching the first row is a coin flip."""
+    board = [_board_row(4262921, "Ja'Marr Chase"), _board_row(4262921, "Someone Else")]
+
+    updated, unmatched = apply_picks(board, [_pick(1, "Ja'Marr Chase", player_id=4262921)])
+
+    assert [p["overall_pick"] for p in unmatched] == [1]
+    assert not any(row["drafted"] for row in updated)
+
+
+def test_a_hand_entered_pick_does_not_erase_a_known_team_attribution():
+    """The manual fallback knows the player and not the team. Re-applying it
+    over a row ESPN already attributed must not blank the attribution."""
+    board = [_board_row(-1, "Ja'Marr Chase")]
+    from_espn, _ = apply_picks(board, [_pick(1, "Ja'Marr Chase", team_id=107)])
+
+    updated, unmatched = apply_picks(from_espn, [{"player_name": "Ja'Marr Chase"}])
+
+    assert unmatched == []
+    assert updated[0]["drafted_by_team_id"] == 107
+    assert updated[0]["drafted_at"] == "2026-09-07T12:00:00Z"
+
+
 def test_apply_picks_handles_a_manual_pick_with_no_team_id():
     """The web page's 'they took him' fallback knows the player, not the team."""
     board = [_board_row(-1, "Ja'Marr Chase")]
@@ -553,7 +619,10 @@ def test_scarcity_counts_undrafted_players_in_the_best_remaining_tiers():
         _tiered("wr c", "WR", 5, 3),
     ]
 
-    assert scarcity(board) == {"RB": 2, "WR": 2}
+    assert scarcity(board) == {
+        "RB": {"best_tier": 1, "count": 2},
+        "WR": {"best_tier": 1, "count": 2},
+    }
 
 
 def test_scarcity_slides_down_as_the_best_tiers_empty():
@@ -567,7 +636,24 @@ def test_scarcity_slides_down_as_the_best_tiers_empty():
         _tiered("rb e", "RB", 4, 5),
     ]
 
-    assert scarcity(board) == {"RB": 2}
+    assert scarcity(board) == {"RB": {"best_tier": 2, "count": 2}}
+
+
+def test_scarcity_says_which_tier_the_window_starts_at():
+    """A count on its own cannot drive a decision: two left at tier 1 and two
+    left at tier 6 call for opposite ones. The best remaining tier is half the
+    answer, so it travels with the count."""
+    elite = [_tiered("rb a", "RB", 1, 1), _tiered("rb b", "RB", 2, 2)]
+    picked_over = [
+        _tiered("rb a", "RB", 1, 1, drafted=True),
+        _tiered("rb b", "RB", 2, 2, drafted=True),
+        _tiered("rb c", "RB", 6, 3),
+        _tiered("rb d", "RB", 7, 4),
+    ]
+
+    assert scarcity(elite)["RB"]["count"] == scarcity(picked_over)["RB"]["count"] == 2
+    assert scarcity(elite)["RB"]["best_tier"] == 1
+    assert scarcity(picked_over)["RB"]["best_tier"] == 6
 
 
 def test_scarcity_within_one_tier():
@@ -577,13 +663,25 @@ def test_scarcity_within_one_tier():
         _tiered("rb c", "RB", 2, 3),
     ]
 
-    assert scarcity(board, within_tiers=1) == {"RB": 1}
-    assert scarcity(board, within_tiers=2) == {"RB": 3}
+    assert scarcity(board, within_tiers=1) == {"RB": {"best_tier": 1, "count": 1}}
+    assert scarcity(board, within_tiers=2) == {"RB": {"best_tier": 1, "count": 3}}
 
 
 def test_scarcity_reports_zero_for_a_position_that_is_gone():
     board = [_tiered("k a", "K", 1, 1, drafted=True), _tiered("rb a", "RB", 1, 1)]
-    assert scarcity(board) == {"K": 0, "RB": 1}
+    assert scarcity(board) == {
+        "K": {"best_tier": None, "count": 0},
+        "RB": {"best_tier": 1, "count": 1},
+    }
+
+
+def test_scarcity_reports_no_best_tier_for_a_position_with_no_tiers():
+    """An untiered row sorts behind every tiered one, but it must not be
+    reported as if it were the best tier in the league."""
+    row = _tiered("rb a", "RB", 1, 1)
+    row["tier"] = None
+
+    assert scarcity([row]) == {"RB": {"best_tier": None, "count": 1}}
 
 
 def test_scarcity_rejects_a_nonsense_tier_window():
