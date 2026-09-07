@@ -90,13 +90,43 @@ class Subscription:
         return self._dropped
 
     def close(self) -> None:
-        """Unsubscribe. Idempotent, and safe to call while iterating: a pending
-        ``__anext__`` raises ``StopAsyncIteration`` rather than hanging."""
+        """Unsubscribe. Idempotent, safe from any thread, and safe to call while
+        iterating: a pending ``__anext__`` raises ``StopAsyncIteration`` rather
+        than hanging.
+
+        Off the owning loop this goes through ``call_soon_threadsafe`` for the
+        same reason :meth:`EventBus.publish` does, and it is easier to get wrong
+        here because the failure is quieter. Ending the iteration means
+        resolving the parked getter's future, and ``Future.set_result``
+        schedules through ``loop.call_soon``, whose thread check is debug-only
+        and which never writes the loop's self-pipe. Called from another thread
+        it lands in the loop's callback queue without waking it: a loop parked
+        in ``select`` stays parked, the consumer hangs, and the connection
+        leaks. Task 6b's shutdown path and any synchronous FastAPI dependency
+        close from off the loop.
+        """
         if self._closed:
             return
         self._closed = True
         self._bus._remove(self)
-        self._offer(_CLOSED)
+        self._wake(_CLOSED)
+
+    def _wake(self, item: Any) -> None:
+        """Put ``item`` on this subscriber's queue from whichever thread is
+        calling, deferring to the owning loop when that is not this one."""
+        try:
+            current: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            current = None
+        if current is self._loop:
+            self._offer(item)
+            return
+        try:
+            self._loop.call_soon_threadsafe(self._offer, item)
+        except RuntimeError:
+            # The loop is closed: there is no consumer left to wake, and the
+            # subscription is already off the bus.
+            pass
 
     def __aiter__(self) -> Self:
         return self

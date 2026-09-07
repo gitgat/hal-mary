@@ -8,6 +8,7 @@ never care whether a browser is open.
 
 import asyncio
 import threading
+import time
 
 import pytest
 
@@ -98,6 +99,59 @@ async def test_closing_a_subscription_ends_its_iteration():
 
     await asyncio.wait_for(task, timeout=1)
     assert consumed == [("board_updated", {"pick": 1})]
+    assert bus.subscriber_count == 0
+
+
+async def test_closing_from_another_thread_wakes_a_parked_consumer():
+    """close() mutates an asyncio.Queue, so off the loop it has exactly the
+    problem publish() is routed around: the getter's future is resolved through
+    loop.call_soon, whose thread check is debug-only and which never writes the
+    loop's self-pipe. The loop stays parked in select and the subscription
+    leaks. Task 6b's shutdown path and any synchronous FastAPI dependency close
+    from off the loop."""
+    bus = EventBus()
+    sub = bus.subscribe()
+
+    async def consume():
+        async for _event, _payload in sub:
+            pass
+
+    task = asyncio.create_task(consume())
+    await asyncio.sleep(0)  # let the consumer park on an empty queue
+
+    def close_once_the_loop_is_idle():
+        # The loop must be parked in select for this to mean anything: joining
+        # the thread from the loop would keep it awake and hide the bug.
+        time.sleep(0.2)
+        sub.close()
+
+    thread = threading.Thread(target=close_once_the_loop_is_idle)
+    thread.start()
+
+    started = time.monotonic()
+    await asyncio.wait_for(task, timeout=5)
+    elapsed = time.monotonic() - started
+    thread.join(timeout=2)
+
+    # Generous, but an order of magnitude below the full 5s park this
+    # regresses to when the wakeup does not reach the loop.
+    assert elapsed < 1.0, f"the close took {elapsed:.2f}s to wake the loop"
+    assert bus.subscriber_count == 0
+
+
+def test_closing_from_another_thread_after_the_loop_has_gone_is_harmless():
+    bus = EventBus()
+    holder = {}
+
+    async def subscribe_and_abandon():
+        holder["sub"] = bus.subscribe()
+
+    asyncio.run(subscribe_and_abandon())
+
+    thread = threading.Thread(target=holder["sub"].close)
+    thread.start()
+    thread.join(timeout=2)
+    assert not thread.is_alive()
     assert bus.subscriber_count == 0
 
 
