@@ -51,8 +51,13 @@ def test_write_note_round_trips_and_sets_created_at(conn):
     assert row["team_abbr"] == "CIN"
     assert row["source_url"] == "https://example.com/chase"
     assert row["expires_at"] is None
-    # Written by the function, not the caller: ISO-8601 UTC to seconds.
-    assert row["created_at"] == db.utc_now()
+    # Written by the function, not the caller: ISO-8601 UTC to seconds. Compared
+    # with a tolerance rather than to db.utc_now() exactly, because a write that
+    # straddles a second boundary is correct and an equality check is not.
+    created = datetime.fromisoformat(row["created_at"])
+    assert created.tzinfo is not None
+    assert created.isoformat(timespec="seconds") == row["created_at"]
+    assert abs((datetime.now(UTC) - created).total_seconds()) < 60
 
 
 def test_write_note_rejects_blank_text(conn):
@@ -87,6 +92,11 @@ def backdate(conn, note_id, days):
     """Move a note's created_at ``days`` into the past, FTS triggers and all."""
     when = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
     conn.execute("UPDATE notes SET created_at = ? WHERE id = ?", (when, note_id))
+
+
+def stored_date(conn, note_id):
+    """The date the database actually stamped, so a midnight crossing cannot flake."""
+    return conn.execute("SELECT created_at FROM notes WHERE id = ?", (note_id,)).fetchone()[0][:10]
 
 
 def iso_in(days):
@@ -344,7 +354,7 @@ def test_standing_memory_reflects_an_edit_without_a_restart(memory_dir):
 
 def test_build_context_orders_standing_memory_then_extras_then_notes(conn, memory_dir):
     (memory_dir / "caroline.md").write_text("Explain every term.", encoding="utf-8")
-    memory.write_note(
+    note_id = memory.write_note(
         conn,
         memory.Note(
             text="Practiced in full on Friday",
@@ -368,18 +378,18 @@ def test_build_context_orders_standing_memory_then_extras_then_notes(conn, memor
         "## Her roster\n\nWR Ja'Marr Chase\n\n"
         "## The board\n\n1. Bijan Robinson\n\n"
         "## What we have learned recently\n\n"
-        f"- [{db.utc_now()[:10]}] (Ja'Marr Chase, injury) Practiced in full on Friday"
+        f"- [{stored_date(conn, note_id)}] (Ja'Marr Chase, injury) Practiced in full on Friday"
         " — source: https://example.com/chase"
     )
 
 
 def test_build_context_renders_a_bare_note_without_stray_punctuation(conn, memory_dir):
-    memory.write_note(conn, memory.Note(text="Something happened", source_job="chat"))
+    note_id = memory.write_note(conn, memory.Note(text="Something happened", source_job="chat"))
 
     text = memory.build_context(conn, settings_for(memory_dir))
 
     assert text == (
-        f"## What we have learned recently\n\n- [{db.utc_now()[:10]}] Something happened"
+        f"## What we have learned recently\n\n- [{stored_date(conn, note_id)}] Something happened"
     )
 
 
