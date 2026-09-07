@@ -49,6 +49,7 @@ from dotenv import dotenv_values
 from pydantic import BaseModel, ConfigDict, model_validator
 
 __all__ = [
+    "ActionsConfig",
     "ClaudeConfig",
     "ConfigError",
     "CoworkConfig",
@@ -228,6 +229,31 @@ class LeagueConfig(_Frozen):
     roster_slots: dict[str, int] = {}
 
 
+class ActionsConfig(_Frozen):
+    """When an NFL week rolls over, for the purpose of expiring an instruction.
+
+    Two things depend on this one boundary, which is why it is a configured value
+    rather than a number in the code.
+
+    **Every emitted action expires at it.** A lineup change is worthless once the
+    week it was reasoned about is over, and an executor that has been offline for
+    a fortnight must not come back and perform it. Without a deadline there is no
+    expiry and no other revocation path, so this is what makes "actions expire"
+    a mechanism instead of a sentence in a design document.
+
+    **Emission equivalence is scoped by it.** "The same bench, already queued this
+    week" is a duplicate; the same bench next week is a new decision — he was on
+    bye then and is injured now — and suppressing it would lose a real change.
+
+    The defaults put the boundary after Monday night's game (which ends around
+    04:15 UTC on Tuesday) and around when ESPN rolls its scoring period. UTC
+    because that is the only clock the database stores.
+    """
+
+    week_boundary_weekday: str = "tuesday"
+    week_boundary_hour_utc: int = 11
+
+
 class CoworkConfig(_Frozen):
     """How the Cowork schedule is rendered.
 
@@ -326,6 +352,7 @@ class Settings(_Frozen):
     draft: DraftConfig
     espn: EspnConfig = EspnConfig()
     league: LeagueConfig = LeagueConfig()
+    actions: ActionsConfig = ActionsConfig()
     cowork: CoworkConfig = CoworkConfig()
     web: WebConfig
     jobs: dict[str, JobConfig]
@@ -389,6 +416,7 @@ class Settings(_Frozen):
                 ("Prompts", self.paths.prompts_dir),
                 ("System prompt", self.claude.system_prompt_file),
                 ("Claude scratch", self.claude.scratch_dir),
+                ("Cowork tasks", self.paths.cowork_tasks),
                 ("Database", self.db_path),
             )
         ]
@@ -522,6 +550,7 @@ def load_settings(
         draft = DraftConfig(**raw.get("draft", {}))
         espn = EspnConfig(**raw.get("espn", {}))
         league = LeagueConfig(**raw.get("league", {}))
+        actions = ActionsConfig(**raw.get("actions", {}))
         cowork = CoworkConfig(**raw.get("cowork", {}))
         web = WebConfig(**raw.get("web", {}))
     except Exception as exc:
@@ -541,6 +570,7 @@ def load_settings(
         draft=draft,
         espn=espn,
         league=league,
+        actions=actions,
         cowork=cowork,
         web=web,
         jobs=jobs,

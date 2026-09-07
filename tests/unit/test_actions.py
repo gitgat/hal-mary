@@ -17,7 +17,14 @@ from pathlib import Path
 
 import pytest
 
+from conftest import FIXTURE_ENV
 from hal_mary import actions, db
+from hal_mary.config import load_settings
+
+
+@pytest.fixture
+def settings():
+    return load_settings(env=FIXTURE_ENV)
 
 
 @pytest.fixture
@@ -309,3 +316,88 @@ def test_report_refuses_an_outcome_that_is_not_one_of_the_three(conn: sqlite3.Co
 def test_report_on_an_unknown_id_is_a_lookup_error(conn: sqlite3.Connection):
     with pytest.raises(LookupError):
         actions.report(conn, 4242, "done", None)
+
+
+# --- the NFL week boundary ---------------------------------------------------
+#
+# Two different bugs are fixed by the same clock, so they are tested together.
+#
+# The first is that an instruction with no deadline never goes stale. Cowork's
+# Sunday task does not run in week 5 because Claude Desktop was closed; week 7
+# arrives, `pending_actions` still says bench Bijan Robinson, the bye is three
+# weeks gone, and a healthy starter is benched unattended. The design's line —
+# "a stale instruction executed three days late is worse than none" — is inert
+# unless something actually sets a deadline.
+#
+# The second is that "within the current week" was implemented as a rolling
+# seven days, so a genuinely new decision made five days later was silently
+# swallowed and the caller could not tell.
+
+
+def test_the_week_boundary_is_the_next_rollover_after_now(settings):
+    # A Sunday morning, mid-season.
+    sunday = datetime(2026, 10, 4, 10, 30, tzinfo=UTC)
+    assert actions.end_of_nfl_week(sunday, settings) == "2026-10-06T11:00:00+00:00"
+
+
+def test_a_moment_just_before_the_rollover_still_belongs_to_the_old_week(settings):
+    late_monday = datetime(2026, 10, 6, 10, 59, tzinfo=UTC)
+    assert actions.end_of_nfl_week(late_monday, settings) == "2026-10-06T11:00:00+00:00"
+
+
+def test_a_moment_just_after_the_rollover_belongs_to_the_new_one(settings):
+    tuesday = datetime(2026, 10, 6, 11, 1, tzinfo=UTC)
+    assert actions.end_of_nfl_week(tuesday, settings) == "2026-10-13T11:00:00+00:00"
+
+
+def test_an_action_deadlined_to_the_week_stops_being_pending_when_the_week_ends(
+    conn: sqlite3.Connection, settings
+):
+    """The concrete failure: a bye-week bench still being issued two weeks later."""
+    emitted = datetime(2026, 10, 4, 10, 30, tzinfo=UTC)
+    actions.emit(
+        conn,
+        bench(deadline=actions.end_of_nfl_week(emitted, settings)),
+        now=emitted,
+    )
+
+    still_this_week = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+    assert len(actions.pending(conn, now=still_this_week)) == 1
+
+    two_weeks_later = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
+    assert actions.pending(conn, now=two_weeks_later) == []
+    assert actions.expire_stale(conn, two_weeks_later) == 1
+    assert statuses(conn) == [("Bijan Robinson", "expired")]
+
+
+# --- equivalence is scoped to the week, not to a rolling window ---------------
+
+
+def test_the_same_move_twice_in_one_week_is_one_action(conn: sqlite3.Connection):
+    tuesday = datetime(2026, 10, 6, 12, 0, tzinfo=UTC)
+    friday = datetime(2026, 10, 9, 12, 0, tzinfo=UTC)
+
+    first = actions.emit(conn, bench(), now=tuesday)
+    second = actions.emit(conn, bench(), now=friday)
+    assert first == second
+
+
+def test_the_same_move_in_the_next_week_is_a_new_action(conn: sqlite3.Connection):
+    """Five days apart but a different week: on bye then, injured now."""
+    monday = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+    saturday = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)
+
+    first = actions.emit(conn, bench(), now=monday)
+    actions.report(conn, first, "done", "Benched.", now=monday)
+
+    second = actions.emit(conn, bench(), now=saturday)
+    assert second != first
+    assert [row["id"] for row in actions.pending(conn, now=saturday)] == [second]
+
+
+def test_a_caller_can_tell_already_queued_from_newly_decided(conn: sqlite3.Connection):
+    """`emit` returning an id says nothing about whether it wrote one."""
+    assert actions.find_equivalent(conn, bench()) is None
+
+    first = actions.emit(conn, bench())
+    assert actions.find_equivalent(conn, bench()) == first

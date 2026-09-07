@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -343,7 +344,9 @@ def test_running_twice_emits_one_action(conn, settings):
     second = lineup_actions.emit_bye_week_benchings(conn, settings)
 
     assert len(emitted(conn)) == 1
-    assert first["emitted"] == second["emitted"]
+    # The same action, and the second run says plainly that it wrote nothing.
+    assert second["emitted"] == []
+    assert second["already_queued"] == first["emitted"]
     assert len(actions.pending(conn)) == 1
 
 
@@ -366,3 +369,56 @@ def test_the_job_records_a_run(conn, settings):
     assert row["job"] == lineup_actions.JOB_NAME
     assert row["status"] == "ok"
     assert row["finished_at"]
+
+
+# --- the deadline ------------------------------------------------------------
+
+
+def test_every_emitted_action_expires_at_the_end_of_the_week_that_emitted_it(conn, settings):
+    """Without a deadline there is no expiry and no other revocation path.
+
+    Cowork's Sunday task does not run in week 5 because Claude Desktop was
+    closed. Week 7 arrives, the bye is three weeks gone, Bijan Robinson is
+    healthy and playing — and an instruction with no deadline is still pending,
+    so a browser benches a starter unattended. The coarse boundary is not the
+    eventual answer (that is a per-player kickoff), but it turns "actions expire"
+    from a sentence in a design document into a mechanism.
+    """
+    make_league(conn)
+    a_full_healthy_lineup(conn)
+    conn.execute("UPDATE board SET bye_week = ? WHERE player_id = 2", (CURRENT_WEEK,))
+    add_player(conn, 20, "Rhamondre Stevenson", "RB", "BE", bye_week=11, rank=30)
+    sunday = datetime(2026, 10, 4, 10, 30, tzinfo=UTC)
+
+    lineup_actions.emit_bye_week_benchings(conn, settings, now=sunday)
+
+    assert emitted(conn)[0]["deadline"] == "2026-10-06T11:00:00+00:00"
+
+
+def test_a_bench_queued_this_week_is_not_issued_two_weeks_later(conn, settings):
+    make_league(conn)
+    a_full_healthy_lineup(conn)
+    conn.execute("UPDATE board SET bye_week = ? WHERE player_id = 2", (CURRENT_WEEK,))
+    add_player(conn, 20, "Rhamondre Stevenson", "RB", "BE", bye_week=11, rank=30)
+    sunday = datetime(2026, 10, 4, 10, 30, tzinfo=UTC)
+    lineup_actions.emit_bye_week_benchings(conn, settings, now=sunday)
+
+    two_weeks_later = datetime(2026, 10, 18, 10, 30, tzinfo=UTC)
+    assert actions.pending(conn, now=two_weeks_later) == []
+
+
+def test_running_twice_in_one_week_reports_the_second_as_already_queued(conn, settings):
+    """`emit` returning an id says nothing about whether it wrote one."""
+    make_league(conn)
+    a_full_healthy_lineup(conn)
+    conn.execute("UPDATE board SET bye_week = ? WHERE player_id = 2", (CURRENT_WEEK,))
+    add_player(conn, 20, "Rhamondre Stevenson", "RB", "BE", bye_week=11, rank=30)
+    sunday = datetime(2026, 10, 4, 10, 30, tzinfo=UTC)
+
+    first = lineup_actions.emit_bye_week_benchings(conn, settings, now=sunday)
+    second = lineup_actions.emit_bye_week_benchings(conn, settings, now=sunday)
+
+    assert first["emitted"] and not first["already_queued"]
+    assert not second["emitted"]
+    assert second["already_queued"] == first["emitted"]
+    assert len(emitted(conn)) == 1

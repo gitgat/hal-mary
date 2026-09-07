@@ -145,7 +145,13 @@ def emit_bye_week_benchings(
 
 
 def _nothing(week: int | None, summary: str) -> dict[str, Any]:
-    return {"week": week, "emitted": [], "unreplaceable": [], "summary": summary}
+    return {
+        "week": week,
+        "emitted": [],
+        "already_queued": [],
+        "unreplaceable": [],
+        "summary": summary,
+    }
 
 
 def _plan(conn: sqlite3.Connection, settings: Settings, *, now: Any = None) -> dict[str, Any]:
@@ -186,9 +192,19 @@ def _plan(conn: sqlite3.Connection, settings: Settings, *, now: Any = None) -> d
     started_on_bye.sort(key=lambda player: ((player["slot"] or ""), player["name"] or ""))
 
     emitted: list[int] = []
+    already_queued: list[int] = []
     unreplaceable: list[str] = []
     taken: set[int] = set()
     sequence = 0
+
+    # Every action emitted by this run expires when this NFL week does. It is a
+    # coarse deadline — the exact one is that player's own kickoff, which needs a
+    # pro schedule hal-mary does not sync yet — but coarse is the difference
+    # between an instruction that goes stale and one that does not. Without it,
+    # an executor that was offline for a fortnight comes back in week 7 and
+    # benches a healthy starter for a bye that ended three weeks ago, and nothing
+    # anywhere would have revoked it.
+    deadline = actions.end_of_nfl_week(now, settings)
 
     for player in started_on_bye:
         slot = player["slot"] or ""
@@ -205,35 +221,35 @@ def _plan(conn: sqlite3.Connection, settings: Settings, *, now: Any = None) -> d
         replacement = min(candidates, key=_replacement_sort_key)
         taken.add(replacement["player_id"])
         sequence += 1
-        emitted.append(
-            actions.emit(
-                conn,
-                actions.Action(
-                    kind="bench",
-                    player_name=player["name"],
-                    player_id=player["player_id"],
-                    slot=slot,
-                    paired_player_name=replacement["name"],
-                    reason=_reason(player["name"], replacement["name"], slot, week),
-                    sequence=sequence,
-                    # Every one of these is independent: benching one player on
-                    # bye neither needs nor blocks benching another.
-                    depends_on=(),
-                    # No deadline. Lineups lock at each player's own kickoff and
-                    # nothing here knows those times yet; a deadline invented
-                    # from a guess would expire a move that was still legal.
-                    deadline=None,
-                    reversible=True,
-                    source_job=JOB_NAME,
-                ),
-                now=now,
-            )
+        proposed = actions.Action(
+            kind="bench",
+            player_name=player["name"],
+            player_id=player["player_id"],
+            slot=slot,
+            paired_player_name=replacement["name"],
+            reason=_reason(player["name"], replacement["name"], slot, week),
+            sequence=sequence,
+            # Every one of these is independent: benching one player on bye
+            # neither needs nor blocks benching another.
+            depends_on=(),
+            deadline=deadline,
+            reversible=True,
+            source_job=JOB_NAME,
         )
+        # Asked before emitting, not inferred from the id afterwards: `emit`
+        # returns an id whether it wrote a row or found one, and a run that
+        # cannot tell "already queued" from "newly decided" cannot say honestly
+        # what it did.
+        existing = actions.find_equivalent(conn, proposed, now=now, settings=settings)
+        action_id = actions.emit(conn, proposed, now=now, settings=settings)
+        (already_queued if existing is not None else emitted).append(action_id)
 
     _note_the_unreplaceable(conn, unreplaceable, week)
 
     if emitted:
-        summary = f"Week {week}: benched {len(emitted)} player(s) on bye."
+        summary = f"Week {week}: queued a bench for {len(emitted)} player(s) on bye."
+    elif already_queued:
+        summary = f"Week {week}: {len(already_queued)} bye bench(es) already queued this week."
     elif unreplaceable:
         summary = f"Week {week}: {len(unreplaceable)} player(s) on bye with nobody legal to start."
     else:
@@ -241,6 +257,7 @@ def _plan(conn: sqlite3.Connection, settings: Settings, *, now: Any = None) -> d
     return {
         "week": week,
         "emitted": emitted,
+        "already_queued": already_queued,
         "unreplaceable": unreplaceable,
         "summary": summary,
     }

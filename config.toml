@@ -241,3 +241,20 @@ timezone = "UTC"
 # in a batch, so a run after that time submits into a window that has closed; a
 # day ahead leaves room for a failed run to be noticed and repeated.
 waiver_lead_minutes = 1440
+
+[actions]
+# When an NFL week rolls over, for the purpose of expiring an instruction that
+# was queued for Claude Cowork.
+#
+# Two things hang off this one boundary. Every emitted action expires at it — a
+# lineup change is worthless once the week it was reasoned about is over, and an
+# executor that has been offline for a fortnight must not come back and perform
+# it. And emission equivalence is scoped by it: the same bench twice in one week
+# is a duplicate, the same bench next week is a new decision (on bye then,
+# injured now) and suppressing it would lose a real change.
+#
+# Tuesday 11:00 UTC is after Monday night's game (which ends around 04:15 UTC on
+# Tuesday) and around when ESPN rolls its scoring period. UTC because that is the
+# only clock the database stores.
+week_boundary_weekday = "tuesday"
+week_boundary_hour_utc = 11
