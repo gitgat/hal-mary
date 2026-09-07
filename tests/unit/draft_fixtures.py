@@ -306,3 +306,18 @@ class FakeEspnClient:
             error, self.fail_next = self.fail_next, None
             raise error
         return [dict(pick) for pick in self.picks]
+
+
+class RecordingBus:
+    """An :class:`~hal_mary.events.EventBus` stand-in that just remembers.
+
+    The real bus needs a running event loop to subscribe to, and most of these
+    tests are synchronous. One test uses the real bus to prove the wiring; the
+    rest use this to assert on what was published.
+    """
+
+    def __init__(self) -> None:
+        self.published: list[tuple[str, dict]] = []
+
+    def publish(self, event: str, payload: dict) -> None:
+        self.published.append((event, payload))
