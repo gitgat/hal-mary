@@ -11,11 +11,15 @@ SRC = Path(__file__).resolve().parents[2] / "src"
 
 BANNED = ("opus", "sonnet", "haiku", "claude-3", "claude-4", "claude-5")
 
+SCANNED_SUFFIXES = {".py", ".sql", ".toml", ".md", ".html", ".j2", ".jinja", ".txt", ".json"}
+
 
 def test_no_source_file_hardcodes_a_model_name():
     offenders = []
     for path in sorted(SRC.rglob("*")):
-        if not path.is_file() or path.suffix not in {".py", ".sql", ".toml", ".md"}:
+        # Templates count: Jinja under src/hal_mary/web/templates/ could otherwise
+        # name a model in a form default or a status page and escape the guard.
+        if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
             continue
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             lowered = line.lower()

@@ -52,3 +52,24 @@ def test_memory_files_are_marked_human_editable():
     settings = load_settings(env={})
     text = (REPO / settings.paths.memory_dir / "caroline.md").read_text(encoding="utf-8")
     assert "human-editable" in text.lower()
+
+
+#: Task 5's rewrite of memory/league.md must preserve everything below this line
+#: verbatim. Pinned here because it is a contract between two tasks, not prose.
+LEAGUE_PRESERVE_SENTINEL = "<!-- hal-mary:preserve-below -->"
+
+
+def test_league_memory_has_a_machine_readable_preserve_sentinel():
+    settings = load_settings(env={})
+    text = (REPO / settings.paths.memory_dir / "league.md").read_text(encoding="utf-8")
+    assert text.count(LEAGUE_PRESERVE_SENTINEL) == 1
+    before, _, after = text.partition(LEAGUE_PRESERVE_SENTINEL)
+    assert "---" in before, "the sentinel is preceded by a horizontal rule"
+    assert after.strip(), "the sentinel is not the last line; hand-written notes go below it"
+
+
+def test_league_memory_explains_what_the_sentinel_means():
+    settings = load_settings(env={})
+    text = (REPO / settings.paths.memory_dir / "league.md").read_text(encoding="utf-8")
+    assert "hal-mary sync" in text
+    assert "preserved" in text.lower()
