@@ -36,6 +36,7 @@ __all__ = [
     "DraftConfig",
     "EspnConfig",
     "JobConfig",
+    "LeagueConfig",
     "PathsConfig",
     "Settings",
     "WebConfig",
@@ -89,15 +90,38 @@ class PathsConfig(_Frozen):
 
 
 class DraftConfig(_Frozen):
+    """How the draft loop behaves, and how much of the board each prompt sees.
+
+    The sizes are here rather than in the code because they are the dial between
+    a prompt that is too thin to reason from and one that will not come back
+    inside the pick clock. Defaults are supplied so an older ``config.toml``
+    without them still loads.
+    """
+
     poll_seconds: int
     advise_within_picks: int
+    #: How many players the pre-draft research job is asked to rank.
+    board_size: int = 200
+    #: Notes retrieved into the (slow, pre-draft) research prompt.
+    research_note_limit: int = 30
+    #: Board rows shown to the advisor on the clock, and on its shorter retry.
+    advice_candidates: int = 14
+    advice_retry_candidates: int = 5
+    #: Recent picks shown to the advisor, and notes retrieved for its candidates.
+    advice_recent_picks: int = 8
+    advice_note_limit: int = 12
+    #: Wall-clock seconds one draft-loop tick may spend before Caroline has a
+    #: card, counting the ESPN sync and every Claude attempt. The advisor starts
+    #: an attempt only if it can finish inside what is left, so the tick is
+    #: bounded by construction rather than by arithmetic in a comment.
+    advice_budget_s: int = 60
 
 
 class EspnConfig(_Frozen):
     """Transport limits for the raw ESPN reads.
 
     These belong here rather than in the client because they are bounded by the
-    thing configured immediately above them: the pick clock is 60 to 90 seconds
+    thing configured immediately above them: the pick clock is 90 seconds
     and ``draft.poll_seconds`` is 5, so a read that outlives its poll silently
     stops the draft loop. Defaults are supplied so an older ``config.toml``
     without an ``[espn]`` section still loads.
@@ -105,6 +129,40 @@ class EspnConfig(_Frozen):
 
     connect_timeout_s: float = 10.0
     read_timeout_s: float = 15.0
+
+
+class LeagueConfig(_Frozen):
+    """The manual fallback for the league's own settings.
+
+    Normally ``hal-mary sync`` writes the ``league_settings`` table from ESPN and
+    nothing here is read. This section exists for the case that decides whether
+    hal-mary is useful on draft night at all: **no working ESPN credentials.**
+    Pick discovery already has a manual path; without this, the league's size,
+    scoring and draft order would have none, and every recommendation would be
+    built on a guessed twelve-team standard-scoring default.
+
+    Everything is optional, and a synced row always wins field by field, so a
+    partly-filled section is still worth having. ``hal_mary.league`` applies the
+    precedence; nothing else reads this.
+
+    ``draft_order`` is team ids or team names by first-round slot. Names are for
+    the realistic case: Caroline reading the ESPN draft lobby, which shows names
+    and no ids. When names are given, a team's id *is* its 1-based slot.
+    """
+
+    team_count: int | None = None
+    scoring_type: str | None = None
+    points_per_reception: float | None = None
+    draft_type: str | None = None
+    draft_date: str | None = None
+    name: str | None = None
+    rounds: int | None = None
+    #: Seconds on the clock per pick. Every draft-night budget is sized against
+    #: it, so it is worth being able to state by hand when ESPN is unavailable.
+    pick_clock_s: int | None = None
+    my_draft_slot: int | None = None
+    draft_order: list[int | str] = []
+    roster_slots: dict[str, int] = {}
 
 
 class WebConfig(_Frozen):
@@ -160,6 +218,7 @@ class Settings(_Frozen):
     paths: PathsConfig
     draft: DraftConfig
     espn: EspnConfig = EspnConfig()
+    league: LeagueConfig = LeagueConfig()
     web: WebConfig
     jobs: dict[str, JobConfig]
 
@@ -287,6 +346,7 @@ def load_settings(
         paths = PathsConfig(**raw.get("paths", {}))
         draft = DraftConfig(**raw.get("draft", {}))
         espn = EspnConfig(**raw.get("espn", {}))
+        league = LeagueConfig(**raw.get("league", {}))
         web = WebConfig(**raw.get("web", {}))
     except Exception as exc:
         raise ConfigError(f"{path} is missing or has an invalid section: {exc}") from exc
@@ -303,6 +363,7 @@ def load_settings(
         paths=paths,
         draft=draft,
         espn=espn,
+        league=league,
         web=web,
         jobs=jobs,
         espn_s2=values.get("ESPN_S2"),

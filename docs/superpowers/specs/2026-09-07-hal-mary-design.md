@@ -20,7 +20,7 @@ Decisions made in brainstorming (2026-09-07):
 | Approach | Prepared board + fast advisor. Research runs on a schedule with web tools. On-the-clock advice uses local context only, web tools off, so it answers in seconds. |
 | Process | TDD (superpowers:test-driven-development) and subagent-driven development (superpowers:subagent-driven-development) for every task. |
 
-Key constraint that shapes the design: a `claude -p` call with web search takes 30 to 120 seconds; the ESPN pick clock is 60 to 90 seconds. Research must happen before the draft, not during it.
+Key constraint that shapes the design: a `claude -p` call with web search takes 30 to 120 seconds; this league's pick clock is 90 seconds (`draftSettings.timePerSelection`, confirmed from the live payload). Research must happen before the draft, not during it.
 
 ## Design
 
@@ -144,8 +144,20 @@ Tables: `notes(id, created_at, source_job, topic, player_name, team_abbr, text, 
 ### Draft (`draft/`)
 
 - `board.py` pure functions over dicts, no DB/network/clock imports: `pick_slot(overall_pick, draft_order, snake=True)`, `picks_until_mine(...)`, `my_upcoming_picks(..., rounds=)`, `apply_picks(board, picks) -> (updated_board, unmatched_picks)`, `roster_needs(roster, roster_slots)`, `scarcity(board, within_tiers=2) -> {position: {best_tier, count}}` (window measured from each position's best *remaining* tier), `available(board, limit=40, positions=None)`. Name matching is player_id, then suffix-preserving normalized name, then suffix-stripped, each requiring a unique hit; an ambiguous or unknown name comes back as an unmatched pick rather than a guess.
-- `loop.py`: every `config.draft.poll_seconds` (5), sync draft picks; on new picks, update board, broadcast SSE `board_updated`; when `picks_until_mine <= config.draft.advise_within_picks` (default 2) run advisor.
-- `advisor.py`: prompt from `prompts/draft_advice.md` with board top-N by tier, my roster and needs, scarcity, last N picks, retrieved notes for candidate players. Tools off. `--json-schema` for `{pick, reason, backups:[{name,reason}], watch_out}`. Retry once on parse failure with shorter prompt; on second failure emit a deterministic fallback (top of board by tier filtered by need). Persist to `advice` table and broadcast SSE `advice`.
+- `store.py`: the database half of the board — `load_board`, `replace_board`, `mark_drafted`, `record_unmatched`/`unmatched_picks`, `recent_picks`, `all_picks`, `next_overall_pick`. A drafted board row always carries `drafted_at`, because a hand-entered pick knows the player and not the team and the table has no `drafted` column. Picks that name nobody (ESPN's 96 pre-populated `playerId: -1` rows) are excluded from every count.
+- `loop.py`: `DraftLoop(conn, settings, client, runner, bus)` with `warm()`, `async run_once()`, `async run_forever()`/`stop()`, and `record_manual_pick`. Warms `client.player_name_map()` before the first poll. Every `config.draft.poll_seconds` (5) it syncs, then applies `pending_picks(conn)` — every recorded pick the board does not yet agree with, deduplicated — marks the board, files unmatched picks in the `unmatched_picks` table, broadcasts `board_updated`, and runs the advisor when her next pick is within `config.draft.advise_within_picks` **and it has not already advised for that pick of hers**. The countdown comes from `client.draft_schedule()`, read exactly once on the first poll that sees a real pick — the order is provisional until `DRAFT_START` and final after it — falling back to the snake arithmetic when that read fails. Gates on having no upcoming picks left, the only end-of-draft signal there is. Nothing escapes: an ESPN failure is logged and the loop lives. Runs on its own thread with its own connection; the event bus carries its events to the web loop.
+- `advisor.py`: prompt from `prompts/draft_advice.md` with board top-N by tier, my roster and needs, scarcity, last N picks, retrieved notes for candidate players. Tools off. `--json-schema` for `{pick, reason, backups:[{name,reason}], watch_out}`. Retry once on parse failure with a shorter prompt and its own shorter deadline (`[jobs.draft_advice_retry]`); on second failure emit a deterministic fallback (top of board by tier filtered by need). The whole tick — ESPN sync included — is bounded by `draft.advice_budget_s`, and an attempt is started only if it can finish inside what is left, counting the runner's post-timeout teardown. Persist to `advice` table and broadcast SSE `advice`.
+
+### The league accessor (`league.py`) and prompt loading (`prompts.py`)
+
+`load_league_context(conn, settings)` is the only answer to "what league is this?": team count,
+scoring (including points per reception, computed from ESPN's stat 53 rather than the useless
+`scoringType`), roster slots, draft order, Caroline's team and slot, and rounds (one per drafted
+roster spot, IR excluded — 16 here). A synced `league_settings` row wins field by field over the
+`[league]` section of `config.toml`, which is the **no-ESPN fallback**; neither raises
+`LeagueUnknown`. `board_build` and the advisor read the league only through this and never touch
+`EspnClient`. `prompts.render_prompt(settings, name, values)` reads `prompts/*.md` fresh on every
+call and fills `{{placeholder}}` tokens, raising on any left unfilled.
 
 ### Jobs and scheduler (`jobs/`)
 

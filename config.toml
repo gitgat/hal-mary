@@ -17,6 +17,56 @@ memory_dir = "memory"
 poll_seconds = 5
 advise_within_picks = 2
 
+# How much of the board each prompt sees. board_size is the pre-draft research
+# job, which has fifteen minutes. The advice_* sizes run against a 90-second
+# pick clock: bigger is better reasoning right up until the answer arrives after
+# the pick was due. advice_retry_candidates is the shorter second attempt.
+board_size = 200
+research_note_limit = 30
+advice_candidates = 14
+advice_retry_candidates = 5
+advice_recent_picks = 8
+advice_note_limit = 12
+
+# Wall-clock seconds one tick may spend before Caroline has a card. The clock
+# starts before the ESPN sync, so a slow read spends this budget like anything
+# else — but it bounds only what the advisor chooses to start, not a request
+# already in flight. See the worked sum above [jobs.draft_advice].
+advice_budget_s = 60
+
+# The manual fallback for the league's own settings.
+#
+# Normally `hal-mary sync` reads these from ESPN into the league_settings table
+# and nothing below is read. Uncomment and fill this in when there are no
+# working ESPN credentials: it is the difference between hal-mary running the
+# draft from hand-entered picks and being unable to help at all.
+#
+# A synced row always wins, field by field, so a filled-in section here stays
+# harmless once ESPN works — and it still covers a sync that landed without the
+# roster slots. Having this section does not disable syncing.
+#
+# draft_order is team ids or team names by first-round slot; names are what the
+# ESPN draft lobby shows. my_draft_slot is Caroline's 1-based place in round 1.
+#
+# [league]
+# team_count = 6
+# scoring_type = "full PPR"
+# points_per_reception = 1.0    # 1.0 full PPR, 0.5 half PPR, 0.0 standard
+# draft_type = "SNAKE"
+# draft_order = [1, 2, 3, 4, 5, 6]
+# my_draft_slot = 6
+#
+# [league.roster_slots]         # one draft round per slot, IR excluded
+# QB = 1
+# RB = 2
+# WR = 2
+# TE = 1
+# "D/ST" = 1
+# K = 1
+# "RB/WR/TE" = 1               # the flex slot; ESPN spells it this way
+# BE = 7                       # bench
+# IR = 1                       # injured reserve; not drafted
+
 [espn]
 # Transport limits for the raw ESPN reads. Bounded by the pick clock above: a
 # read that outlives its poll interval silently stops the draft loop, and a
@@ -42,10 +92,63 @@ max_budget_usd = 5.0
 enabled = true
 cron = "0 6 * * *"
 
+# The two on-the-clock attempts. Both run with no web tools, and their deadlines
+# are a budget against the pick clock, which this league sets at 90 seconds
+# (draftSettings.timePerSelection, read into LeagueContext.pick_clock_s).
+#
+# What one timed-out attempt actually costs:
+#
+#   its own deadline                    timeout_s below
+#   + claude_runner.TIMEOUT_TEARDOWN_S  7s — SIGKILL reap 5s + stdout join 2s,
+#                                       both OUTSIDE timeout_s
+#
+# So, worst case, the Claude half of a tick:
+#
+#   first attempt, timing out        25s   jobs.draft_advice.timeout_s
+#     + its teardown                  7s
+#   retry, timing out                15s   jobs.draft_advice_retry.timeout_s
+#     + its teardown                  7s
+#   deterministic fallback card      ~0s   pure arithmetic over the board
+#                                   ----
+#   Claude spend, worst case         54s   <= draft.advice_budget_s (60)
+#
+# WHAT IS GUARANTEED, AND WHAT IS NOT.
+#
+# The advisor checks the remaining budget before each attempt and starts one only
+# if it can finish, teardown included. That bounds the *Claude* spend: it can
+# never push a tick past draft.advice_budget_s, and when nothing fits the
+# deterministic card renders at once instead of after two more slow calls.
+#
+# It does NOT bound the ESPN reads, because it cannot cancel an HTTP request
+# already in flight. A tick makes up to three of them — warm()'s player_name_map
+# on the first tick, draft_picks() (which fetches the name map itself if the warm
+# failed), and _read_schedule() on the tick the draft opens — and httpx's
+# connect/read timeouts are per operation, not per request, so each is nominally
+# 25s and can be more. Worst-case ESPN spend is therefore roughly 50-75s, and the
+# true bound on a tick is max(advice_budget_s, whatever ESPN took), not 60.
+#
+# That is the right shape anyway: ESPN spending 50 seconds leaves 10, nothing
+# fits, and Caroline gets the board's own card immediately rather than nothing.
+# If ESPN worst cases start actually happening, the lever is espn.read_timeout_s
+# above, not these two numbers.
+#
+# Measured: a tools-off call with a JSON schema returns in about 15 seconds, so
+# 25s is comfortable for the full prompt and 15s is comfortable for the retry,
+# whose prompt carries five candidates and no notes. Raising either tightens the
+# margin; raising both past the budget silently costs the retry — which is now a
+# real loss, because a budget too small for the first attempt still affords the
+# second.
 [jobs.draft_advice]
 model = "opus"
 tools = []                # no web tools: this runs on the pick clock
-timeout_s = 45
+timeout_s = 25
+max_budget_usd = 1.0
+enabled = true
+
+[jobs.draft_advice_retry]
+model = "opus"
+tools = []                # no web tools: this runs on the pick clock too
+timeout_s = 15            # shorter on purpose: the first attempt already spent time
 max_budget_usd = 1.0
 enabled = true
 
