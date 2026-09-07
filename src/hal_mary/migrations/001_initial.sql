@@ -23,8 +23,11 @@ CREATE TABLE league_settings (
     updated_at        TEXT
 );
 
+-- team_id and players.player_id are NOT NULL explicitly: they are declared
+-- INT PRIMARY KEY, not INTEGER PRIMARY KEY, so they are not rowid aliases and
+-- SQLite's legacy quirk would otherwise admit any number of NULL-id rows.
 CREATE TABLE teams (
-    team_id    INT PRIMARY KEY,
+    team_id    INT PRIMARY KEY NOT NULL,
     name       TEXT,
     owner      TEXT,
     abbrev     TEXT,
@@ -33,7 +36,7 @@ CREATE TABLE teams (
 );
 
 CREATE TABLE players (
-    player_id     INT PRIMARY KEY,
+    player_id     INT PRIMARY KEY NOT NULL,
     name          TEXT NOT NULL,
     position      TEXT,
     pro_team      TEXT,

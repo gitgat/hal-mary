@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,6 +27,7 @@ __all__ = [
     "job_run_finished",
     "job_run_started",
     "migrate",
+    "transaction",
 ]
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
@@ -58,6 +61,18 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     * ``isolation_level = None``: transactions are explicit. The implicit-BEGIN
       behaviour of the stdlib driver interacts badly with ``executescript`` and
       with DDL, and explicit is easier to reason about across a scheduler.
+
+    **Because transactions are explicit, wrap every multi-statement write in**
+    :func:`transaction`. A sync loop that inserts a hundred rows without one is
+    a hundred separate transactions: it fsyncs once per row, and a failure at
+    row fifty leaves fifty rows committed and the rest missing, with nothing to
+    say the sync was partial.
+
+    **One connection per thread.** A ``sqlite3.Connection`` must not be shared
+    across threads, and the web app, the APScheduler workers and the draft poll
+    loop all run in different ones. Open a connection where you need it and
+    close it when you are done; WAL means concurrent readers and one writer are
+    fine, they just cannot share the same connection object.
     """
     path = Path(db_path)
     if path.parent and not path.parent.exists():
@@ -67,6 +82,47 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     return conn
+
+
+def _rollback_quietly(conn: sqlite3.Connection) -> None:
+    """Roll back, swallowing the failure if there is nothing to roll back.
+
+    SQLite rolls back automatically on SQLITE_FULL, SQLITE_IOERR and
+    SQLITE_NOMEM. An explicit ROLLBACK afterwards raises "cannot rollback - no
+    transaction is active", which would replace the real error: the operator
+    whose disk filled would be told about a rollback instead of about the disk.
+    """
+    try:
+        conn.execute("ROLLBACK")
+    except sqlite3.Error:
+        pass
+
+
+@contextmanager
+def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Run a block of statements as one atomic, single-fsync transaction.
+
+    Connections from :func:`connect` are in explicit-transaction mode, so
+    without this every statement is its own transaction. Use it for anything
+    that writes more than one row::
+
+        with transaction(conn):
+            for team in teams:
+                conn.execute("INSERT OR REPLACE INTO teams ...", team)
+
+    Commits on a clean exit, rolls back on any exception — including
+    ``KeyboardInterrupt`` and a job timeout — and re-raises it unchanged.
+
+    SQLite has no nested transactions: calling this inside another
+    ``transaction()`` raises ``sqlite3.OperationalError``.
+    """
+    conn.execute("BEGIN")
+    try:
+        yield conn
+    except BaseException:
+        _rollback_quietly(conn)
+        raise
+    conn.execute("COMMIT")
 
 
 def _migration_files(migrations_dir: Path) -> list[Path]:
@@ -104,7 +160,7 @@ def migrate(conn: sqlite3.Connection, migrations_dir: str | Path | None = None) 
             )
             conn.execute("COMMIT")
         except Exception:
-            conn.execute("ROLLBACK")
+            _rollback_quietly(conn)
             raise
         applied.append(path.name)
 

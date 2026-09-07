@@ -28,13 +28,16 @@ EXPECTED_TABLES = {
     "chat_messages",
 }
 
-EXPECTED_INDEX_TARGETS = {
-    ("notes", "created_at"),
-    ("advice", "created_at"),
-    ("advice", "done"),
-    ("draft_picks", "team_id"),
-    ("roster_slots", "team_id"),
-    ("job_runs", "job"),
+# (table, exact tuple of indexed columns). Tuples, not substrings: a substring
+# check against the index SQL matches the index *name*, so an index on the wrong
+# column would pass, and a composite index would be satisfied by a single column.
+EXPECTED_INDEXES = {
+    ("notes", ("created_at",)),
+    ("advice", ("created_at",)),
+    ("advice", ("done",)),
+    ("draft_picks", ("team_id",)),
+    ("roster_slots", ("team_id",)),
+    ("job_runs", ("job", "started_at")),
 }
 
 
@@ -148,19 +151,26 @@ def test_a_failing_migration_rolls_back_and_is_not_recorded(tmp_path):
     connection.close()
 
 
-def test_expected_indexes_exist(conn):
-    rows = conn.execute(
-        "SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL"
-    ).fetchall()
-    covered = set()
-    for row in rows:
-        sql = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='index' AND name = ?", (row["name"],)
-        ).fetchone()[0]
-        for table, column in EXPECTED_INDEX_TARGETS:
-            if row["tbl_name"] == table and column in sql:
-                covered.add((table, column))
-    assert covered == EXPECTED_INDEX_TARGETS
+def index_column_tuples(conn, table):
+    """Every index on `table`, as a tuple of its actual column names in order."""
+    tuples = set()
+    for index in conn.execute(f"PRAGMA index_list({table})").fetchall():
+        columns = tuple(
+            row["name"] for row in conn.execute(f"PRAGMA index_info({index['name']})").fetchall()
+        )
+        tuples.add(columns)
+    return tuples
+
+
+@pytest.mark.parametrize(("table", "columns"), sorted(EXPECTED_INDEXES))
+def test_expected_index_exists_on_the_right_columns(conn, table, columns):
+    assert columns in index_column_tuples(conn, table)
+
+
+def test_composite_job_runs_index_is_ordered_job_then_started_at(conn):
+    """Order matters: (started_at, job) would not serve 'last run of job X'."""
+    assert ("job", "started_at") in index_column_tuples(conn, "job_runs")
+    assert ("started_at", "job") not in index_column_tuples(conn, "job_runs")
 
 
 # --- schema behaviour ---------------------------------------------------------
@@ -255,6 +265,30 @@ def insert_note(conn, text, player_name="Justin Jefferson", topic="injury"):
     return cur.lastrowid
 
 
+def fts_index_hits(conn, query):
+    """Rows the FTS index alone returns, with no join back to notes.
+
+    The join in fts_search() hides a stale index: once the notes row is deleted,
+    a leftover index entry has nothing to join to and silently disappears from
+    the result. Counting inside notes_fts is what actually exercises the
+    AFTER DELETE trigger.
+    """
+    return conn.execute(
+        "SELECT count(*) FROM notes_fts WHERE notes_fts MATCH ?", (query,)
+    ).fetchone()[0]
+
+
+def assert_fts_integrity(conn):
+    """Ask FTS5 itself whether the index matches the content table.
+
+    The `1` matters. Bare `('integrity-check')` only verifies the index against
+    itself and passes happily with a stale entry pointing at a deleted note;
+    `('integrity-check', 1)` is the form that compares against `notes`. Requires
+    SQLite >= 3.41, which is older than the Python 3.12 this project needs.
+    """
+    conn.execute("INSERT INTO notes_fts(notes_fts, rank) VALUES ('integrity-check', 1)")
+
+
 def fts_search(conn, query):
     return [
         row["id"]
@@ -286,8 +320,29 @@ def test_fts_reflects_an_update(conn):
 
 def test_fts_reflects_a_delete(conn):
     note_id = insert_note(conn, "hamstring strain")
+    assert fts_index_hits(conn, "hamstring") == 1
     conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    assert fts_index_hits(conn, "hamstring") == 0
     assert fts_search(conn, "hamstring") == []
+
+
+def test_fts_index_stays_consistent_with_notes(conn):
+    """FTS5's own integrity check, after each kind of write."""
+    first = insert_note(conn, "hamstring strain")
+    insert_note(conn, "ankle sprain", player_name="Somebody Else", topic="usage")
+    assert_fts_integrity(conn)
+    conn.execute("UPDATE notes SET text = 'cleared to play' WHERE id = ?", (first,))
+    assert_fts_integrity(conn)
+    conn.execute("DELETE FROM notes WHERE id = ?", (first,))
+    assert_fts_integrity(conn)
+
+
+def test_fts_index_is_empty_after_deleting_every_note(conn):
+    insert_note(conn, "hamstring strain")
+    insert_note(conn, "hamstring tightness", player_name="Someone Else")
+    conn.execute("DELETE FROM notes")
+    assert fts_index_hits(conn, "hamstring") == 0
+    assert_fts_integrity(conn)
 
 
 def test_fts_ranks_and_returns_only_matching_notes(conn):
@@ -348,3 +403,101 @@ def test_job_run_finished_rejects_an_unknown_status(conn):
 def test_job_run_finished_rejects_an_unknown_run_id(conn):
     with pytest.raises(LookupError):
         db.job_run_finished(conn, 9999, "ok")
+
+
+# --- NOT NULL on the ESPN-supplied primary keys -------------------------------
+
+
+def test_team_id_cannot_be_null(conn):
+    """`INT PRIMARY KEY` is not a rowid alias, so SQLite's legacy quirk would
+    otherwise let several NULL-id teams in and break every join."""
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO teams(team_id, name) VALUES (NULL, 'Nameless')")
+
+
+def test_player_id_cannot_be_null(conn):
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO players(player_id, name) VALUES (NULL, 'Some Player')")
+
+
+# --- transaction() ------------------------------------------------------------
+
+
+def test_transaction_commits_on_success(tmp_path):
+    connection = db.connect(tmp_path / "hal.db")
+    db.migrate(connection)
+    with db.transaction(connection):
+        connection.execute("INSERT INTO teams(team_id, name) VALUES (1, 'One')")
+        connection.execute("INSERT INTO teams(team_id, name) VALUES (2, 'Two')")
+    connection.close()
+
+    reopened = db.connect(tmp_path / "hal.db")
+    assert reopened.execute("SELECT COUNT(*) FROM teams").fetchone()[0] == 2
+    reopened.close()
+
+
+def test_transaction_rolls_back_every_statement_on_failure(conn):
+    conn.execute("INSERT INTO teams(team_id, name) VALUES (1, 'Existing')")
+    with pytest.raises(sqlite3.IntegrityError), db.transaction(conn):
+        conn.execute("INSERT INTO teams(team_id, name) VALUES (2, 'Two')")
+        conn.execute("INSERT INTO teams(team_id, name) VALUES (3, 'Three')")
+        # duplicate primary key: the whole block must be undone
+        conn.execute("INSERT INTO teams(team_id, name) VALUES (1, 'Clash')")
+    names = [row["name"] for row in conn.execute("SELECT name FROM teams")]
+    assert names == ["Existing"]
+
+
+def test_transaction_reraises_the_original_exception(conn):
+    class Boom(Exception):
+        pass
+
+    with pytest.raises(Boom), db.transaction(conn):
+        conn.execute("INSERT INTO teams(team_id, name) VALUES (1, 'One')")
+        raise Boom("something in the caller failed")
+    assert conn.execute("SELECT COUNT(*) FROM teams").fetchone()[0] == 0
+
+
+def test_transaction_yields_the_connection(conn):
+    with db.transaction(conn) as handle:
+        assert handle is conn
+
+
+def test_transaction_leaves_no_open_transaction_behind(conn):
+    with db.transaction(conn):
+        conn.execute("INSERT INTO teams(team_id, name) VALUES (1, 'One')")
+    assert not conn.in_transaction
+    with pytest.raises(sqlite3.IntegrityError), db.transaction(conn):
+        conn.execute("INSERT INTO teams(team_id, name) VALUES (1, 'Clash')")
+    assert not conn.in_transaction
+
+
+# --- rollback must never replace the error that caused it ---------------------
+
+
+def test_transaction_rollback_never_replaces_the_original_error(conn):
+    """SQLite auto-rolls-back on SQLITE_FULL / IOERR / NOMEM. A bare ROLLBACK
+    afterwards raises "cannot rollback - no transaction is active" and the real
+    error never reaches the operator. The explicit ROLLBACK below stands in for
+    the automatic one."""
+
+    class DiskFull(Exception):
+        pass
+
+    with pytest.raises(DiskFull, match="the real failure"), db.transaction(conn):
+        conn.execute("INSERT INTO teams(team_id, name) VALUES (1, 'One')")
+        conn.execute("ROLLBACK")  # SQLite has already unwound the transaction
+        raise DiskFull("the real failure")
+
+
+def test_a_migration_that_lost_its_transaction_still_reports_its_own_error(tmp_path):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "001_unwound.sql").write_text(
+        "CREATE TABLE t (x INT);\nROLLBACK;\nTHIS IS NOT SQL;"
+    )
+    connection = db.connect(tmp_path / "hal.db")
+    with pytest.raises(sqlite3.Error) as excinfo:
+        db.migrate(connection, migrations_dir=migrations)
+    assert "syntax error" in str(excinfo.value)
+    assert "no transaction is active" not in str(excinfo.value)
+    connection.close()
