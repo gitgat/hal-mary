@@ -132,7 +132,14 @@ poll grows it without bound. And `_fetch_draft` returns early unless `draftDetai
 which may only happen once a draft completes — the window we care about is exactly the window it
 might report nothing. Fifteen lines of `httpx` removes both problems.
 
-**Cost:** we map player ids to names ourselves, which the library would otherwise do.
+**Cost:** we map player ids to names ourselves, which the library would otherwise do, and we now
+run two HTTP stacks against one API — `requests` inside the library, `httpx` for ours. Contained by
+keeping the raw path to a single method and giving the whole package one exception hierarchy:
+`EspnAuthError`, `EspnLeagueNotFound`, `EspnUnavailable`.
+
+**Pinned by:** `test_draft_picks_ignores_the_drafted_flag`, which feeds a payload with
+`drafted: false` and three picks and asserts three picks come back. The library returns nothing for
+that same payload.
 
 **Would revisit if:** the library fixes both defects upstream.
 
@@ -204,3 +211,29 @@ fails if the call costs more than $0.10. A measured live run: $0.0017, 2.1s, `mc
 
 **Would revisit if:** a future job needs a real MCP server, which would add an opt-in argument rather
 than remove the default.
+
+---
+
+## 2026-09-07 — ESPN fixtures are recorded, scrubbed, and committed
+
+**Decision:** The ESPN tests run against JSON fixtures in `tests/fixtures/espn/`, mocked in at
+`requests.get` (for the library) and `httpx.MockTransport` (for the raw draft call). No test may
+open a real network connection; a conftest fixture blocks both HTTP stacks at their real transport.
+`scripts/record_espn_fixtures.py` re-records the fixtures from the real league in one command,
+scrubbing cookies and pseudonymising SWIDs, member names and team names before anything is written.
+
+**Why:** The suite has to pass on a box with no internet and no credentials, and a test that quietly
+talks to ESPN passes until the day it does not. Mocking at `requests.get` rather than at our own
+client means the real library parses the fixtures, so a fixture ESPN's library cannot read fails in
+CI rather than at 6am on draft day.
+
+**Why the pseudonymising and not just redaction:** a real ESPN payload carries the league's members
+by first and last name, and their team names. Recording those verbatim would put Caroline's
+leaguemates' real names into a public git history, irreversibly. Blanking them instead would
+collapse the team-to-owner links and the fixtures would stop meaning anything, so each distinct name
+maps to a stable fake.
+
+**Known gap:** the fixtures committed with this decision are **synthetic** — hand-built to the
+shapes in the `espn_api` source, because there were no credentials when the client was written. They
+pin the mapping honestly but cannot be trusted about ESPN's real vocabulary. Re-record them the
+first time cookies exist.

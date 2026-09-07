@@ -1,0 +1,23 @@
+{
+  "id": 1234567,
+  "seasonId": 2025,
+  "segmentId": 0,
+  "scoringPeriodId": 1,
+  "gameId": 1,
+  "draftDetail": {
+    "completeDate": null,
+    "drafted": false,
+    "inProgress": false,
+    "picks": []
+  },
+  "status": {
+    "currentMatchupPeriod": 1,
+    "firstScoringPeriod": 1,
+    "finalScoringPeriod": 17,
+    "latestScoringPeriod": 1,
+    "previousSeasons": [
+      2023,
+      2024
+    ]
+  }
+}

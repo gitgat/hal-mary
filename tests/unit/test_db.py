@@ -38,6 +38,7 @@ EXPECTED_INDEXES = {
     ("draft_picks", ("team_id",)),
     ("roster_slots", ("team_id",)),
     ("job_runs", ("job", "started_at")),
+    ("sync_runs", ("kind", "id")),
 }
 
 
@@ -98,13 +99,23 @@ def test_migrate_creates_every_expected_table(conn):
 
 def test_migrate_records_the_applied_filenames(conn):
     rows = conn.execute("SELECT filename, applied_at FROM schema_migrations").fetchall()
-    assert [row["filename"] for row in rows] == ["001_initial.sql"]
+    assert [row["filename"] for row in rows] == shipped_migrations()
     assert rows[0]["applied_at"]
+
+
+def shipped_migrations():
+    """Every migration file in the package, in the order migrate() applies them.
+
+    Derived rather than listed: migrations accumulate, and a test that has to be
+    edited every time one is added is a test people learn to edit without
+    reading.
+    """
+    return sorted(path.name for path in db.MIGRATIONS_DIR.glob("[0-9][0-9][0-9]_*.sql"))
 
 
 def test_migrate_returns_the_filenames_it_applied(tmp_path):
     connection = db.connect(tmp_path / "hal.db")
-    assert db.migrate(connection) == ["001_initial.sql"]
+    assert db.migrate(connection) == shipped_migrations()
     connection.close()
 
 
@@ -113,7 +124,7 @@ def test_migrate_twice_is_a_no_op(tmp_path):
     db.migrate(connection)
     assert db.migrate(connection) == []
     count = connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
-    assert count == 1
+    assert count == len(shipped_migrations())
     assert EXPECTED_TABLES <= table_names(connection)
     connection.close()
 

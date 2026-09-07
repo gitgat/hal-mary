@@ -54,9 +54,9 @@ uv sync                        # install deps
 uv run pytest                  # full test suite
 uv run pytest tests/unit -x    # fast loop while developing
 uv run hal-mary serve          # web app + scheduler (dev)
-uv run hal-mary sync           # pull league state from ESPN
+uv run hal-mary sync           # pull league state and draft picks from ESPN
+uv run hal-mary espn-check     # are the cookies still good? exits nonzero when not
 uv run hal-mary job <name>     # run one job on demand
-uv run hal-mary draft-spike    # probe whether ESPN exposes live draft picks
 ```
 
 ## Architecture in one paragraph
@@ -79,8 +79,13 @@ pick-clock path is wrong.
 
 - **The ESPN API is unofficial.** Cookies (`ESPN_S2`, `SWID`) expire. The status page checks auth
   hourly; when it breaks in-season, that is the first thing to look at.
-- **Whether `league.draft` updates *during* a live draft is unverified.** See the spike results in
-  the design doc before relying on it.
+- **Never poll a live draft through `espn-api`.** `refresh_draft()` appends to a list cleared only
+  in the constructor, and `_fetch_draft` returns early unless `draftDetail.drafted` is true — a flag
+  that may only be set once the draft is over. `hal_mary.espn.client.draft_picks()` reads the raw
+  `mDraftDetail` endpoint and ignores that flag; see `docs/DECISIONS.md`.
+- **The ESPN fixtures in `tests/fixtures/espn/` are synthetic** until someone runs
+  `uv run python scripts/record_espn_fixtures.py` with real cookies. No test may reach the network;
+  `tests/conftest.py` blocks both HTTP stacks.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export
   mounted on every node, and SQLite on NFS corrupts. The production VM keeps `hal.db` on its own
   disk.

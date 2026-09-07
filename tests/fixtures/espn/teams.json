@@ -1,0 +1,380 @@
+{
+  "id": 1234567,
+  "seasonId": 2025,
+  "segmentId": 0,
+  "gameId": 1,
+  "scoringPeriodId": 1,
+  "status": {
+    "currentMatchupPeriod": 1,
+    "firstScoringPeriod": 1,
+    "finalScoringPeriod": 17,
+    "latestScoringPeriod": 1,
+    "isActive": true,
+    "previousSeasons": [
+      2023,
+      2024
+    ],
+    "standingsUpdateDate": 1756166400000,
+    "teamsJoined": 4,
+    "waiverLastExecutionDate": 1756166400000
+  },
+  "settings": {
+    "name": "The Gridiron Gauntlet",
+    "size": 4,
+    "isPublic": false,
+    "restrictionType": "NONE",
+    "draftSettings": {
+      "type": "SNAKE",
+      "date": 1756166400000,
+      "timePerSelection": 90,
+      "pickOrder": [
+        3,
+        1,
+        4,
+        2
+      ],
+      "keeperCount": 0,
+      "auctionBudget": 200,
+      "isTradingEnabled": false
+    },
+    "rosterSettings": {
+      "lineupSlotCounts": {
+        "0": 1,
+        "1": 0,
+        "2": 2,
+        "3": 0,
+        "4": 2,
+        "5": 0,
+        "6": 1,
+        "16": 1,
+        "17": 1,
+        "20": 6,
+        "21": 1,
+        "23": 1
+      },
+      "isBenchUnlimited": false,
+      "positionLimits": {},
+      "rosterLocktimeType": "INDIVIDUAL_GAME"
+    },
+    "scoringSettings": {
+      "scoringType": "H2H_POINTS",
+      "playerRankType": "PPR",
+      "matchupTieRule": "NONE",
+      "playoffMatchupTieRule": "NONE",
+      "scoringEnhancementType": null,
+      "homeTeamBonus": 0,
+      "scoringItems": [
+        {
+          "statId": 3,
+          "points": 0.04,
+          "pointsOverrides": {}
+        },
+        {
+          "statId": 4,
+          "points": 4.0,
+          "pointsOverrides": {}
+        },
+        {
+          "statId": 24,
+          "points": 0.1,
+          "pointsOverrides": {}
+        },
+        {
+          "statId": 42,
+          "points": 0.1,
+          "pointsOverrides": {}
+        },
+        {
+          "statId": 43,
+          "points": 6.0,
+          "pointsOverrides": {}
+        },
+        {
+          "statId": 53,
+          "points": 1.0,
+          "pointsOverrides": {}
+        }
+      ]
+    },
+    "scheduleSettings": {
+      "matchupPeriodCount": 14,
+      "matchupPeriods": {
+        "1": [
+          1
+        ]
+      },
+      "matchupPeriodLength": 1,
+      "playoffTeamCount": 4,
+      "playoffMatchupPeriodLength": 1,
+      "playoffSeedingRule": "TOTAL_POINTS_SCORED",
+      "playoffSeedingRuleBy": 0,
+      "divisions": [
+        {
+          "id": 0,
+          "name": "Gauntlet",
+          "size": 4
+        }
+      ]
+    },
+    "tradeSettings": {
+      "vetoVotesRequired": 2,
+      "deadlineDate": 1763424000000,
+      "allowOutOfUniverse": false,
+      "max": -1,
+      "revisionHours": 24
+    },
+    "acquisitionSettings": {
+      "isUsingAcquisitionBudget": true,
+      "acquisitionBudget": 100,
+      "acquisitionLimit": -1,
+      "acquisitionType": "WAIVERS_TRADITIONAL",
+      "waiverProcessDays": [
+        "WEDNESDAY"
+      ],
+      "waiverHours": 10
+    },
+    "financeSettings": {
+      "entryFee": 0
+    }
+  },
+  "members": [
+    {
+      "id": "{00000000-0000-0000-0000-000000000001}",
+      "displayName": "caroline",
+      "firstName": "Caroline",
+      "lastName": "Reed",
+      "isLeagueManager": false
+    },
+    {
+      "id": "{00000000-0000-0000-0000-000000000002}",
+      "displayName": "dwhitlock",
+      "firstName": "Dana",
+      "lastName": "Whitlock",
+      "isLeagueManager": true
+    },
+    {
+      "id": "{00000000-0000-0000-0000-000000000003}",
+      "displayName": "mellis",
+      "firstName": "Marcus",
+      "lastName": "Ellis",
+      "isLeagueManager": false
+    },
+    {
+      "id": "{00000000-0000-0000-0000-000000000004}",
+      "displayName": "praman",
+      "firstName": "Priya",
+      "lastName": "Raman",
+      "isLeagueManager": false
+    }
+  ],
+  "teams": [
+    {
+      "id": 1,
+      "abbrev": "HAL",
+      "location": "Hail",
+      "nickname": "Mary",
+      "name": "Hail Mary",
+      "divisionId": 0,
+      "owners": [
+        "{00000000-0000-0000-0000-000000000001}"
+      ],
+      "playoffSeed": 1,
+      "rankCalculatedFinal": 0,
+      "waiverRank": 1,
+      "draftDayProjectedRank": 1,
+      "logo": "https://g.espncdn.com/lm-static/logo-packs/core/nfl.svg",
+      "currentProjectedRank": 1,
+      "currentSimulationResults": {
+        "playoffPct": 0.5
+      },
+      "transactionCounter": {
+        "acquisitions": 0,
+        "acquisitionBudgetSpent": 0,
+        "drops": 0,
+        "trades": 0,
+        "moveToIR": 0
+      },
+      "valuesByStat": {},
+      "record": {
+        "overall": {
+          "wins": 0,
+          "losses": 0,
+          "ties": 0,
+          "pointsFor": 0.0,
+          "pointsAgainst": 0.0,
+          "percentage": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "gamesBack": 0.0
+        }
+      },
+      "roster": {
+        "entries": []
+      }
+    },
+    {
+      "id": 2,
+      "abbrev": "BLZ",
+      "location": "Blitz",
+      "nickname": "Brigade",
+      "name": "Blitz Brigade",
+      "divisionId": 0,
+      "owners": [
+        "{00000000-0000-0000-0000-000000000002}"
+      ],
+      "playoffSeed": 4,
+      "rankCalculatedFinal": 0,
+      "waiverRank": 4,
+      "draftDayProjectedRank": 4,
+      "logo": "https://g.espncdn.com/lm-static/logo-packs/core/nfl.svg",
+      "currentProjectedRank": 4,
+      "currentSimulationResults": {
+        "playoffPct": 0.5
+      },
+      "transactionCounter": {
+        "acquisitions": 0,
+        "acquisitionBudgetSpent": 0,
+        "drops": 0,
+        "trades": 0,
+        "moveToIR": 0
+      },
+      "valuesByStat": {},
+      "record": {
+        "overall": {
+          "wins": 0,
+          "losses": 0,
+          "ties": 0,
+          "pointsFor": 0.0,
+          "pointsAgainst": 0.0,
+          "percentage": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "gamesBack": 0.0
+        }
+      },
+      "roster": {
+        "entries": []
+      }
+    },
+    {
+      "id": 3,
+      "abbrev": "PLY",
+      "location": "Play Action",
+      "nickname": "Heroes",
+      "name": "Play Action Heroes",
+      "divisionId": 0,
+      "owners": [
+        "{00000000-0000-0000-0000-000000000003}"
+      ],
+      "playoffSeed": 3,
+      "rankCalculatedFinal": 0,
+      "waiverRank": 3,
+      "draftDayProjectedRank": 3,
+      "logo": "https://g.espncdn.com/lm-static/logo-packs/core/nfl.svg",
+      "currentProjectedRank": 3,
+      "currentSimulationResults": {
+        "playoffPct": 0.5
+      },
+      "transactionCounter": {
+        "acquisitions": 0,
+        "acquisitionBudgetSpent": 0,
+        "drops": 0,
+        "trades": 0,
+        "moveToIR": 0
+      },
+      "valuesByStat": {},
+      "record": {
+        "overall": {
+          "wins": 0,
+          "losses": 0,
+          "ties": 0,
+          "pointsFor": 0.0,
+          "pointsAgainst": 0.0,
+          "percentage": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "gamesBack": 0.0
+        }
+      },
+      "roster": {
+        "entries": []
+      }
+    },
+    {
+      "id": 4,
+      "abbrev": "TDZ",
+      "location": "Touchdown",
+      "nickname": "Zone",
+      "name": "Touchdown Zone",
+      "divisionId": 0,
+      "owners": [
+        "{00000000-0000-0000-0000-000000000004}"
+      ],
+      "playoffSeed": 2,
+      "rankCalculatedFinal": 0,
+      "waiverRank": 2,
+      "draftDayProjectedRank": 2,
+      "logo": "https://g.espncdn.com/lm-static/logo-packs/core/nfl.svg",
+      "currentProjectedRank": 2,
+      "currentSimulationResults": {
+        "playoffPct": 0.5
+      },
+      "transactionCounter": {
+        "acquisitions": 0,
+        "acquisitionBudgetSpent": 0,
+        "drops": 0,
+        "trades": 0,
+        "moveToIR": 0
+      },
+      "valuesByStat": {},
+      "record": {
+        "overall": {
+          "wins": 0,
+          "losses": 0,
+          "ties": 0,
+          "pointsFor": 0.0,
+          "pointsAgainst": 0.0,
+          "percentage": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "gamesBack": 0.0
+        }
+      },
+      "roster": {
+        "entries": []
+      }
+    }
+  ],
+  "schedule": [
+    {
+      "id": 1,
+      "matchupPeriodId": 1,
+      "winner": "UNDECIDED",
+      "home": {
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "away": {
+        "teamId": 2,
+        "totalPoints": 0.0
+      }
+    },
+    {
+      "id": 2,
+      "matchupPeriodId": 1,
+      "winner": "UNDECIDED",
+      "home": {
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "away": {
+        "teamId": 4,
+        "totalPoints": 0.0
+      }
+    }
+  ],
+  "draftDetail": {
+    "drafted": false,
+    "inProgress": false
+  }
+}

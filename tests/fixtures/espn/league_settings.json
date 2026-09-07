@@ -1,0 +1,123 @@
+{
+  "id": 1234567,
+  "seasonId": 2025,
+  "settings": {
+    "name": "The Gridiron Gauntlet",
+    "size": 4,
+    "isPublic": false,
+    "restrictionType": "NONE",
+    "draftSettings": {
+      "type": "SNAKE",
+      "date": 1756166400000,
+      "timePerSelection": 90,
+      "pickOrder": [
+        3,
+        1,
+        4,
+        2
+      ],
+      "keeperCount": 0,
+      "auctionBudget": 200,
+      "isTradingEnabled": false
+    },
+    "rosterSettings": {
+      "lineupSlotCounts": {
+        "0": 1,
+        "1": 0,
+        "2": 2,
+        "3": 0,
+        "4": 2,
+        "5": 0,
+        "6": 1,
+        "16": 1,
+        "17": 1,
+        "20": 6,
+        "21": 1,
+        "23": 1
+      },
+      "isBenchUnlimited": false,
+      "positionLimits": {},
+      "rosterLocktimeType": "INDIVIDUAL_GAME"
+    },
+    "scoringSettings": {
+      "scoringType": "H2H_POINTS",
+      "playerRankType": "PPR",
+      "matchupTieRule": "NONE",
+      "playoffMatchupTieRule": "NONE",
+      "scoringEnhancementType": null,
+      "homeTeamBonus": 0,
+      "scoringItems": [
+        {
+          "statId": 3,
+          "points": 0.04,
+          "pointsOverrides": {}
+        },
+        {
+          "statId": 4,
+          "points": 4.0,
+          "pointsOverrides": {}
+        },
+        {
+          "statId": 24,
+          "points": 0.1,
+          "pointsOverrides": {}
+        },
+        {
+          "statId": 42,
+          "points": 0.1,
+          "pointsOverrides": {}
+        },
+        {
+          "statId": 43,
+          "points": 6.0,
+          "pointsOverrides": {}
+        },
+        {
+          "statId": 53,
+          "points": 1.0,
+          "pointsOverrides": {}
+        }
+      ]
+    },
+    "scheduleSettings": {
+      "matchupPeriodCount": 14,
+      "matchupPeriods": {
+        "1": [
+          1
+        ]
+      },
+      "matchupPeriodLength": 1,
+      "playoffTeamCount": 4,
+      "playoffMatchupPeriodLength": 1,
+      "playoffSeedingRule": "TOTAL_POINTS_SCORED",
+      "playoffSeedingRuleBy": 0,
+      "divisions": [
+        {
+          "id": 0,
+          "name": "Gauntlet",
+          "size": 4
+        }
+      ]
+    },
+    "tradeSettings": {
+      "vetoVotesRequired": 2,
+      "deadlineDate": 1763424000000,
+      "allowOutOfUniverse": false,
+      "max": -1,
+      "revisionHours": 24
+    },
+    "acquisitionSettings": {
+      "isUsingAcquisitionBudget": true,
+      "acquisitionBudget": 100,
+      "acquisitionLimit": -1,
+      "acquisitionType": "WAIVERS_TRADITIONAL",
+      "waiverProcessDays": [
+        "WEDNESDAY"
+      ],
+      "waiverHours": 10
+    },
+    "financeSettings": {
+      "entryFee": 0
+    }
+  }
+}
