@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Status — hal-mary{% endblock %}
+{% block content %}
+
+{# What is wrong, first and in red. Everything else is detail. #}
+{% if problems %}
+  <div class="alarm">
+    <h2>Problems right now</h2>
+    <ul>
+      {% for problem in problems %}<li>{{ problem }}</li>{% endfor %}
+    </ul>
+  </div>
+{% else %}
+  <p class="allclear">Nothing is wrong. ESPN, the syncs and Claude all look fine.</p>
+{% endif %}
+
+<div class="card">
+  <h2>ESPN</h2>
+  <div class="row">
+    <span class="label">Cookies</span>
+    <span class="value">
+      <span class="chip {{ 'ok' if espn.ok else 'bad' }}">{{ 'Working' if espn.ok else 'Broken' }}</span>
+    </span>
+  </div>
+  <p class="small muted">{{ espn.reason }}</p>
+  {% for sync in syncs %}
+    <div class="row">
+      <span class="label">{{ sync.label }}</span>
+      <span class="value">{{ sync.age }}{% if sync.status != 'ok' %} · {{ sync.status }}{% endif %}</span>
+    </div>
+    {% if sync.error %}<p class="small muted">{{ sync.error }}</p>{% endif %}
+  {% endfor %}
+
+  <form hx-post="/sync" hx-target="#sync-result" hx-swap="innerHTML"
+        hx-disabled-elt="find button" method="post" action="/sync">
+    <button type="submit">Sync from ESPN now<span class="spinner"> …</span></button>
+  </form>
+  <div class="fragment" id="sync-result"></div>
+</div>
+
+<div class="card">
+  <h2>Secrets</h2>
+  {% if missing_secrets %}
+    <div class="row">
+      <span class="label">Missing from .env</span>
+      <span class="value"><span class="chip bad">{{ missing_secrets|join(', ') }}</span></span>
+    </div>
+  {% else %}
+    <div class="row">
+      <span class="label">All set</span>
+      <span class="value"><span class="chip ok">Nothing missing</span></span>
+    </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Claude</h2>
+  <div class="row">
+    <span class="label">The claude binary</span>
+    <span class="value">
+      <span class="chip {{ 'ok' if claude.ok else 'bad' }}">{{ 'Found' if claude.ok else 'Missing' }}</span>
+    </span>
+  </div>
+  <p class="small muted">{{ claude.reason }}</p>
+</div>
+
+<div class="card">
+  <h2>What is in the database</h2>
+  {% for label, count in counts %}
+    <div class="row">
+      <span class="label">{{ label }}</span>
+      <span class="value">{{ count if count is not none else 'unreadable' }}</span>
+    </div>
+  {% endfor %}
+  <p class="small muted">{{ db_path }}</p>
+</div>
+
+<div class="card">
+  <h2>Recent jobs</h2>
+  {% if jobs %}
+    {% for job in jobs %}
+      <div class="row">
+        <span class="label">{{ job['job'] }}</span>
+        <span class="value">
+          <span class="chip {{ 'ok' if job['status'] == 'ok' else ('warn' if job['status'] == 'running' else 'bad') }}">{{ job['status'] }}</span>
+          {{ age_in_words(job['finished_at'] or job['started_at']) }}
+        </span>
+      </div>
+      {% if job['summary'] %}<p class="small muted">{{ job['summary'] }}</p>{% endif %}
+      {% if job['error'] %}<p class="small muted">{{ job['error'] }}</p>{% endif %}
+    {% endfor %}
+  {% else %}
+    <p class="muted">No job has run yet.</p>
+  {% endif %}
+</div>
+
+<form method="post" action="/logout">
+  <button class="quiet" type="submit">Sign out</button>
+</form>
+{% endblock %}

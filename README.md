@@ -23,7 +23,7 @@ uv sync
 cp .env.example .env        # fill in ESPN cookies and league id
 uv run hal-mary espn-check  # check the ESPN cookies work
 uv run hal-mary sync        # pull league state
-uv run hal-mary serve       # web app + scheduler
+uv run hal-mary serve       # web app; prints the URL to open on a phone
 ```
 
 See [`docs/SETUP.md`](docs/SETUP.md) for first-time setup (ESPN credentials, league ids, the

@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2",
     "python-dotenv",
     "httpx",
+    "itsdangerous>=2.2.0",
 ]
 
 [project.scripts]

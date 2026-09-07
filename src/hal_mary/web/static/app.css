@@ -1,0 +1,286 @@
+/* hal-mary — one stylesheet, no build step, no CDN.
+ *
+ * Written for one reader on one phone, held at arm's length, sometimes with a
+ * 90-second pick clock running. So: big type, big targets, high contrast, and
+ * colour used only where it means something. Light and dark both come from the
+ * viewer's own setting — nobody is going to hunt for a theme toggle mid-draft.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f4f4f5;
+  --card: #ffffff;
+  --ink: #16181d;
+  --ink-soft: #5b6270;
+  --line: #d8dae0;
+  --accent: #1f5fd0;
+  --accent-ink: #ffffff;
+  --ok: #14663a;
+  --ok-bg: #e3f4ea;
+  --bad: #a41220;
+  --bad-bg: #fdeaec;
+  --warn: #7a4c00;
+  --warn-bg: #fdf1dc;
+
+  --radius: 12px;
+  --tap: 48px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101216;
+    --card: #191c22;
+    --ink: #f2f3f5;
+    --ink-soft: #a3aab8;
+    --line: #2c313a;
+    --accent: #6fa5ff;
+    --accent-ink: #0b0d11;
+    --ok: #6ee7a8;
+    --ok-bg: #12301f;
+    --bad: #ff9aa3;
+    --bad-bg: #3a141a;
+    --warn: #f5c777;
+    --warn-bg: #3a2c11;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 0 3rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.wrap {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 0 0.75rem;
+}
+
+/* --- header and nav ------------------------------------------------------ */
+
+header {
+  padding: 0.9rem 0 0.4rem;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+nav {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.6rem 0 1rem;
+}
+
+nav a {
+  flex: 1;
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+nav a[aria-current="page"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* --- cards --------------------------------------------------------------- */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.85rem 0.9rem;
+  margin: 0 0 0.75rem;
+}
+
+.card h2 {
+  margin: 0 0 0.6rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.muted { color: var(--ink-soft); }
+.small { font-size: 0.85rem; }
+
+/* --- the blunt part ------------------------------------------------------ */
+
+.alarm {
+  background: var(--bad-bg);
+  border: 1px solid var(--bad);
+  border-radius: var(--radius);
+  padding: 0.8rem 0.9rem;
+  margin: 0 0 0.75rem;
+}
+
+.alarm h2 { color: var(--bad); }
+
+.alarm ul { margin: 0; padding-left: 1.1rem; }
+.alarm li { margin: 0.3rem 0; font-weight: 600; color: var(--bad); }
+
+.allclear {
+  background: var(--ok-bg);
+  border: 1px solid var(--ok);
+  color: var(--ok);
+  border-radius: var(--radius);
+  padding: 0.8rem 0.9rem;
+  margin: 0 0 0.75rem;
+  font-weight: 600;
+}
+
+/* --- rows ---------------------------------------------------------------- */
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.row:first-of-type { border-top: 0; }
+
+.row .label { font-weight: 600; }
+.row .value { text-align: right; color: var(--ink-soft); white-space: nowrap; }
+
+.chip {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.chip.ok { background: var(--ok-bg); color: var(--ok); }
+.chip.bad { background: var(--bad-bg); color: var(--bad); }
+.chip.warn { background: var(--warn-bg); color: var(--warn); }
+
+/* --- roster -------------------------------------------------------------- */
+
+.slot { margin: 0 0 0.9rem; }
+
+.slot h3 {
+  margin: 0 0 0.3rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.player {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 2.6rem;
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.player:first-of-type { border-top: 0; }
+.player .who { font-weight: 600; }
+.player .meta { color: var(--ink-soft); font-size: 0.85rem; text-align: right; }
+
+.player.open {
+  color: var(--ink-soft);
+  font-style: italic;
+  border-top: 1px dashed var(--line);
+}
+
+/* --- league -------------------------------------------------------------- */
+
+.team {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.team:first-of-type { border-top: 0; }
+
+.team .pick {
+  flex: 0 0 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.team.mine { background: var(--ok-bg); border-radius: var(--radius); padding-inline: 0.4rem; }
+.team.mine .pick { background: var(--ok); color: var(--card); border-color: var(--ok); }
+.team .name { font-weight: 600; }
+
+/* --- buttons and fragments ----------------------------------------------- */
+
+button, .button {
+  min-height: var(--tap);
+  width: 100%;
+  padding: 0 1rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.quiet {
+  background: var(--card);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+/* The swap target keeps its height so the page does not jump when a fragment
+   lands under a thumb that is about to tap something else. */
+.fragment { min-height: 2.6rem; margin-top: 0.6rem; }
+
+.htmx-request .spinner { display: inline; }
+.spinner { display: none; }
+
+input[type="password"] {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 0.7rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+label { display: block; font-weight: 600; margin-bottom: 0.35rem; }
+
+table { width: 100%; border-collapse: collapse; }
+td, th { text-align: left; padding: 0.35rem 0; border-top: 1px solid var(--line); }
+th { color: var(--ink-soft); font-size: 0.78rem; text-transform: uppercase; }
