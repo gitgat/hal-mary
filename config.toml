@@ -17,6 +17,39 @@ memory_dir = "memory"
 poll_seconds = 5
 advise_within_picks = 2
 
+# The manual fallback for the league's own settings.
+#
+# Normally `hal-mary sync` reads these from ESPN into the league_settings table
+# and nothing below is read. Uncomment and fill this in when there are no
+# working ESPN credentials: it is the difference between hal-mary running the
+# draft from hand-entered picks and being unable to help at all.
+#
+# A synced row always wins, field by field, so a filled-in section here stays
+# harmless once ESPN works — and it still covers a sync that landed without the
+# roster slots. Having this section does not disable syncing.
+#
+# draft_order is team ids or team names by first-round slot; names are what the
+# ESPN draft lobby shows. my_draft_slot is Caroline's 1-based place in round 1.
+#
+# [league]
+# team_count = 6
+# scoring_type = "full PPR"
+# points_per_reception = 1.0    # 1.0 full PPR, 0.5 half PPR, 0.0 standard
+# draft_type = "SNAKE"
+# draft_order = [1, 2, 3, 4, 5, 6]
+# my_draft_slot = 6
+#
+# [league.roster_slots]         # one draft round per slot, IR excluded
+# QB = 1
+# RB = 2
+# WR = 2
+# TE = 1
+# "D/ST" = 1
+# K = 1
+# FLEX = 1
+# BE = 7
+# IR = 1
+
 [espn]
 # Transport limits for the raw ESPN reads. Bounded by the pick clock above: a
 # read that outlives its poll interval silently stops the draft loop, and a

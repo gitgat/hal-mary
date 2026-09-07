@@ -36,6 +36,7 @@ __all__ = [
     "DraftConfig",
     "EspnConfig",
     "JobConfig",
+    "LeagueConfig",
     "PathsConfig",
     "Settings",
     "WebConfig",
@@ -107,6 +108,37 @@ class EspnConfig(_Frozen):
     read_timeout_s: float = 15.0
 
 
+class LeagueConfig(_Frozen):
+    """The manual fallback for the league's own settings.
+
+    Normally ``hal-mary sync`` writes the ``league_settings`` table from ESPN and
+    nothing here is read. This section exists for the case that decides whether
+    hal-mary is useful on draft night at all: **no working ESPN credentials.**
+    Pick discovery already has a manual path; without this, the league's size,
+    scoring and draft order would have none, and every recommendation would be
+    built on a guessed twelve-team standard-scoring default.
+
+    Everything is optional, and a synced row always wins field by field, so a
+    partly-filled section is still worth having. ``hal_mary.league`` applies the
+    precedence; nothing else reads this.
+
+    ``draft_order`` is team ids or team names by first-round slot. Names are for
+    the realistic case: Caroline reading the ESPN draft lobby, which shows names
+    and no ids. When names are given, a team's id *is* its 1-based slot.
+    """
+
+    team_count: int | None = None
+    scoring_type: str | None = None
+    points_per_reception: float | None = None
+    draft_type: str | None = None
+    draft_date: str | None = None
+    name: str | None = None
+    rounds: int | None = None
+    my_draft_slot: int | None = None
+    draft_order: list[int | str] = []
+    roster_slots: dict[str, int] = {}
+
+
 class WebConfig(_Frozen):
     """How the web app listens, signs sessions and paces its background work.
 
@@ -160,6 +192,7 @@ class Settings(_Frozen):
     paths: PathsConfig
     draft: DraftConfig
     espn: EspnConfig = EspnConfig()
+    league: LeagueConfig = LeagueConfig()
     web: WebConfig
     jobs: dict[str, JobConfig]
 
@@ -287,6 +320,7 @@ def load_settings(
         paths = PathsConfig(**raw.get("paths", {}))
         draft = DraftConfig(**raw.get("draft", {}))
         espn = EspnConfig(**raw.get("espn", {}))
+        league = LeagueConfig(**raw.get("league", {}))
         web = WebConfig(**raw.get("web", {}))
     except Exception as exc:
         raise ConfigError(f"{path} is missing or has an invalid section: {exc}") from exc
@@ -303,6 +337,7 @@ def load_settings(
         paths=paths,
         draft=draft,
         espn=espn,
+        league=league,
         web=web,
         jobs=jobs,
         espn_s2=values.get("ESPN_S2"),
