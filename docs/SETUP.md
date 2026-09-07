@@ -77,9 +77,17 @@ a missing memory directory is called out by name in the problems box at the top 
 Verify with:
 
 ```bash
+uv run hal-mary doctor         # everything above, in one place, before anything runs
 uv run hal-mary espn-check     # exits nonzero if the cookies do not work
 uv run hal-mary sync           # pulls the league and prints a summary
 ```
+
+`doctor` is the fastest way to find out what is still missing: the `.env` keys, `claude` on the PATH
+and logged in, the prompts and memory directories, and whether the database directory is writable
+and on local disk rather than an NFS mount. It touches no network and spawns nothing. It is also
+what `deploy/install.sh` and `deploy/deploy.sh` gate on — `serve` itself always starts and reports
+problems on the status page instead, so that a box with something missing is still serving the page
+that explains what.
 
 That first sync creates `memory/league.md` — it does not ship in the repo, because it is written
 from the live ESPN payload and holds real leaguemates' names and the league id. It is gitignored
@@ -149,3 +157,9 @@ Do the eyeballing even if the numbers look plausible. A wrong draft order is a *
 page and the advice card compute her position the same way from the same list, so they agree with
 each other while both being wrong, and no banner fires. A human comparing two screens is the only
 thing that catches it.
+
+## 6. Running it as a service
+
+Everything above is for a developer's checkout. For the production VM — creating it, installing the
+systemd unit, reading logs, rotating the ESPN cookies mid-season, backups and rollback — see the
+**runbook** in the second half of [`README.md`](../README.md).

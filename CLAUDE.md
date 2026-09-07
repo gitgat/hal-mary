@@ -69,7 +69,15 @@ uv run hal-mary job <name>     # run one job on demand (board_build)
 
 uv run hal-mary cowork-config  # Cowork's scheduled tasks, rendered for this league; --json
 uv run hal-mary job <name>     # run one job on demand
+
+uv run hal-mary doctor         # can this box run hal-mary? nonzero on a fatal problem
+uv run hal-mary migrate        # apply pending schema migrations
+uv run hal-mary backup         # snapshot the database, prune to backup.keep
 ```
+
+Deployment lives in `deploy/` — a systemd **user** unit, `install.sh` and `deploy.sh` — and the
+runbook is the second half of `README.md`. Both scripts are covered by `tests/unit/test_deploy.py`,
+which drives them against a fabricated box; `shellcheck --severity=style deploy/*.sh` must be clean.
 
 ## Architecture in one paragraph
 
@@ -228,6 +236,24 @@ empty for exactly that reason.
   and something else under systemd. Use `settings.paths.memory_dir` as given; a `Path(...)` around
   it is the bug, not a safety net. `Settings.resolved_paths()` is what the status page renders.
   See `docs/DECISIONS.md`.
+- **`serve` boots degraded; `hal-mary doctor` is what refuses.** There is no startup preflight.
+  A service that will not start because the memory directory is missing is down at 2am with nobody
+  watching, and the page that would have said why is served by the process that refused to start.
+  So the checking that *stops* something happens in `install.sh` and `deploy.sh`, where a human is
+  looking, and the running service reports the same facts on `/status`. `Check.fatal` in
+  `hal_mary.doctor` is a policy dial — "should an install stop over this" — not a severity label,
+  and nothing in doctor may ever gate `serve`. Doctor touches no network and spawns no process;
+  `espn-check` is the separate command that asks ESPN. See `docs/DECISIONS.md`.
+- **The systemd unit sets `Environment=PATH=` explicitly, and that line is load-bearing.** A
+  systemd user unit does not inherit the interactive shell's PATH, and both `uv` and `claude` live
+  under `~/.local/bin` and `~/.npm-global/bin`. Drop them and the service starts, serves every page,
+  and every Claude call fails with `claude: not found` — up and useless, which is the worst state.
+  `tests/unit/test_deploy.py` pins both directories.
+- **Never back up the database with `cp`.** It is a WAL database written to while the service runs,
+  so a copy of the main file alone is a torn snapshot that opens cleanly and has lost the newest
+  notes. `hal-mary backup` uses SQLite's online backup API, and it is a subcommand rather than a
+  shell script because `DB_PATH` is anchored to `config.toml`'s directory and a script would
+  re-derive it wrongly. See `docs/DECISIONS.md`.
 - **A missing memory directory warns and shows on the status page; it never raises.**
   `standing_memory()` is on the pick-clock path, so thinner advice beats no advice. An existing but
   empty directory is silent — "there are no notes" and "I am looking in the wrong place" are
