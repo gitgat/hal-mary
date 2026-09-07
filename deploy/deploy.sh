@@ -126,7 +126,12 @@ health_url() {
   uv run python -c 'from hal_mary.config import load_settings; s = load_settings(); print(f"http://127.0.0.1:{s.web.port}/healthz")'
 }
 
-URL="$(health_url)"
+URL="$(health_url || true)"
+[ -n "$URL" ] ||
+  die "could not work out the health-check URL (web.port in config.toml).
+     The service HAS been restarted; check it by hand:
+       systemctl --user status ${UNIT%.service}
+       journalctl --user -u ${UNIT%.service} -n 50"
 step "waiting for $URL"
 
 deadline=$((SECONDS + HEALTH_TIMEOUT))

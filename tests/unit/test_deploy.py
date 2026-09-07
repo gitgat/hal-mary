@@ -693,3 +693,30 @@ def test_install_clones_when_told_where_from(installable: Box, tmp_path: Path):
     )
 
     assert (fresh / ".git").is_dir(), result.stdout + result.stderr
+
+
+def test_a_health_url_that_cannot_be_derived_fails_fast(box: Box):
+    """Not "poll an empty URL until the timeout".
+
+    The restart has already happened by this point, so the message has to say so
+    and hand over the two commands that answer what actually became of it.
+    """
+    box.stub("uv", extra='if [ "$2" = "python" ]; then exit 1; fi')
+    env = box.env()
+    env.pop("HAL_MARY_HEALTH_URL")
+
+    result = subprocess.run(
+        ["bash", str(DEPLOY / "deploy.sh")], capture_output=True, text=True, env=env, check=False
+    )
+
+    assert result.returncode != 0
+    assert "journalctl" in result.stdout + result.stderr
+    assert box.log("curl") == [], "nothing to poll, so it must not have polled"
+
+
+def test_install_reports_the_lan_url_with_a_real_address(installable: Box):
+    """Not a literal '$(hostname -I)' printed at someone at 1am."""
+    result = installable.run("install.sh")
+
+    assert "$(" not in result.stdout, result.stdout
+    assert ":8080" in result.stdout

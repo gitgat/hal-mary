@@ -123,7 +123,7 @@ uv run hal-mary doctor ||
   die "this box is not ready (above). The most likely one, and the only one no
      script can do for you:
 
-         ssh $(whoami)@\$(hostname -f)
+         ssh $(whoami)@$(hostname -f 2>/dev/null || hostname)
          claude          # log in interactively, once
 
      The service inherits that subscription session; there is no API key to set.
@@ -178,7 +178,12 @@ health_url() {
   uv run python -c 'from hal_mary.config import load_settings; s = load_settings(); print(f"http://127.0.0.1:{s.web.port}/healthz")'
 }
 
-URL="$(health_url)"
+URL="$(health_url || true)"
+[ -n "$URL" ] ||
+  die "could not work out the health-check URL (web.port in config.toml).
+     The units are installed and started; check by hand:
+       systemctl --user status hal-mary
+       journalctl --user -u hal-mary -n 50"
 step "waiting for $URL"
 
 deadline=$((SECONDS + HEALTH_TIMEOUT))
@@ -197,10 +202,13 @@ while :; do
 done
 
 step "installed"
+LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+PORT="${URL##*:}"
+PORT="${PORT%%/*}"
 cat <<EOF
     hal-mary is running and set to start at boot.
 
-    Open it        http://\$(hostname -I | awk '{print \$1}'):8080  (from a phone on the LAN)
+    Open it        http://${LAN_IP:-<this box>}:${PORT:-8080}  (from a phone on the LAN)
     Logs           journalctl --user -u hal-mary -f
     Status         systemctl --user status hal-mary
     Is ESPN ok?    the /status page in the app, not systemctl
