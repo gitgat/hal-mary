@@ -22,7 +22,7 @@ __all__ = ["build_parser", "main"]
 
 DESCRIPTION = "hal-mary — a Claude-powered fantasy football advisor."
 
-EPILOG = "job is added by a later task."
+EPILOG = "Run `hal-mary job board_build` the day before a draft."
 
 #: The environment keys ``sync`` cannot run without. ``WEB_PASSWORD`` is needed
 #: to serve the web app but has nothing to do with reading ESPN.
@@ -33,6 +33,9 @@ ESPN_ENV_KEYS = ("ESPN_S2", "SWID", "LEAGUE_ID", "SEASON")
 EXIT_OK = 0
 EXIT_ESPN_FAILED = 1
 EXIT_NOT_CONFIGURED = 2
+#: A job that ran and failed. Same value as an ESPN failure on purpose: to a
+#: shell script or a cron line, "it did not work" is one outcome.
+EXIT_JOB_FAILED = 1
 
 
 def load_cli_settings() -> Any:
@@ -65,6 +68,13 @@ def run_draft_sync(conn: sqlite3.Connection, client: Any) -> list[dict[str, Any]
     from hal_mary.espn import sync_draft
 
     return sync_draft(conn, client)
+
+
+def build_runner(settings: Any, conn: sqlite3.Connection) -> Any:
+    """The ``claude`` runner, as its own seam so a test never spawns one."""
+    from hal_mary.claude_runner import ClaudeRunner
+
+    return ClaudeRunner(settings, conn)
 
 
 def _missing_espn_config(settings: Any) -> list[str]:
@@ -122,6 +132,35 @@ def _cmd_espn_check(_args: argparse.Namespace) -> int:
     return EXIT_ESPN_FAILED
 
 
+def _cmd_job(args: argparse.Namespace) -> int:
+    """Run one job on demand.
+
+    The board is researched the day before the draft and takes minutes, so it
+    needs a way to be started by hand — and to be startable again when it fails
+    at six in the morning. The scheduler is Task 9; this is the command that
+    makes the board buildable today.
+    """
+    from hal_mary.jobs.registry import JOBS, job_names
+
+    settings = load_cli_settings()
+    job = JOBS.get(args.name)
+    if job is None:
+        print(
+            f"unknown job {args.name!r}. This build knows: {job_names()}.",
+            file=sys.stderr,
+        )
+        return EXIT_NOT_CONFIGURED
+
+    conn = open_db(settings)
+    outcome = job(conn, settings, build_runner(settings, conn))
+
+    if not outcome.get("ok", True):
+        print(f"{args.name} failed: {outcome.get('error')}", file=sys.stderr)
+        return EXIT_JOB_FAILED
+    print(f"{args.name}: {outcome.get('summary') or 'done'}")
+    return EXIT_OK
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     settings = load_cli_settings()
     if not (settings.web_password or "").strip():
@@ -142,7 +181,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hal-mary", description=DESCRIPTION, epilog=EPILOG)
-    subcommands = parser.add_subparsers(dest="command", metavar="{sync,espn-check,serve}")
+    subcommands = parser.add_subparsers(
+        dest="command", metavar="{sync,espn-check,serve,job}"
+    )
 
     sync = subcommands.add_parser("sync", help="pull league state and draft picks from ESPN")
     sync.set_defaults(handler=_cmd_sync)
@@ -160,6 +201,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="restart on code changes (development only)",
     )
     serve.set_defaults(handler=_cmd_serve)
+
+    job = subcommands.add_parser("job", help="run one job now, by name")
+    job.add_argument("name", help="which job to run, e.g. board_build")
+    job.set_defaults(handler=_cmd_job)
 
     return parser
 

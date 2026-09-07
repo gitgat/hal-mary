@@ -1,0 +1,68 @@
+{# The players still on the table, best first.
+
+   Taken players are struck through rather than deleted — she needs to see that
+   the name she was about to say has gone — but they sit in a short "just taken"
+   list below rather than mixed into the ranking, because thirty rows of which
+   twenty are crossed out is a list with nothing on it. #}
+<div class="card board">
+  <h2>Still available</h2>
+  {% if not board.missing %}
+    <p class="small muted">
+      Best first. A group is a set of players the research rated as much the
+      same; group 1 is the strongest.
+    </p>
+  {% endif %}
+
+  {% if board.missing %}
+    <p><strong>There is no researched list of players yet.</strong></p>
+    <p class="small muted">
+      Without it hal-mary can only guess. Build it from a terminal on the box
+      with <code>uv run hal-mary job board_build</code> — it takes a few minutes
+      and wants to be run before the draft, not during it.
+    </p>
+  {% else %}
+    <nav class="filters">
+      <a href="/draft" {% if not board.position %}aria-current="page"{% endif %}>Everyone</a>
+      {% for filter in board.filters %}
+        <a href="/draft?position={{ filter.code|urlencode }}"
+           {% if filter.selected %}aria-current="page"{% endif %}>{{ filter.label }}</a>
+      {% endfor %}
+    </nav>
+
+    {% if board.available %}
+      {% for player in board.available %}
+        <div class="player">
+          <span class="who">{{ player.name }}
+            {% if player.tier %}<span class="tier">Group {{ player.tier }}</span>{% endif %}
+          </span>
+          <span class="meta">
+            {{ player.position_word }}{% if player.pro_team %} · {{ player.pro_team }}{% endif %}
+            {% if player.bye_week %}<br>Bye week {{ player.bye_week }}{% endif %}
+          </span>
+        </div>
+        {% if player.note %}<p class="small muted note">{{ player.note }}</p>{% endif %}
+      {% endfor %}
+    {% else %}
+      <p class="muted">
+        {% if board.position_word %}
+          Every {{ board.position_word }} on the list has been taken. Try another
+          position, or “Everyone”.
+        {% elif board.position %}
+          Nobody on the list plays that position. Try another one, or “Everyone”.
+        {% else %}
+          Every player on the list has been taken.
+        {% endif %}
+      </p>
+    {% endif %}
+
+    {% if board.gone %}
+      <h3 class="slot-head">Just taken</h3>
+      {% for player in board.gone %}
+        <div class="player player--gone">
+          <span class="who"><s>{{ player.name }}</s></span>
+          <span class="meta">{{ player.position_word }}{% if player.pro_team %} · {{ player.pro_team }}{% endif %}</span>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endif %}
+</div>

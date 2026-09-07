@@ -1,0 +1,30 @@
+{# Whose pick it is, and how many until hers. The question asked most often
+   during a draft.
+
+   Gated on the league knowing she has picks left: picks_until_mine counts as
+   though the draft ran forever, so without the gate this keeps telling her to
+   get ready long after the last pick has been made. #}
+<div class="card turn">
+  {% if not turn.known %}
+    <p><strong>hal-mary does not know the draft order yet.</strong></p>
+    <p class="small muted">{{ league_problem }}</p>
+  {% elif turn.over %}
+    <p class="turn-now"><strong>The draft is finished.</strong></p>
+    <p class="small muted">Every pick has been made. Nothing here will change again.</p>
+  {% else %}
+    <p class="turn-now">Pick {{ turn.next_overall_pick }} — <strong>{{ turn.on_the_clock }}</strong> is on the clock.</p>
+    {% if turn.mine_now %}
+      <p class="turn-mine"><strong>It is your pick.</strong></p>
+    {% else %}
+      <p class="turn-wait">
+        <strong>{{ turn.picks_until_mine }} pick{{ '' if turn.picks_until_mine == 1 else 's' }} until yours.</strong>
+      </p>
+    {% endif %}
+    <p class="small muted">
+      Round {{ turn.round_num }} of {{ turn.total_rounds }}.
+      {% if turn.my_next_picks|length > 1 %}
+        Your picks after this one: {{ turn.my_next_picks[1:]|join(' and ') }}.
+      {% endif %}
+    </p>
+  {% endif %}
+</div>

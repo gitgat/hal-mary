@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Draft — hal-mary{% endblock %}
+{% block content %}
+
+{# Everything that changes while the draft runs lives in #live and is swapped
+   whole. A reload would lose her scroll position, which on a phone with a
+   90-second clock running is genuinely disruptive. #}
+<div id="live">
+  {% include "partials/draft_sections.html" %}
+</div>
+
+{# The lifeline, and the one warning that means a recommendation could be
+   actively wrong. The warning sits above the control that fixes it. #}
+<div class="card" id="manual">
+  <h2>If ESPN stops updating</h2>
+  <div id="alerts">{% include "partials/unmatched.html" %}</div>
+
+  <details>
+    <summary>Enter a pick by hand</summary>
+    <p class="small muted">
+      Use this when ESPN goes quiet and hal-mary stops seeing picks. Anyone you
+      mark taken is crossed off the list below, so the next recommendation knows
+      he is gone.
+    </p>
+    <form hx-post="/draft/pick" hx-target="#pick-result" hx-swap="innerHTML"
+          hx-disabled-elt="find button" method="post" action="/draft/pick">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="player_name">Who was taken</label>
+      <input id="player_name" name="player_name" type="text" autocomplete="off"
+             autocapitalize="words" spellcheck="false" placeholder="Type a player's name">
+      <label for="team_id">Which team took him</label>
+      <select id="team_id" name="team_id">
+        <option value="">Not sure — just mark him taken</option>
+        {% for team in teams %}
+          <option value="{{ team.team_id }}">{{ team.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Mark him taken<span class="spinner"> …</span></button>
+    </form>
+    <div class="fragment" id="pick-result"></div>
+  </details>
+</div>
+
+<p class="small muted" id="link-state" hidden>
+  Lost the live connection — reconnecting, and checking for new picks every few
+  seconds in the meantime.
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* Live updates without a reload.
+ *
+ * The event stream carries three things worth redrawing for — a new card
+ * (`advice`), picks landing on the board (`board_updated`), and the board being
+ * empty (`board_missing`) — and each of them swaps the fragment rather than
+ * reloading the page.
+ *
+ * When the stream drops (a phone locking its screen, the box restarting mid
+ * draft) the same fragment is polled through htmx instead, and a line appears
+ * saying so. Frozen data with no sign anything is wrong is the failure this
+ * page cannot have.
+ *
+ * Deferred until DOMContentLoaded because htmx.min.js is loaded with `defer`:
+ * an inline script runs during parsing, before any deferred script has. */
+document.addEventListener('DOMContentLoaded', function () {
+  /* htmx drops an error response on the floor by default, so a post refused for
+   * a stale token would make "mark him taken" do nothing at all, visibly. The
+   * server's refusal is a readable sentence; show it where the form asked. */
+  document.body.addEventListener('htmx:beforeSwap', function (event) {
+    if (event.detail.xhr && event.detail.xhr.status === 403) {
+      event.detail.shouldSwap = true;
+      event.detail.isError = false;
+    }
+  });
+
+  var POLL_MS = {{ poll_ms }};
+  var EVENTS = ["advice", "board_updated", "board_missing"];
+  var notice = document.getElementById('link-state');
+  var timer = null;
+
+  function refresh() {
+    /* The page's own query string goes with it, so a pick landing while she is
+     * filtered to running backs does not throw her back to the whole board. */
+    var url = '/draft/live' + window.location.search;
+    htmx.ajax('GET', url, {target: '#live', swap: 'innerHTML'});
+  }
+
+  function live(connected) {
+    if (notice) { notice.hidden = connected; }
+    if (connected) {
+      if (timer) { clearInterval(timer); timer = null; }
+    } else if (!timer) {
+      timer = setInterval(refresh, POLL_MS);
+    }
+  }
+
+  if (!window.EventSource) { live(false); return; }
+  var stream = new EventSource('/events');
+  stream.onopen = function () { live(true); };
+  stream.onerror = function () { live(false); };
+  EVENTS.forEach(function (name) { stream.addEventListener(name, refresh); });
+});
+</script>
+{% endblock %}

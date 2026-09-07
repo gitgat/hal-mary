@@ -1,0 +1,35 @@
+{# The board and reality disagree about who is already gone.
+
+   This is the one condition that makes a recommendation actively wrong rather
+   than merely unhelpful — hal-mary may be about to recommend a player who has
+   been on somebody else's team for twenty minutes — so it is on the page, next
+   to the control a human uses to fix it, and not only in a log file. #}
+{% if unmatched %}
+  <div class="alarm">
+    <h3>Someone was taken that hal-mary cannot place</h3>
+    <p>
+      hal-mary could not find {{ 'these players' if unmatched|length > 1 else 'this player' }}
+      on its own list, so it may still be treating
+      {{ 'them' if unmatched|length > 1 else 'him' }} as available. Type the name
+      in below to be sure, then dismiss this.
+    </p>
+    {% for row in unmatched %}
+      <div class="row">
+        <span class="label">
+          {{ row.name }}
+          {% if row.team %}<span class="small muted">to {{ row.team }}</span>{% endif %}
+        </span>
+        <form hx-post="/draft/unmatched/resolve" hx-target="#alerts" hx-swap="innerHTML"
+              method="post" action="/draft/unmatched/resolve">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="unmatched_id" value="{{ row.id }}">
+          <button class="quiet" type="submit">Dealt with</button>
+        </form>
+      </div>
+    {% endfor %}
+    <p class="small muted">
+      Dismissing only hides the warning — it does not change who hal-mary thinks
+      is available.
+    </p>
+  </div>
+{% endif %}

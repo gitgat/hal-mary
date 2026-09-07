@@ -33,6 +33,7 @@
 
   <form hx-post="/sync" hx-target="#sync-result" hx-swap="innerHTML"
         hx-disabled-elt="find button" method="post" action="/sync">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit">Sync from ESPN now<span class="spinner"> …</span></button>
   </form>
   <div class="fragment" id="sync-result"></div>
@@ -112,6 +113,7 @@
 </div>
 
 <form method="post" action="/logout">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <button class="quiet" type="submit">Sign out</button>
 </form>
 {% endblock %}

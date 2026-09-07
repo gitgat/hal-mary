@@ -580,3 +580,119 @@ exit 0, $0.0017.
 
 **Would revisit if:** a CLI upgrade needs a variable that is not on the list. The symptom is the live
 integration test failing to authenticate, which is loud.
+
+---
+
+## 2026-09-07 — CSRF is a property of the router, not of a handler
+
+**Decision.** Every POST on the authenticated router requires a double-submit token: a
+`hal_mary_csrf` cookie issued by middleware on the first response, echoed back in a hidden
+`csrf_token` field (or an `X-CSRF-Token` header) and compared with `secrets.compare_digest`. A
+mismatch is a 403 with a sentence, never a redirect.
+
+**Why.** 7a shipped without one on the grounds that its only POST was a sync, whose worst case was
+an extra read of ESPN. Manual pick entry is the first genuinely state-changing POST: any page open
+in any tab on the house network could otherwise write a pick into Caroline's draft, mark the wrong
+player gone, and make the next recommendation actively wrong — which is precisely the failure the
+unmatched-pick warning exists to catch.
+
+Putting the check on the router rather than in each handler is the same argument as `require_session`:
+a route added to the private router is protected by construction, and nobody has to remember. That
+covers `/logout` too, which used to be a hidden form post away from logging her out mid-draft.
+
+**Consequences.** Every rendered form carries the token, so `page()` and the fragment renderer both
+inject it and a test walks the draft page asserting no form is missing it. Tests that post to a
+private route go through a `post()` helper that supplies the token; a test that posts without one is
+testing the refusal, not the handler. The cookie is `HttpOnly`: the token is rendered server-side, so
+nothing needs to read it in the browser, and a cookie script cannot read is one XSS cannot steal.
+
+---
+
+## 2026-09-07 — The draft loop runs on its own thread, started where the app is built
+
+**Decision.** `hal_mary.draft.runner.DraftLoopThread` runs `DraftLoop.run_forever` on a daemon
+thread with **its own** SQLite connection, and `web.serve.app_from_env` starts it with the app's own
+`EventBus`. `start()` returns a bool and records `error`; it never raises.
+
+**Why.** `run_once` deliberately blocks — on the web app's loop it would freeze every request for the
+length of a Claude call, including `/events`, which is how the page learns anything happened. And
+`db.connect` leaves `check_same_thread` on, so a connection opened on the web thread and used by the
+loop is an intermittent `ProgrammingError` rather than a clean failure. The connection is therefore
+opened *inside* the thread, which is why `start` waits on an event to report how it went rather than
+simply returning.
+
+It starts in `app_from_env` rather than in `serve` because that is where the app — and so the bus the
+loop publishes onto — is built, and it is what `--reload` re-runs, so development and production take
+one path.
+
+**Consequences.** A loop that cannot start (no ESPN cookies, no `claude` binary, an unwritable
+database) is logged and nothing more: the page still renders, and picks can still be entered by hand.
+That is the right trade, because the page is where the operator would find out.
+
+---
+
+## 2026-09-07 — A fallback advice card is a different object, not a footnote
+
+**Decision.** Advice with `source == "fallback"` renders with a dashed amber border and a band
+saying it is the ranking list's own answer. A researched card gets a solid border and a
+"Researched" chip. The difference is visible without reading.
+
+**Why.** The advisor always produces a card — that is its promise — but a card computed from tiers
+alone knows nothing about who is already on Caroline's team or who went in the last four picks.
+Advice she cannot tell apart from a researched recommendation is advice she cannot weigh, and she
+will act on it at the same speed either way. The distinction has to survive a glance, a grayscale
+screen and a colour-blind reader, which is why the border style changes as well as the colour.
+
+**Consequences.** `attempts == 0` (no model call was even started) and `attempts > 0` with a fallback
+result differ only in one sentence — "had no time to think about this one" versus "ran out of time
+thinking about this one" — because to her they mean the same thing about how much to trust the card.
+
+---
+
+## 2026-09-07 — A card is labelled with the pick it is *for*, not the pick it was written on
+
+**Decision.** The draft page reads `my_next_picks[0]` from the advice payload as the pick a card is
+for, and calls a card stale by comparing that against **her next pick** rather than against the pick
+on the clock. `next_overall_pick` on the payload is a fallback for rows written before this was
+understood.
+
+**Why.** The advisor is deliberately early: the loop fires as soon as she is within
+`draft.advise_within_picks` (2), and `_last_advised_pick` then stops it firing again for the same
+pick. So a card for her pick 6 is normally written while pick 4 is on the clock, and
+`advisor._persist` stores 4. Reading that as "the pick this card is for" made a correct, current
+recommendation announce that it was out of date, dim itself, and promise a replacement that no code
+would ever write — on her turn, every turn. Because `advise_within_picks > 0`, that was the normal
+path, not an edge case.
+
+**Consequences.** Anything that changes *when* the advisor runs has to keep `my_next_picks[0]`
+meaning "the pick this card reasoned about". A cheaper fix would have been to store the target
+explicitly in the payload; it was not taken because the value is already there and a second field
+saying the same thing is a second field that can disagree.
+
+**How this was missed, which matters more than the bug.** The test and the manual browser check both
+seeded an advice row by hand with `next_overall_pick=6` and five picks made — an alignment the loop
+cannot produce. The fixture encoded what the author believed the loop stored, so no assertion over it
+could contradict the belief that produced the bug, and the two checks agreed with each other about a
+state that does not exist. Advice fixtures on the draft page are now built by **running the loop**
+(`advise_through_the_loop` in `tests/unit/test_draft_page.py`), and the board is advanced through the
+loop's own `sync_draft` / `apply_new_picks` pair rather than by writing pick rows directly.
+
+---
+
+## 2026-09-07 — Every inference on the draft page needs a falsifier
+
+**Decision.** "Working out your pick now" is only claimed when a `draft` sync row exists and is
+younger than `web.draft_stale_seconds`, and a draft loop that failed to start puts its reason on the
+page.
+
+**Why.** The band is derived, not observed: the advisor publishes when it is *done* and says nothing
+when it starts, so the page infers "a card is being written" from her pick being inside the
+advisor's window with no card for it. `start_draft_loop` deliberately tolerates a loop that will not
+start, so with nothing polling that inference is unfalsifiable and the page promises a card forever
+while she waits for it. `sync_draft` writes a `sync_runs` row every tick, which is the loop's own
+evidence of life and costs nothing to read.
+
+**Consequences.** A page with a board, a league and picks but no poller says "No advice yet" rather
+than "Working out your pick", and a failed loop is a band across the top naming the reason and
+pointing at manual entry — which still works. The same reasoning applies to anything else the page
+infers about work in progress: state what would make it false, and check that.

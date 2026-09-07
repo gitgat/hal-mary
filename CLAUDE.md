@@ -53,10 +53,10 @@ the `Co-Authored-By` and `Claude-Session` trailers.
 uv sync                        # install deps
 uv run pytest                  # full test suite
 uv run pytest tests/unit -x    # fast loop while developing
-uv run hal-mary serve          # web app on the LAN; --reload for development
+uv run hal-mary serve          # web app + draft loop on the LAN; --reload for development
 uv run hal-mary sync           # pull league state and draft picks from ESPN
 uv run hal-mary espn-check     # are the cookies still good? exits nonzero when not
-uv run hal-mary job <name>     # run one job on demand
+uv run hal-mary job <name>     # run one job on demand (board_build)
 ```
 
 ## Architecture in one paragraph
@@ -145,6 +145,25 @@ empty for exactly that reason.
 - **The web app opens a connection per request**, from the `connect` factory passed to
   `create_app`. Anything running off the event loop — a sync, the draft loop, a scheduled job —
   opens its own connection inside its own worker. See `docs/DECISIONS.md`.
+- **Every POST on the private router needs a CSRF token.** `create_app` puts
+  `Depends(require_csrf)` on the router beside `Depends(require_session)`, so a state-changing route
+  is protected by construction. Rendered forms get the token from `page()` / the fragment renderer;
+  a test that posts to a private route goes through `post()` in `tests/unit/test_web.py`, and one
+  that posts without a token is testing the 403. See `docs/DECISIONS.md`.
+- **The draft loop runs on its own thread with its own connection.** `DraftLoopThread` opens the
+  connection *inside* the thread — `db.connect` leaves `check_same_thread` on — and
+  `web.serve.app_from_env` starts it with the app's own `EventBus`. A loop that will not start is
+  logged and nothing more: the page must render, and picks must be enterable by hand, on a box with
+  no ESPN credentials at all.
+- **The draft page derives "working on it" rather than storing it.** The advisor publishes when it
+  is *done* and says nothing when it starts, so `draft_page.draft_context` infers it: her pick is
+  inside `draft.advise_within_picks` and the newest card is not for the pick on the clock. Anything
+  that changes when the advisor runs has to change that inference too, or the card will read as
+  current when it is not.
+- **Position codes never stand alone.** `web/positions.py` is the one place slot and position labels
+  live, shared by the team page and the draft page. "QB" is not a word Caroline has any reason to
+  know, so no heading, filter or empty state may be a bare code — and the flex slot is labelled by
+  what it accepts rather than called a "flex".
 - **`app.routes` does not contain your routes.** This FastAPI represents each
   `include_router` as one opaque `_IncludedRouter` object holding the original router, so a test
   that walks `app.routes` looking for paths finds three pathless objects and silently checks

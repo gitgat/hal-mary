@@ -1,0 +1,74 @@
+{# The one thing she will read if she reads one thing.
+
+   Three states, and they must not be confusable:
+
+   * a researched card — the model looked at her team, the board and who has
+     just gone;
+   * a fallback card — the pre-draft ranking list's own answer, with no thought
+     about her team at all. Drawn as a different object, not as the same card
+     with a footnote, because advice she cannot tell apart is advice she cannot
+     weigh;
+   * a card written for an earlier pick, which is not this pick's advice and
+     says so rather than reading as today's answer. #}
+
+<section class="advice{% if advice and not advice.researched %} advice--fallback{% endif %}{% if advice and advice.stale %} advice--stale{% endif %}">
+
+  {# At most two bands, ever. "Working on it" already tells her the card below
+     is not for this pick, so saying both is two thirds of a phone screen spent
+     before the recommendation. #}
+  {% if advising %}
+    <p class="advice-band working">
+      Working out pick {{ turn.next_overall_pick }} now — a few seconds.
+      {% if advice and advice.stale %}What is below was for pick {{ advice.written_for }}.{% endif %}
+    </p>
+  {% elif advice and advice.stale %}
+    <p class="advice-band warn">
+      This was for pick {{ advice.written_for }}, and the draft has moved on.
+      Treat it as a suggestion until a new one lands.
+    </p>
+  {% endif %}
+
+  {% if advice %}
+    {% if not advice.researched %}
+      <p class="advice-band">
+        Best guess from the ranking list.
+        {% if advice.tried_to_research %}
+          hal-mary ran out of time thinking about this one,
+        {% else %}
+          hal-mary had no time to think about this one,
+        {% endif %}
+        so this is the order players were ranked in before the draft — it knows
+        nothing about who is already on your team.
+      </p>
+    {% endif %}
+
+    <p class="advice-eyebrow">
+      {% if advice.researched %}<span class="chip ok">Researched</span>{% endif %}
+      Take{% if advice.written_for %} at pick {{ advice.written_for }}{% endif %}
+    </p>
+    <h2 class="advice-pick">{{ advice.pick }}</h2>
+    <p class="advice-reason">{{ advice.reason }}</p>
+
+    {% if advice.backups %}
+      <h3 class="advice-sub">If somebody takes him first</h3>
+      <ul class="advice-backups">
+        {% for backup in advice.backups %}
+          <li><strong>{{ backup.name }}</strong>{% if backup.reason %} — {{ backup.reason }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if advice.watch_out %}
+      <p class="advice-watch"><strong>Watch out:</strong> {{ advice.watch_out }}</p>
+    {% endif %}
+
+    <p class="small muted advice-when">Written {{ age_in_words(advice.created_at) }}.</p>
+
+  {% elif not advising %}
+    <h2 class="advice-sub">No advice yet</h2>
+    <p class="advice-reason">
+      hal-mary writes a card when your turn is a couple of picks away. Until
+      then, the list further down is what it would be working from.
+    </p>
+  {% endif %}
+</section>

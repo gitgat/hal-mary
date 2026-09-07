@@ -57,10 +57,15 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from hal_mary import db
 from hal_mary.config import Settings
+from hal_mary.draft import loop as draft_loop
 from hal_mary.espn.sync import last_sync
 from hal_mary.memory import standing_memory_files
+from hal_mary.web.draft_page import draft_context
+from hal_mary.web.positions import SLOT_LABELS, position_word, slot_sort_key
 
 __all__ = [
+    "CSRF_FIELD",
+    "SAFE_METHODS",
     "EventStreamResponse",
     "LoginLimiter",
     "MissingPasswordError",
@@ -109,28 +114,14 @@ COUNTED_TABLES = (
     ("Advice", "advice"),
 )
 
-#: Lineup slots in the order a roster is read, not the order ESPN returns them.
-#: Anything ESPN sends that is not listed here is appended, so an unfamiliar
-#: slot shows up rather than vanishing.
-SLOT_ORDER = ("QB", "RB", "WR", "TE", "RB/WR/TE", "WR/TE", "OP", "D/ST", "K", "BE", "IR")
-
-#: Slot names as Caroline would say them.
-SLOT_LABELS = {
-    "QB": "Quarterback",
-    "RB": "Running back",
-    "WR": "Wide receiver",
-    "TE": "Tight end",
-    "RB/WR/TE": "Flex",
-    "WR/TE": "Flex",
-    "OP": "Flex",
-    "D/ST": "Defense",
-    "K": "Kicker",
-    "BE": "Bench",
-    "IR": "Injured reserve",
-}
-
 #: Injury values ESPN sends that mean "nothing to see here".
 HEALTHY = {"ACTIVE", "NORMAL", ""}
+
+#: The hidden form field carrying the CSRF token, and the methods that do not
+#: need one. Anything not listed changes state and is checked.
+CSRF_FIELD = "csrf_token"
+CSRF_HEADER = "x-csrf-token"
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 class MissingPasswordError(RuntimeError):
@@ -361,6 +352,15 @@ class _NotAuthenticated(Exception):
         self.next_url = next_url
 
 
+class _CsrfFailed(Exception):
+    """Raised by the CSRF dependency; handled into a plain 403.
+
+    Not a redirect. A redirect would send a forged post round the loop again,
+    and the honest answer to "this request did not come from a hal-mary page" is
+    to refuse it and say so.
+    """
+
+
 class EventStreamResponse(StreamingResponse):
     """A streaming response that closes its generator when the client vanishes.
 
@@ -469,9 +469,82 @@ def create_app(
         if not is_authenticated(request):
             raise _NotAuthenticated(request.url.path)
 
+    async def require_csrf(request: Request) -> None:
+        """Double-submit: the form must echo the token in the cookie.
+
+        7a shipped without this because its only POST was a sync, whose worst
+        case was an extra read of ESPN. Manual pick entry is the first genuinely
+        state-changing POST — anything on the house network, or any page open in
+        another tab, could otherwise post a pick into her draft — so the check
+        lands on the router rather than on the handlers. A page added to the
+        private router is protected by construction, the same way it is
+        authenticated by construction.
+
+        The token is read from a header first so an HTMX request can carry it
+        without a form, then from the body. ``request.form()`` caches its result
+        on the request, so parsing it here costs the handler nothing.
+        """
+        if request.method in SAFE_METHODS:
+            return
+        cookie = request.cookies.get(settings.web.csrf_cookie) or ""
+        sent = request.headers.get(CSRF_HEADER) or ""
+        if not sent:
+            try:
+                form = await request.form()
+            except Exception:  # noqa: BLE001 - a body we cannot parse has no token
+                form = {}
+            sent = str(form.get(CSRF_FIELD) or "")
+        # compare_digest, not ==: reachable from every device on the LAN.
+        if not cookie or not secrets.compare_digest(sent, cookie):
+            logger.warning(
+                "refused %s %s: the CSRF token was missing or did not match",
+                request.method,
+                request.url.path,
+            )
+            raise _CsrfFailed
+
+    @app.middleware("http")
+    async def issue_csrf_cookie(request: Request, call_next: Any) -> Any:
+        """Make sure every response carries a token she can submit back.
+
+        Issued here rather than at login because ``/login`` itself is a form:
+        the cookie has to exist before the first page is rendered, and it has to
+        survive logging out and back in. It is not a secret and not tied to the
+        session — it only has to be unguessable by another origin, which cannot
+        read it.
+        """
+        token = request.cookies.get(settings.web.csrf_cookie)
+        fresh = not token
+        if fresh:
+            token = secrets.token_urlsafe(32)
+        request.state.csrf_token = token
+        response = await call_next(request)
+        if fresh:
+            response.set_cookie(
+                settings.web.csrf_cookie,
+                token,
+                max_age=max_age,
+                # HttpOnly because nothing needs to read it in the browser: the
+                # token is rendered into each form server-side, so a script that
+                # could read it would only be an XSS handed the keys.
+                httponly=True,
+                samesite="lax",
+                secure=request.url.scheme == "https",
+                path="/",
+            )
+        return response
+
     @app.exception_handler(_NotAuthenticated)
     async def _login_redirect(request: Request, exc: _NotAuthenticated) -> RedirectResponse:
         return RedirectResponse(f"/login?next={exc.next_url}", status_code=302)
+
+    @app.exception_handler(_CsrfFailed)
+    async def _csrf_refused(request: Request, _exc: _CsrfFailed) -> HTMLResponse:
+        return HTMLResponse(
+            "<p>That did not come from a hal-mary page, so nothing was changed. "
+            "Reload the page and try again.</p>",
+            status_code=403,
+        )
 
     def page(
         request: Request, name: str, status_code: int = 200, **context: Any
@@ -490,7 +563,14 @@ def create_app(
         saying otherwise.
         """
         return templates.TemplateResponse(
-            request, name, {"nav": name, **context}, status_code=status_code
+            request,
+            name,
+            {
+                "nav": name,
+                "csrf_token": getattr(request.state, "csrf_token", ""),
+                **context,
+            },
+            status_code=status_code,
         )
 
     async def espn_auth() -> tuple[bool, str]:
@@ -516,7 +596,7 @@ def create_app(
         return ok, reason
 
     public = APIRouter()
-    private = APIRouter(dependencies=[Depends(require_session)])
+    private = APIRouter(dependencies=[Depends(require_session), Depends(require_csrf)])
 
     # -- public ------------------------------------------------------------
 
@@ -609,9 +689,143 @@ def create_app(
 
     @private.get("/")
     async def index() -> RedirectResponse:
-        """7b repoints this at the draft page; until then the status page is
-        the most useful thing to land on."""
-        return RedirectResponse("/status", status_code=302)
+        """The draft page is the one she opens on the night, so it is home."""
+        return RedirectResponse("/draft", status_code=302)
+
+    # -- the draft page ----------------------------------------------------
+
+    def loop_error(request: Request) -> str | None:
+        """Why the draft loop is not running, if it is not.
+
+        ``start_draft_loop`` deliberately tolerates a loop that will not start,
+        because serving the page matters more than the loop that feeds it. The
+        cost of that is a page which would otherwise show frozen data with no
+        sign anything is wrong, so the reason is read back off the app and put
+        in front of her.
+        """
+        thread = getattr(request.app.state, "draft_loop", None)
+        if thread is None or getattr(thread, "alive", False):
+            return None
+        return getattr(thread, "error", None)
+
+    @private.get("/draft", response_class=HTMLResponse)
+    async def draft(request: Request, position: str = "") -> HTMLResponse:
+        with database() as conn:
+            context = draft_context(
+                conn, settings, position=position, loop_error=loop_error(request)
+            )
+        return page(request, "draft.html", **context)
+
+    @private.get("/draft/live", response_class=HTMLResponse)
+    async def draft_live(request: Request, position: str = "") -> HTMLResponse:
+        """The live half of the page, for a swap rather than a reload.
+
+        A reload loses her scroll position and closes the manual-entry panel,
+        which on a phone mid-draft is genuinely disruptive. The event listener
+        and the ten-second fallback poll both land here.
+        """
+        with database() as conn:
+            context = draft_context(
+                conn, settings, position=position, loop_error=loop_error(request)
+            )
+        return _fragment(request, "partials/draft_live.html", **context)
+
+    @private.post("/draft/pick")
+    async def draft_pick(
+        request: Request,
+        player_name: str = Form(""),
+        team_id: str = Form(""),
+    ) -> Any:
+        """Record a pick Caroline entered by hand.
+
+        The lifeline if ESPN stops updating, and the whole no-ESPN contingency
+        depends on it. It goes through the draft loop's own ``record_manual_pick``
+        so a hand-entered pick and an ESPN one take exactly the same path — a
+        second path is a second set of rules about who is gone.
+
+        The connection is this request's own. The loop runs on another thread
+        with another connection, and a ``sqlite3.Connection`` belongs to the
+        thread that opened it.
+        """
+        name = (player_name or "").strip()
+        if not name:
+            return _pick_response(
+                request, error="Type the player's name first — hal-mary needs a name."
+            )
+
+        try:
+            owner = int(team_id) if str(team_id).strip() else None
+        except ValueError:
+            owner = None
+
+        try:
+            with database() as conn:
+                outcome = draft_loop.record_manual_pick(
+                    conn, player_name=name, team_id=owner, bus=bus
+                )
+        except Exception as exc:
+            logger.exception("could not record a hand-entered pick")
+            return _pick_response(
+                request, error=f"That did not save ({type(exc).__name__}). Try again."
+            )
+
+        return _pick_response(
+            request,
+            name=name,
+            already=not outcome.get("recorded"),
+            unmatched=bool(outcome.get("unmatched")),
+            # With no board, apply_new_picks crossed nobody off and reported no
+            # unmatched picks either — so without this the fragment would claim
+            # he is off a list that does not exist.
+            board_missing=bool(outcome.get("board_missing")),
+        )
+
+    @private.post("/draft/unmatched/resolve")
+    async def resolve_unmatched(request: Request, unmatched_id: str = Form("")) -> Any:
+        """Dismiss one "the board and ESPN disagree" warning.
+
+        Dismissing means "I have dealt with this", not "try again":
+        ``loop.pending_picks`` skips every filed row, resolved or not, so a
+        resolved pick is never re-applied to the board. The template says so,
+        because a button that quietly did nothing would be worse than no button.
+        """
+        try:
+            row_id = int(unmatched_id)
+        except (TypeError, ValueError):
+            row_id = None
+        if row_id is not None:
+            with (
+                database() as conn,
+                contextlib.suppress(sqlite3.Error),
+                db.transaction(conn),
+            ):
+                conn.execute(
+                    "UPDATE unmatched_picks SET resolved_at = ?"
+                    " WHERE id = ? AND resolved_at IS NULL",
+                    (db.utc_now(), row_id),
+                )
+        if not request.headers.get("hx-request"):
+            return RedirectResponse("/draft", status_code=303)
+        with database() as conn:
+            context = draft_context(conn, settings)
+        return _fragment(request, "partials/unmatched.html", **context)
+
+    def _fragment(request: Request, template: str, **context: Any) -> HTMLResponse:
+        """A template rendered as a fragment, with the token every form needs.
+
+        The parameter is ``template`` rather than ``name`` because the contexts
+        passed through here carry a ``name`` of their own — a player's.
+        """
+        return templates.TemplateResponse(
+            request,
+            template,
+            {"csrf_token": getattr(request.state, "csrf_token", ""), **context},
+        )
+
+    def _pick_response(request: Request, **outcome: Any) -> Any:
+        if not request.headers.get("hx-request"):
+            return RedirectResponse("/draft", status_code=303)
+        return _fragment(request, "partials/pick_result.html", **outcome)
 
     @private.get("/status", response_class=HTMLResponse)
     async def status_page(request: Request) -> HTMLResponse:
@@ -809,10 +1023,6 @@ def _roster_slot_counts(conn: sqlite3.Connection) -> dict[str, int]:
     return {str(k): int(v) for k, v in raw.items() if v}
 
 
-def _slot_sort_key(slot: str) -> tuple[int, str]:
-    return (SLOT_ORDER.index(slot) if slot in SLOT_ORDER else len(SLOT_ORDER), slot)
-
-
 def _team_context(conn: sqlite3.Connection, settings: Settings) -> dict[str, Any]:
     """Caroline's roster, grouped by slot, with open slots as empty rows.
 
@@ -846,6 +1056,7 @@ def _team_context(conn: sqlite3.Connection, settings: Settings) -> dict[str, Any
             {
                 "name": row["name"],
                 "position": row["position"],
+                "position_word": position_word(row["position"]),
                 "pro_team": row["pro_team"],
                 "bye_week": row["bye_week"],
                 "injury": (row["injury_status"] or "").upper(),
@@ -854,7 +1065,7 @@ def _team_context(conn: sqlite3.Connection, settings: Settings) -> dict[str, Any
         )
 
     groups = []
-    for slot in sorted(set(configured) | set(players_by_slot), key=_slot_sort_key):
+    for slot in sorted(set(configured) | set(players_by_slot), key=slot_sort_key):
         filled = players_by_slot.get(slot, [])
         open_slots = max(0, configured.get(slot, len(filled)) - len(filled))
         groups.append(
