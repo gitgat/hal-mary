@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Sign in — hal-mary{% endblock %}
+{% block content %}
+<header>
+  <h1>hal-mary</h1>
+</header>
+
+<form class="card" method="post" action="/login">
+  <h2>Sign in</h2>
+  {% if error %}
+    <p class="chip bad">{{ error }}</p>
+  {% endif %}
+  <label for="password">Password</label>
+  <input id="password" name="password" type="password" autocomplete="current-password"
+         autofocus required>
+  <input type="hidden" name="next" value="{{ next }}">
+  <p><button type="submit">Sign in</button></p>
+  <p class="small muted">One password for the household. It is in the .env file on the box.</p>
+</form>
+{% endblock %}

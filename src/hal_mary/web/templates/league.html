@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}League — hal-mary{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>{{ league['name'] if league else 'League' }}</h2>
+  {% if league %}
+    <div class="row">
+      <span class="label">Teams</span><span class="value">{{ league['team_count'] }}</span>
+    </div>
+    <div class="row">
+      <span class="label">Season</span><span class="value">{{ league['season'] }}</span>
+    </div>
+    <div class="row">
+      <span class="label">Draft</span>
+      <span class="value">{{ league['draft_type'] or 'unknown' }}</span>
+    </div>
+  {% else %}
+    <p class="muted">The league has not been pulled from ESPN yet. Use “Sync from ESPN now”
+      on the status page.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Draft order</h2>
+  {% if teams %}
+    {% for team in teams %}
+      <div class="team {% if team['team_id'] == my_team_id %}mine{% endif %}">
+        <span class="pick">{{ team['draft_slot'] if team['draft_slot'] else '–' }}</span>
+        <span>
+          <span class="name">{{ team['name'] }}</span>
+          {% if team['team_id'] == my_team_id %}<span class="chip ok">Your team</span>{% endif %}
+          <br>
+          <span class="small muted">{{ team['owner'] or 'owner unknown' }}</span>
+        </span>
+      </div>
+    {% endfor %}
+    <p class="small muted">The number is the pick order in round one. It reverses every round.</p>
+  {% else %}
+    <p class="muted">No teams yet.</p>
+  {% endif %}
+</div>
+{% endblock %}
