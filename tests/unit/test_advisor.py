@@ -21,10 +21,12 @@ import json
 import logging
 import re
 import sqlite3
+import time
 
 from draft_fixtures import (
     REPO,
     SAMPLE_BOARD,
+    FakeClock,
     FakeRunner,
     RecordingBus,
     failed_result,
@@ -35,8 +37,8 @@ from draft_fixtures import (
     seed_synced_league,
 )
 
-from hal_mary import memory
-from hal_mary.draft.advisor import advise
+from hal_mary import claude_runner, memory
+from hal_mary.draft.advisor import _fits, advise
 from hal_mary.events import EventBus
 
 ADVICE = {
@@ -52,12 +54,12 @@ ADVICE = {
 }
 
 
-def advisor_ready(tmp_path, results, board=None, extra="", replace=None):
+def advisor_ready(tmp_path, results, board=None, extra="", replace=None, clock=None):
     settings = make_settings(tmp_path, extra, replace)
     conn = open_db(tmp_path)
     seed_synced_league(conn)
     seed_board(conn, SAMPLE_BOARD if board is None else board)
-    return conn, settings, FakeRunner(settings, results), RecordingBus()
+    return conn, settings, FakeRunner(settings, results, clock), RecordingBus()
 
 
 # --- the timing guard --------------------------------------------------------
@@ -260,6 +262,25 @@ def test_an_empty_board_still_produces_a_card(tmp_path):
     )
     for jargon in ("D/ST", "RB", "WR", "TE", "QB", " K "):
         assert jargon not in card, f"{jargon!r} means nothing to someone who has never played"
+
+
+def test_no_position_code_can_reach_the_card_unglossed():
+    """The uppercase scan in the test above is weaker than it looks: an unglossed
+    code was lowercased on its way out, so a league with a defensive-player slot
+    would have said "take the best available dl" and the scan would have missed
+    it. Every position any roster slot can name is glossed, and anything else
+    falls back to words rather than to a lowercased code.
+    """
+    from hal_mary.draft.advisor import _POSITION_WORDS, _best_open_position
+    from hal_mary.draft.board import _MULTI_POSITION_SLOTS
+
+    reachable = {position for group in _MULTI_POSITION_SLOTS.values() for position in group}
+    reachable |= {"QB", "RB", "WR", "TE", "K", "D/ST"}
+    missing = sorted(position for position in reachable if position not in _POSITION_WORDS)
+    assert missing == [], f"these positions have no plain-English word: {missing}"
+
+    # And a code nobody anticipated still comes out as words, not as "zz".
+    assert _best_open_position(["ZZ"]) == "player at any position"
 
 
 def test_the_empty_board_card_never_leads_with_a_kicker_or_a_defence(tmp_path):
@@ -485,3 +506,147 @@ def test_the_fallback_explains_its_own_jargon(tmp_path):
     ), "a bare tier number means nothing to someone who has never drafted"
     for backup in result["backups"]:
         assert "tier" not in backup["reason"].lower() or "group" in backup["reason"].lower()
+
+
+# --- the time budget ---------------------------------------------------------
+
+#: Confirmed from the live ESPN payload: draftSettings.timePerSelection = 90.
+PICK_CLOCK_S = 90
+
+
+def test_the_configured_budget_fits_inside_one_pick_clock(tmp_path):
+    """The worked sum, pinned so it cannot drift.
+
+    Sizing this by arithmetic in a comment is what let a 55-second figure stand
+    while the real worst case was 94. The numbers that make it up are asserted
+    here instead, against the shipped `config.toml`, including the teardown the
+    runner spends *after* a deadline expires and the ESPN reads that run earlier
+    in the same tick.
+    """
+    settings = make_settings(tmp_path)
+    teardown = claude_runner.TIMEOUT_TEARDOWN_S
+    first = settings.job("draft_advice").timeout_s
+    retry = settings.job("draft_advice_retry").timeout_s
+    espn_worst = settings.espn.connect_timeout_s + settings.espn.read_timeout_s
+
+    # Both attempts timing out, each paying its teardown, must fit the budget.
+    assert first + teardown + retry + teardown <= settings.draft.advice_budget_s
+
+    # And the budget bounds the whole tick, sync included, with room left on the
+    # clock for the card to render and be read.
+    assert espn_worst <= settings.draft.advice_budget_s
+    assert settings.draft.advice_budget_s <= PICK_CLOCK_S - 25
+
+
+def test_an_attempt_costs_its_timeout_plus_the_runners_teardown(tmp_path):
+    """The mistake this pins: budgeting on `timeout_s` alone.
+
+    When a deadline expires the runner still has to kill the process group and
+    reap it, then join the stdout reader — seven seconds that sit *outside*
+    `timeout_s`. Leaving them out is how a 55-second worst case turned out to be
+    69, so a window big enough for the deadline but not for the teardown must
+    read as "does not fit".
+    """
+    settings = make_settings(tmp_path)
+    budget = settings.job("draft_advice_retry").timeout_s
+
+    now = time.monotonic()
+    assert not _fits(settings, "draft_advice_retry", now + budget + 1), (
+        "room for the deadline but not the teardown is not room"
+    )
+    assert _fits(settings, "draft_advice_retry", now + budget + claude_runner.TIMEOUT_TEARDOWN_S + 1)
+
+
+def test_a_job_missing_from_an_older_config_degrades_instead_of_raising(tmp_path):
+    settings = make_settings(tmp_path)
+
+    assert not _fits(settings, "no_such_job", time.monotonic() + 10_000)
+
+
+def test_an_attempt_that_cannot_finish_in_time_is_not_started(tmp_path):
+    """A slow ESPN read earlier in the tick has already spent the clock. Starting
+    a call that cannot return before the pick is due buys nothing and costs the
+    card."""
+    conn, settings, runner, bus = advisor_ready(tmp_path, [ok_result(ADVICE)])
+
+    result = advise(
+        conn, settings, runner, bus, next_overall_pick=6, deadline=time.monotonic() - 1
+    )
+
+    assert runner.calls == [], "no budget left, so no call was made"
+    assert result["source"] == "fallback"
+    assert result["pick"], "and she still gets a card"
+    assert result["attempts"] == 0
+
+
+def test_a_slow_sync_costs_the_retry_rather_than_the_card(tmp_path, monkeypatch):
+    """Twenty-five seconds of ESPN, then a first attempt that times out, leaves no
+    room for a second slow call. The budget spends what is left on the card that
+    always renders, not on another attempt that would land after the pick."""
+    clock = FakeClock()
+    conn, settings, runner, bus = advisor_ready(
+        tmp_path,
+        [failed_result(error="timed out after 25.0s"), ok_result(ADVICE)],
+        clock=clock,
+    )
+    monkeypatch.setattr("hal_mary.draft.advisor.time", clock)
+    started = clock.monotonic()
+    deadline = started + settings.draft.advice_budget_s
+    clock.advance(settings.espn.connect_timeout_s + settings.espn.read_timeout_s)
+
+    result = advise(conn, settings, runner, bus, next_overall_pick=6, deadline=deadline)
+
+    assert len(runner.calls) == 1, "the retry could not have finished in time"
+    assert result["source"] == "fallback"
+    assert clock.monotonic() <= deadline, "and the whole thing stayed inside the budget"
+
+
+def test_both_attempts_run_after_a_fast_sync(tmp_path, monkeypatch):
+    """The retry earns its place when there is room: a quick sync leaves the whole
+    budget, and a first attempt that timed out still leaves enough for the much
+    smaller retry prompt."""
+    clock = FakeClock()
+    conn, settings, runner, bus = advisor_ready(
+        tmp_path, [failed_result(error="timed out"), ok_result(ADVICE)], clock=clock
+    )
+    monkeypatch.setattr("hal_mary.draft.advisor.time", clock)
+    deadline = clock.monotonic() + settings.draft.advice_budget_s
+    clock.advance(1)
+
+    result = advise(conn, settings, runner, bus, next_overall_pick=6, deadline=deadline)
+
+    assert len(runner.calls) == 2
+    assert result["source"] == "claude"
+    assert clock.monotonic() <= deadline
+
+
+def test_two_timeouts_after_a_fast_sync_still_fit_the_budget(tmp_path, monkeypatch):
+    """The worst case the config is sized for."""
+    clock = FakeClock()
+    conn, settings, runner, bus = advisor_ready(
+        tmp_path, [failed_result(error="timed out"), failed_result(error="timed out")],
+        clock=clock,
+    )
+    monkeypatch.setattr("hal_mary.draft.advisor.time", clock)
+    deadline = clock.monotonic() + settings.draft.advice_budget_s
+    clock.advance(1)
+
+    result = advise(conn, settings, runner, bus, next_overall_pick=6, deadline=deadline)
+
+    assert len(runner.calls) == 2
+    assert result["source"] == "fallback"
+    assert result["pick"]
+    assert clock.monotonic() <= deadline
+
+
+def test_no_deadline_means_no_budget_gate(tmp_path):
+    """Called outside the draft loop — a page refresh, a test — there is no tick
+    to be inside, so the attempts run on their own timeouts alone."""
+    conn, settings, runner, bus = advisor_ready(
+        tmp_path, [failed_result(error="timeout"), ok_result(ADVICE)]
+    )
+
+    result = advise(conn, settings, runner, bus, next_overall_pick=6)
+
+    assert len(runner.calls) == 2
+    assert result["source"] == "claude"

@@ -22,7 +22,7 @@ from typing import Any
 
 from conftest import FIXTURE_ENV
 from hal_mary import db
-from hal_mary.claude_runner import ClaudeResult
+from hal_mary.claude_runner import TIMEOUT_TEARDOWN_S, ClaudeResult
 from hal_mary.config import Settings, load_settings
 
 REPO = Path(__file__).resolve().parents[2]
@@ -256,16 +256,46 @@ def failed_result(text: str = "", error: str = "timed out") -> ClaudeResult:
     )
 
 
+class FakeClock:
+    """A monotonic clock a test drives by hand.
+
+    The advisor budgets a 90-second pick clock, and a fake runner that returns
+    instantly consumes none of it — so a test written against the real clock
+    would assert that the budget gate works while never actually spending any
+    budget. Patch this in as ``hal_mary.draft.advisor.time`` and let
+    :class:`FakeRunner` advance it by what each call would really have cost.
+    """
+
+    def __init__(self, now: float = 1000.0) -> None:
+        self.now = now
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 class FakeRunner:
     """Replays queued results and records exactly how it was called.
 
     A queued item that is an ``Exception`` is raised instead of returned, which
     is how the "the runner itself blew up" path is driven.
+
+    With a ``clock``, each call advances it by that job's configured
+    ``timeout_s`` plus the runner's teardown — i.e. what a call that timed out
+    really costs. That is what lets the budget gate be tested without sleeping.
     """
 
-    def __init__(self, settings: Settings, results: list[Any] | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        results: list[Any] | None = None,
+        clock: FakeClock | None = None,
+    ) -> None:
         self.settings = settings
         self.results = list(results or [])
+        self.clock = clock
         self.calls: list[dict[str, Any]] = []
 
     def run(
@@ -288,6 +318,8 @@ class FakeRunner:
                 "extra_context": extra_context,
             }
         )
+        if self.clock is not None:
+            self.clock.advance(self.settings.job(job).timeout_s + TIMEOUT_TEARDOWN_S)
         if not self.results:
             raise AssertionError(f"fake runner ran out of results (call {len(self.calls)})")
         item = self.results.pop(0)
@@ -308,7 +340,14 @@ class FakeEspnClient:
         self,
         picks: list[dict[str, Any]] | None = None,
         schedule: list[dict[str, Any]] | None = None,
+        clock: FakeClock | None = None,
+        slow_by: float = 0.0,
     ) -> None:
+        #: With a ``clock``, ``draft_picks`` advances it by ``slow_by`` seconds —
+        #: a slow ESPN read, which is the thing that eats the tick's budget
+        #: before the advisor is ever reached.
+        self.clock = clock
+        self.slow_by = slow_by
         self.picks = list(picks or [])
         self.schedule = list(schedule) if schedule is not None else None
         self.fail_next: Exception | None = None
@@ -354,6 +393,8 @@ class FakeEspnClient:
     def draft_picks(self) -> list[dict[str, Any]]:
         self.draft_picks_calls += 1
         self.call_order.append("draft_picks")
+        if self.clock is not None and self.slow_by:
+            self.clock.advance(self.slow_by)
         if self.fail_next is not None:
             error, self.fail_next = self.fail_next, None
             raise error

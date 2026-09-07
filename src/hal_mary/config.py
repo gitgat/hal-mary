@@ -110,13 +110,18 @@ class DraftConfig(_Frozen):
     #: Recent picks shown to the advisor, and notes retrieved for its candidates.
     advice_recent_picks: int = 8
     advice_note_limit: int = 12
+    #: Wall-clock seconds one draft-loop tick may spend before Caroline has a
+    #: card, counting the ESPN sync and every Claude attempt. The advisor starts
+    #: an attempt only if it can finish inside what is left, so the tick is
+    #: bounded by construction rather than by arithmetic in a comment.
+    advice_budget_s: int = 60
 
 
 class EspnConfig(_Frozen):
     """Transport limits for the raw ESPN reads.
 
     These belong here rather than in the client because they are bounded by the
-    thing configured immediately above them: the pick clock is 60 to 90 seconds
+    thing configured immediately above them: the pick clock is 90 seconds
     and ``draft.poll_seconds`` is 5, so a read that outlives its poll silently
     stops the draft loop. Defaults are supplied so an older ``config.toml``
     without an ``[espn]`` section still loads.

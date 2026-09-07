@@ -25,6 +25,7 @@ import logging
 
 from draft_fixtures import (
     SAMPLE_BOARD,
+    FakeClock,
     FakeEspnClient,
     FakeRunner,
     RecordingBus,
@@ -527,3 +528,38 @@ async def test_an_empty_board_does_not_file_a_warning_for_every_pick(tmp_path):
     assert store.unmatched_picks(conn) == []
     assert result["unmatched"] == []
     assert dict(bus.published)["board_updated"]["board_missing"] is True
+
+
+async def test_the_tick_budget_starts_before_the_sync_not_after_it(tmp_path, monkeypatch):
+    """A slow ESPN read must come out of the same allowance as the Claude calls.
+
+    The read is bounded at 25 seconds by the ESPN timeouts and it runs *earlier
+    in the same tick*. Starting the budget after it would let a slow sync plus
+    two slow attempts overrun the 90-second pick clock — the card would arrive
+    after the pick was made, which is the exact failure the budget exists to
+    prevent. So the deadline is an instant fixed at the top of the tick, and a
+    slow sync spends it like anything else.
+    """
+    clock = FakeClock()
+    seen: dict[str, float] = {}
+
+    def spy(conn, settings, runner, bus, *, next_overall_pick, deadline=None):
+        seen["deadline"] = deadline
+        return {"pick": "Somebody", "reason": "x", "backups": [], "watch_out": ""}
+
+    monkeypatch.setattr("hal_mary.draft.loop.advise", spy)
+    monkeypatch.setattr("hal_mary.draft.loop.time", clock)
+    _, loop, client, _, _ = loop_ready(tmp_path, picks=picks_through(3))
+    budget = loop.settings.draft.advice_budget_s
+    espn_worst = loop.settings.espn.connect_timeout_s + loop.settings.espn.read_timeout_s
+
+    client.clock, client.slow_by = clock, espn_worst
+    tick_started = clock.monotonic()
+    await loop.run_once()
+
+    assert seen["deadline"] == tick_started + budget, (
+        "the deadline is the top of the tick plus the budget, not the end of the sync"
+    )
+    # What the advisor is actually left with, which is the point of measuring it
+    # from the top: a 25-second sync has already spent 25 of the 60.
+    assert seen["deadline"] - clock.monotonic() == budget - espn_worst

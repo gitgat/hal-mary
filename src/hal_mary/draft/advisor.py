@@ -29,9 +29,11 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import time
 from typing import Any
 
 from hal_mary import db, memory, prompts
+from hal_mary.claude_runner import TIMEOUT_TEARDOWN_S
 from hal_mary.config import Settings
 from hal_mary.draft import store
 from hal_mary.draft.board import (
@@ -54,7 +56,11 @@ __all__ = [
 
 log = logging.getLogger(__name__)
 
-#: Position codes in words Caroline uses. Anything not here is left as it is.
+#: Position codes in the words Caroline uses. Every position any roster slot can
+#: name is here, including the individual-defensive-player codes some leagues
+#: use — a gap here does not produce an error, it produces a card that says
+#: "take the best available dl", which is exactly the jargon this exists to
+#: prevent. A test pins the coverage against ``board._MULTI_POSITION_SLOTS``.
 _POSITION_WORDS = {
     "QB": "quarterback",
     "RB": "running back",
@@ -62,6 +68,9 @@ _POSITION_WORDS = {
     "TE": "tight end",
     "K": "kicker",
     "D/ST": "defence",
+    "DL": "defensive lineman",
+    "LB": "linebacker",
+    "DB": "defensive back",
 }
 
 JOB_NAME = "draft_advice"
@@ -77,7 +86,17 @@ RETRY_PROMPT_FILE = "draft_advice_short.md"
 #: open. Alphabetical order puts ``D/ST`` first, so the worst-case card used to
 #: tell a first-time player to draft a defence in the first round. Kickers and
 #: defences go last because they are the two nobody takes early.
-_FALLBACK_POSITION_PRIORITY = ("RB", "WR", "TE", "QB", "K", "D/ST")
+_FALLBACK_POSITION_PRIORITY = (
+    "RB",
+    "WR",
+    "TE",
+    "QB",
+    "K",
+    "D/ST",
+    "DL",
+    "LB",
+    "DB",
+)
 
 #: What the draft page renders. Kept small on purpose: one recommendation, the
 #: reason, a couple of fallbacks for when he is taken first, and one warning.
@@ -125,15 +144,26 @@ def advise(
     bus: Any,
     *,
     next_overall_pick: int,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Recommend one player for ``next_overall_pick``. Never raises, never empty.
 
+    ``deadline`` is a :func:`time.monotonic` instant by which Caroline needs the
+    card — the draft loop sets it from the start of the tick, so whatever the
+    ESPN sync already spent comes out of the same budget. An attempt is started
+    only if it can *finish* inside what is left, counting the teardown a timeout
+    costs beyond the job's own deadline. That is what makes the tick bounded by
+    construction rather than by arithmetic in a comment: when the budget is gone
+    the deterministic card renders immediately instead of after two more slow
+    calls, one pick too late. ``None`` means no tick to be inside, and the
+    attempts run on their own timeouts alone.
+
     Returns the advice with ``source`` set to ``claude`` or ``fallback`` and
-    ``attempts`` set to how many Claude calls were made, and leaves behind an
-    ``advice`` row and a published ``advice`` event.
+    ``attempts`` set to how many Claude calls were actually made, and leaves
+    behind an ``advice`` row and a published ``advice`` event.
     """
     try:
-        payload = _reason(conn, settings, runner, next_overall_pick)
+        payload = _reason(conn, settings, runner, next_overall_pick, deadline)
     except Exception:
         # Everything the two Claude attempts can throw is already handled inside
         # ``_ask``. This covers the rest — reading the league, loading the board,
@@ -165,7 +195,11 @@ def advise(
 
 
 def _reason(
-    conn: sqlite3.Connection, settings: Settings, runner: Any, next_overall_pick: int
+    conn: sqlite3.Connection,
+    settings: Settings,
+    runner: Any,
+    next_overall_pick: int,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Everything up to the answer: the two attempts, then the board's own answer."""
     league = load_league_context(conn, settings)
@@ -183,6 +217,8 @@ def _reason(
         ),
         (RETRY_JOB_NAME, RETRY_PROMPT_FILE, settings.draft.advice_retry_candidates, 0),
     ):
+        if not _fits(settings, job, deadline):
+            break
         attempts += 1
         advice = _ask(
             conn,
@@ -212,6 +248,37 @@ def _reason(
         "my_next_picks": state["my_next_picks"],
         "board_built_at": state["built_at"],
     }
+
+
+def _fits(settings: Settings, job: str, deadline: float | None) -> bool:
+    """Can ``job`` still finish before ``deadline``?
+
+    The cost of an attempt is its configured ``timeout_s`` **plus**
+    :data:`~hal_mary.claude_runner.TIMEOUT_TEARDOWN_S`, the process-group reap
+    and reader join the runner pays after a deadline expires. Budgeting on
+    ``timeout_s`` alone is how a 55-second worst case turned out to be 69.
+
+    An unknown job — an older ``config.toml`` with no ``[jobs.draft_advice_retry]``
+    — reports "does not fit" rather than raising, so the advisor degrades to the
+    deterministic card instead of failing.
+    """
+    if deadline is None:
+        return True
+    try:
+        cost = settings.job(job).timeout_s + TIMEOUT_TEARDOWN_S
+    except KeyError:
+        log.warning("job %r is not configured; skipping that attempt", job)
+        return False
+    remaining = deadline - time.monotonic()
+    if remaining < cost:
+        log.warning(
+            "skipping the %s attempt: %.1fs left of the tick budget, it needs %.1fs",
+            job,
+            remaining,
+            cost,
+        )
+        return False
+    return True
 
 
 # --- one attempt -------------------------------------------------------------
@@ -642,9 +709,14 @@ def _best_open_position(needed: list[str]) -> str:
             else len(_FALLBACK_POSITION_PRIORITY)
         ),
     )
-    if not ranked:
-        return "player at any position"
-    return _POSITION_WORDS.get(ranked[0], ranked[0].lower())
+    for position in ranked:
+        word = _POSITION_WORDS.get(position)
+        if word:
+            return word
+    # Nothing we have words for. Say so in plain English rather than handing her
+    # a code: a lowercased "dl" is no more meaningful to her than "DL", and it
+    # slips past any check that scans for uppercase jargon.
+    return "player at any position"
 
 
 # --- persistence -------------------------------------------------------------

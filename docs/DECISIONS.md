@@ -42,7 +42,8 @@ cost.
 **Decision:** Deep research runs on a schedule before the draft and writes a tiered board to the
 database. On-the-clock advice runs with web tools disabled against that board.
 
-**Why:** A web-enabled Claude call takes 30 to 120 seconds. The ESPN pick clock is 60 to 90 seconds.
+**Why:** A web-enabled Claude call takes 30 to 120 seconds. This league's pick clock is 90 seconds
+(`draftSettings.timePerSelection`, confirmed from the live payload).
 Doing research on the clock loses the pick. Splitting the work means the slow, expensive thinking
 happens when there is time for it, and the fast call only has to reason over facts already gathered.
 
@@ -435,3 +436,39 @@ allows negative ids, so `-1` colliding with a researched player is a real collis
 theoretical one.
 
 **Would revisit if:** never, really. It costs one SQL predicate.
+
+---
+
+## 2026-09-07 — One draft-loop tick has one time budget, and it starts before the ESPN read
+
+**Decision:** `draft.advice_budget_s` (60s) bounds a whole tick — the ESPN sync *and* every Claude
+attempt. The deadline is an instant fixed at the top of `run_once` and passed into `advise`, which
+starts an attempt only when it can finish inside what is left. The cost of an attempt is its
+`timeout_s` **plus** `claude_runner.TIMEOUT_TEARDOWN_S`, exported from the runner rather than copied.
+
+**Why:** the pick clock is 90 seconds. Sizing the attempts by adding up `timeout_s` values gave 55
+and felt safe, and it was wrong twice over. A timed-out call also pays the SIGKILL reap (5s) and the
+stdout join (2s) *after* its deadline, so two timeouts are 69s, not 55. And `sync_draft` runs earlier
+in the same tick, bounded at 25s by `espn.connect_timeout_s + read_timeout_s`. A slow ESPN followed
+by two Claude timeouts is ~94 seconds against a 90-second clock: the pick is gone before the
+deterministic card renders, which defeats the entire point of having a deterministic card.
+
+**Why not lean on the two picks of runway** that `advise_within_picks = 2` nominally buys: that
+assumes the other five managers use their clocks. Once the top of the board is gone people pick in
+ten seconds, so two picks is twenty seconds of runway, not one hundred and eighty. Lead time is not
+a budget.
+
+**Why a runtime gate rather than better arithmetic:** arithmetic in a comment drifts the moment
+anyone tunes a timeout, and the symptom is a recommendation arriving after the pick was made — which
+nobody notices until draft night. The gate makes the bound true by construction: whatever the sync
+spent, the advisor spends only the remainder, and when nothing fits the board's own card renders
+immediately. The worked sum in `config.toml` is the explanation, not the guarantee.
+
+**What it costs:** a slow sync costs an attempt, not the card. That is the right trade — skipping the
+sync instead would risk recommending a player taken five seconds ago, which is the failure the whole
+unmatched-pick machinery exists to prevent, while losing an attempt only downgrades a researched
+recommendation to a ranked-list one.
+
+**Would revisit if:** the measured tools-off latency moves far from 15s, or the league changes its
+pick clock. Both are one config edit, and the test that pins the sum fails first.
+

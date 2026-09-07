@@ -23,6 +23,13 @@ failure:
   call leave the second one unmatched forever, because ``apply_picks`` refuses to
   claim a board row twice. That belongs here, upstream, not in the pure
   arithmetic.
+* **One tick has one time budget, and it starts before the ESPN read.** The pick
+  clock is 90 seconds. A slow sync (bounded at 25s by the ESPN timeouts) followed
+  by two Claude attempts that time out (each costing its ``timeout_s`` *plus* the
+  runner's kill-and-join teardown) would otherwise overrun the clock and the card
+  would arrive after the pick was made. ``draft.advice_budget_s`` bounds the
+  whole tick, and the advisor starts an attempt only if it can finish inside what
+  is left — so a slow sync costs an attempt, never the card.
 
 **Threading.** ``run_once`` does blocking SQLite and subprocess work on the
 calling event loop, deliberately: ``db.connect`` leaves ``check_same_thread`` on,
@@ -38,6 +45,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+import time
 from typing import Any
 
 from hal_mary import db
@@ -135,7 +143,9 @@ def apply_new_picks(
     """Mark ``picks`` on the board, store what did not match, and publish.
 
     The single path every pick takes, whether it came from ESPN or from
-    Caroline's thumb. Returns ``{"applied", "unmatched", "duplicates", "picks"}``.
+    Caroline's thumb. Returns ``{"applied", "unmatched", "duplicates", "picks",
+    "board_missing"}`` — ``board_missing`` says the board is empty, which is why
+    ``unmatched`` is empty too rather than holding one entry per pick.
     """
     board = store.load_board(conn)
     kept, repeats = _deduplicate(board, picks)
@@ -380,6 +390,13 @@ class DraftLoop:
             "draft_over": False,
             "error": None,
         }
+        # Set before anything else in the tick. The ESPN read below is bounded
+        # by espn.connect_timeout_s + read_timeout_s — 25 seconds — and it runs
+        # *before* the advisor, so a budget started after it would let a slow
+        # sync push the card past the end of the pick clock. Everything the tick
+        # spends comes out of this one allowance.
+        deadline = time.monotonic() + self.settings.draft.advice_budget_s
+
         if not self._warmed:
             self.warm()
 
@@ -400,7 +417,7 @@ class DraftLoop:
                 result["applied"] = applied["applied"]
                 result["unmatched"] = applied["unmatched"]
                 result["duplicates"] = applied["duplicates"]
-            result.update(self._maybe_advise())
+            result.update(self._maybe_advise(deadline))
         except Exception as exc:
             log.exception("draft loop tick failed after the sync")
             result["error"] = str(exc)
@@ -451,7 +468,7 @@ class DraftLoop:
         # A board that knows nothing about her team is not a board to trust.
         return mine or None
 
-    def _maybe_advise(self) -> dict[str, Any]:
+    def _maybe_advise(self, deadline: float | None = None) -> dict[str, Any]:
         try:
             league = load_league_context(self.conn, self.settings)
         except LeagueUnknown as exc:
@@ -482,7 +499,12 @@ class DraftLoop:
         self._last_advised_pick = target
         log.info("advising for pick %s (pick %s is on the clock)", target, next_pick)
         advice = advise(
-            self.conn, self.settings, self.runner, self.bus, next_overall_pick=next_pick
+            self.conn,
+            self.settings,
+            self.runner,
+            self.bus,
+            next_overall_pick=next_pick,
+            deadline=deadline,
         )
         return {"advised": True, "advice": advice}
 

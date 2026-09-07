@@ -271,9 +271,7 @@ def test_the_prompt_file_states_no_league_fact_of_its_own():
         )
     for placeholder in ("{{team_count}}", "{{scoring_summary}}", "{{draft_type}}",
                         "{{my_draft_slot}}", "{{first_two_picks}}"):
-        assert placeholder in text.replace("{{scoring_summary}}", "{{scoring_summary}}"), (
-            f"prompts/board_build.md never uses {placeholder}"
-        )
+        assert placeholder in text, f"prompts/board_build.md never uses {placeholder}"
 
 
 def test_the_prompt_file_explains_the_beginner_reading_it():

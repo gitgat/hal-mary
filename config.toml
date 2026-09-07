@@ -28,6 +28,10 @@ advice_retry_candidates = 5
 advice_recent_picks = 8
 advice_note_limit = 12
 
+# Wall-clock seconds one tick may spend before Caroline has a card, counting the
+# ESPN sync and every Claude attempt. See the worked sum above [jobs.draft_advice].
+advice_budget_s = 60
+
 # The manual fallback for the league's own settings.
 #
 # Normally `hal-mary sync` reads these from ESPN into the league_settings table
@@ -86,22 +90,47 @@ max_budget_usd = 5.0
 enabled = true
 cron = "0 6 * * *"
 
-# The two on-the-clock attempts. Both run with no web tools, and their timeouts
-# are a budget against a 90-second pick clock: 35 + 20 leaves 35 seconds for the
-# deterministic fallback card to render even when both attempts time out. A
-# tools-off call with a schema measures about 15 seconds, so neither deadline is
-# tight in the ordinary case. Raise these only by taking the sum below 60.
+# The two on-the-clock attempts. Both run with no web tools, and their deadlines
+# are a budget against the pick clock, which this league sets at 90 seconds
+# (draftSettings.timePerSelection, confirmed from the live payload).
+#
+# The worked sum for one tick, worst case, all of it inside draft.advice_budget_s
+# = 60. Every line is time hal-mary can actually spend before Caroline has a card:
+#
+#   ESPN sync, worst case            25s   espn.connect_timeout_s + read_timeout_s
+#   first attempt, timing out        25s   jobs.draft_advice.timeout_s
+#     + its teardown                  7s   claude_runner.TIMEOUT_TEARDOWN_S
+#                                          (SIGKILL reap 5s + stdout join 2s,
+#                                           both OUTSIDE timeout_s)
+#   retry, timing out                15s   jobs.draft_advice_retry.timeout_s
+#     + its teardown                  7s
+#   deterministic fallback card       ~0s   pure arithmetic over the board
+#                                    ----
+#   two attempts after a fast sync    55s   fits; the card renders at ~55s
+#   one attempt after a slow sync     57s   the retry no longer fits and is
+#                                          skipped, so the card still renders
+#
+# The advisor checks the remaining budget before starting each attempt, so no
+# combination of these overruns 60 seconds — which leaves 30 seconds of a
+# 90-second clock for the card to render and be read. That check is what makes
+# the bound real: do not treat the sum above as the guarantee, it is only the
+# explanation. Raising either timeout_s tightens the margin; raising both past
+# the budget silently costs the retry.
+#
+# Measured: a tools-off call with a JSON schema returns in about 15 seconds, so
+# 25s is comfortable for the full prompt and 15s is comfortable for the retry,
+# whose prompt carries five candidates and no notes.
 [jobs.draft_advice]
 model = "opus"
 tools = []                # no web tools: this runs on the pick clock
-timeout_s = 35
+timeout_s = 25
 max_budget_usd = 1.0
 enabled = true
 
 [jobs.draft_advice_retry]
 model = "opus"
 tools = []                # no web tools: this runs on the pick clock too
-timeout_s = 20            # shorter on purpose: the first attempt already spent time
+timeout_s = 15            # shorter on purpose: the first attempt already spent time
 max_budget_usd = 1.0
 enabled = true
 
