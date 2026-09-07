@@ -91,19 +91,31 @@ IR = 1
 """
 
 
-def write_config(tmp_path: Path, extra: str = "") -> Path:
-    """Copy the repo's ``config.toml`` into ``tmp_path`` with ``extra`` appended.
+def write_config(
+    tmp_path: Path, extra: str = "", replace: dict[str, str] | None = None
+) -> Path:
+    """Copy the repo's ``config.toml`` into ``tmp_path``, edited for one test.
+
+    ``extra`` is appended (a whole new section); ``replace`` swaps literal lines
+    in place, which is how a test changes a value in a section that already
+    exists — TOML rejects a table declared twice, so appending a second
+    ``[draft]`` would not load at all.
 
     Copying rather than hand-writing means a test cannot pass against a config
     shape the shipped file does not have.
     """
     text = (REPO / "config.toml").read_text(encoding="utf-8")
+    for old, new in (replace or {}).items():
+        assert old in text, f"config.toml no longer contains {old!r}"
+        text = text.replace(old, new, 1)
     path = tmp_path / "config.toml"
     path.write_text(text + "\n" + extra, encoding="utf-8")
     return path
 
 
-def make_settings(tmp_path: Path, extra: str = "", **env: str) -> Settings:
+def make_settings(
+    tmp_path: Path, extra: str = "", replace: dict[str, str] | None = None, **env: str
+) -> Settings:
     """Settings from a temporary config, with the fixture environment overlaid.
 
     ``claude.binary`` is left alone: these tests never spawn it. Paths that would
@@ -112,7 +124,7 @@ def make_settings(tmp_path: Path, extra: str = "", **env: str) -> Settings:
     that read a stub instead would not notice it going missing.
     """
     values = {**FIXTURE_ENV, "TEAM_ID": str(REAL_MY_TEAM_ID), **env}
-    return load_settings(config_path=write_config(tmp_path, extra), env=values)
+    return load_settings(config_path=write_config(tmp_path, extra, replace), env=values)
 
 
 def open_db(tmp_path: Path):

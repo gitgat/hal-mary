@@ -23,6 +23,7 @@ from typing import Any
 from hal_mary import db
 
 __all__ = [
+    "all_picks",
     "load_board",
     "mark_drafted",
     "next_overall_pick",
@@ -184,6 +185,17 @@ def recent_picks(conn: sqlite3.Connection, *, limit: int = 10) -> list[dict[str,
         f"SELECT {_PICK_COLUMNS} FROM draft_picks ORDER BY overall_pick DESC LIMIT ?",
         (max(int(limit), 0),),
     ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def all_picks(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Every pick recorded, in order. The loop reconciles the board against it.
+
+    Small by construction — 96 rows in this league — so reading the lot on every
+    poll costs nothing and removes the need to remember which picks have already
+    been applied.
+    """
+    rows = conn.execute(f"SELECT {_PICK_COLUMNS} FROM draft_picks ORDER BY overall_pick").fetchall()
     return [dict(row) for row in rows]
 
 
