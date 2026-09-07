@@ -6,6 +6,7 @@ part of its contract, not decoration.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -180,3 +181,59 @@ def test_a_failing_action_plan_does_not_fail_the_sync(wired, capsys):
         assert cli.main(["sync"]) == 0
     finally:
         producer.emit_bye_week_benchings = original
+
+
+# --- cowork-config ---------------------------------------------------------
+
+
+def test_cowork_config_prints_the_schedule_for_this_league(wired, capsys):
+    """Not generic advice: the waiver run's time comes from the league's own
+    processing day, which is exactly the thing an assumed Wednesday gets wrong."""
+    conn = wired["conn"]
+    with db.transaction(conn):
+        conn.execute(
+            """
+            INSERT INTO league_settings
+                (id, season, league_id, name, team_count, roster_slots_json, raw_json,
+                 updated_at, current_week)
+            VALUES (1, 2026, 7654321, 'The Invented League', 6, '{}', ?, ?, 5)
+            """,
+            (
+                '{"acquisitionSettings": {"waiverProcessDays": ["THURSDAY"], "waiverHours": 3}}',
+                "2026-10-01T12:00:00+00:00",
+            ),
+        )
+
+    assert cli.main(["cowork-config"]) == 0
+
+    out = capsys.readouterr().out
+    assert "lineup-sunday" in out
+    assert "waivers" in out
+    assert "Wednesday" in out and "03:00" in out
+    assert "Prompt (paste this whole block):" in out
+
+
+def test_cowork_config_json_is_machine_readable(wired, capsys):
+    assert cli.main(["cowork-config", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert {entry["name"] for entry in payload["tasks"]} >= {"lineup-sunday", "waivers"}
+    assert "timezone" in payload
+
+
+def test_cowork_config_reports_a_broken_task_file_rather_than_a_traceback(
+    wired, monkeypatch, capsys, tmp_path
+):
+    broken = tmp_path / "tasks.toml"
+    broken.write_text("[[task]]\nname = 'x'\ncadence = 'never'\n", encoding="utf-8")
+    settings = wired["settings"]
+    monkeypatch.setattr(
+        cli,
+        "load_cli_settings",
+        lambda: settings.model_copy(
+            update={"paths": settings.paths.model_copy(update={"cowork_tasks": str(broken)})}
+        ),
+    )
+
+    assert cli.main(["cowork-config"]) != 0
+    assert "never" in capsys.readouterr().err

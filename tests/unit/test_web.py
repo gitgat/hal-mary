@@ -233,6 +233,12 @@ def test_no_route_escapes_the_password_by_accident(db_path: Path):
     nothing would fail.
     """
     public = {"/login", "/healthz", "/static"}
+    # `/mcp` is the one route that is deliberately not on the session router: it
+    # carries its own bearer token, and a session cookie must not open it. That
+    # is not an exemption from being guarded — tests/unit/test_mcp.py proves it
+    # rejects a missing token, a wrong token, the web password and a valid
+    # session cookie, and refuses to serve at all when MCP_TOKEN is unset.
+    other_door = {"/mcp"}
     app = build_app(db_path)
     routes = flatten_routes(app)
 
@@ -257,11 +263,19 @@ def test_no_route_escapes_the_password_by_accident(db_path: Path):
     } <= found, (
         f"the route walk found only {sorted(found)}"
     )
+    # And the one route that is excluded above really is there to be excluded,
+    # so a rename cannot turn this into a silent hole.
+    assert other_door <= found, f"the route walk found only {sorted(found)}"
 
     with TestClient(app, follow_redirects=False) as client:
         for route in routes:
             path = getattr(route, "path", None)
-            if path is None or path in public or path.startswith("/static"):
+            if (
+                path is None
+                or path in public
+                or path in other_door
+                or path.startswith("/static")
+            ):
                 continue
             for method in sorted(getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}):
                 response = client.request(method, path)

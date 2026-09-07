@@ -54,12 +54,14 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from starlette.routing import Route
 
 from hal_mary import db
 from hal_mary.config import Settings
 from hal_mary.draft import loop as draft_loop
 from hal_mary.draft import store as draft_store
 from hal_mary.espn.sync import last_sync
+from hal_mary.mcp.server import MCP_PATH, build_endpoint
 from hal_mary.memory import standing_memory_files
 from hal_mary.web.draft_page import draft_context
 from hal_mary.web.positions import SLOT_LABELS, position_word, slot_sort_key
@@ -442,9 +444,20 @@ def create_app(
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
     templates.env.globals["age_in_words"] = age_in_words
 
-    app = FastAPI(title="hal-mary", docs_url=None, redoc_url=None, openapi_url=None)
+    # The MCP endpoint is built before the app because its session manager needs
+    # a lifespan, and FastAPI takes that at construction. It is a separate door
+    # with a separate key: see hal_mary.mcp.server.
+    mcp = build_endpoint(settings, open_conn)
+    app = FastAPI(
+        title="hal-mary",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        lifespan=mcp.lifespan,
+    )
     app.state.settings = settings
     app.state.bus = bus
+    app.state.mcp_enabled = mcp.enabled
 
     auth_cache: dict[str, Any] = {}
 
@@ -1011,6 +1024,15 @@ def create_app(
 
     app.include_router(public)
     app.include_router(private)
+    # Deliberately on neither router. `/mcp` carries its own bearer token and
+    # must not accept the session cookie; the dashboard must not accept the MCP
+    # token. Two doors, two keys — one of these is exposed through a tunnel and
+    # the other is LAN-only. It is a Starlette Route rather than a mount so that
+    # `/mcp` matches exactly, with no trailing-slash redirect for a client to
+    # follow on a POST that carries a body.
+    app.router.routes.append(
+        Route(MCP_PATH, endpoint=mcp.asgi, methods=["GET", "POST", "DELETE"])
+    )
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     return app
 

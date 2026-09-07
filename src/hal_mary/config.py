@@ -51,6 +51,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 __all__ = [
     "ClaudeConfig",
     "ConfigError",
+    "CoworkConfig",
     "DraftConfig",
     "EspnConfig",
     "JobConfig",
@@ -62,10 +63,21 @@ __all__ = [
 ]
 
 #: Environment keys read into :class:`Settings`.
-ENV_KEYS = ("ESPN_S2", "SWID", "LEAGUE_ID", "TEAM_ID", "SEASON", "WEB_PASSWORD", "DB_PATH")
+ENV_KEYS = (
+    "ESPN_S2",
+    "SWID",
+    "LEAGUE_ID",
+    "TEAM_ID",
+    "SEASON",
+    "WEB_PASSWORD",
+    "MCP_TOKEN",
+    "DB_PATH",
+)
 
 #: Keys that must be present before hal-mary can talk to ESPN or serve the web app.
-#: ``DB_PATH`` is absent on purpose: it has a default.
+#: ``DB_PATH`` is absent on purpose: it has a default. So is ``MCP_TOKEN``: the
+#: MCP endpoint is opt-in, and without it ``/mcp`` refuses to serve rather than
+#: serving openly, which is a working deployment and not a missing secret.
 REQUIRED_ENV_KEYS = ("ESPN_S2", "SWID", "LEAGUE_ID", "TEAM_ID", "SEASON", "WEB_PASSWORD")
 
 #: Env keys whose values are integers.
@@ -92,7 +104,7 @@ DEFAULT_DB_PATH = "./hal.db"
 #: the working directory — write it absolute if you need to point at one.
 ANCHORED_PATHS: dict[str, tuple[str, ...]] = {
     "claude": ("scratch_dir", "system_prompt_file"),
-    "paths": ("prompts_dir", "memory_dir"),
+    "paths": ("prompts_dir", "memory_dir", "cowork_tasks"),
 }
 
 # src/hal_mary/config.py -> src/hal_mary -> src -> repo root
@@ -120,9 +132,12 @@ class ClaudeConfig(_Frozen):
 
 
 class PathsConfig(_Frozen):
-    #: Both anchored to the config file's directory by :class:`Settings`.
+    #: All anchored to the config file's directory by :class:`Settings`.
     prompts_dir: Path
     memory_dir: Path
+    #: The declarative Cowork task file. A default is supplied so a config.toml
+    #: written before the MCP endpoint existed still loads.
+    cowork_tasks: Path = Path("cowork/tasks.toml")
 
 
 class DraftConfig(_Frozen):
@@ -213,6 +228,23 @@ class LeagueConfig(_Frozen):
     roster_slots: dict[str, int] = {}
 
 
+class CoworkConfig(_Frozen):
+    """How the Cowork schedule is rendered.
+
+    ``timezone`` is the zone Cowork's own scheduling form uses — the operator's
+    local zone, not the server's. It is here rather than read from the box
+    because the box runs UTC and the person filling in the form does not, and a
+    bare hour with no zone beside it is the kind of thing that schedules a lineup
+    run six hours after kickoff.
+    """
+
+    timezone: str = "UTC"
+    #: How long before waiver processing a claim run should happen. ESPN
+    #: processes claims in a batch, so a run after that time is worth nothing;
+    #: a day ahead leaves room for a failed run to be noticed.
+    waiver_lead_minutes: int = 1440
+
+
 class WebConfig(_Frozen):
     """How the web app listens, signs sessions and paces its background work.
 
@@ -294,6 +326,7 @@ class Settings(_Frozen):
     draft: DraftConfig
     espn: EspnConfig = EspnConfig()
     league: LeagueConfig = LeagueConfig()
+    cowork: CoworkConfig = CoworkConfig()
     web: WebConfig
     jobs: dict[str, JobConfig]
 
@@ -303,6 +336,12 @@ class Settings(_Frozen):
     team_id: int | None = None
     season: int | None = None
     web_password: str | None = None
+    #: The bearer token for ``/mcp``, deliberately separate from
+    #: ``web_password``. Two doors, two keys: the MCP endpoint is what a tunnel
+    #: exposes to the internet, the dashboard is LAN-only, and one shared
+    #: credential would put Caroline's ESPN session cookies on the public side.
+    #: ``None`` means ``/mcp`` refuses every request; absent never means open.
+    mcp_token: str | None = None
     db_path: Path = Path(DEFAULT_DB_PATH)
 
     @model_validator(mode="after")
@@ -483,6 +522,7 @@ def load_settings(
         draft = DraftConfig(**raw.get("draft", {}))
         espn = EspnConfig(**raw.get("espn", {}))
         league = LeagueConfig(**raw.get("league", {}))
+        cowork = CoworkConfig(**raw.get("cowork", {}))
         web = WebConfig(**raw.get("web", {}))
     except Exception as exc:
         raise ConfigError(f"{path} is missing or has an invalid section: {exc}") from exc
@@ -501,6 +541,7 @@ def load_settings(
         draft=draft,
         espn=espn,
         league=league,
+        cowork=cowork,
         web=web,
         jobs=jobs,
         espn_s2=values.get("ESPN_S2"),
@@ -509,5 +550,6 @@ def load_settings(
         team_id=values.get("TEAM_ID"),
         season=values.get("SEASON"),
         web_password=values.get("WEB_PASSWORD"),
+        mcp_token=values.get("MCP_TOKEN"),
         db_path=values.get("DB_PATH", DEFAULT_DB_PATH),
     )

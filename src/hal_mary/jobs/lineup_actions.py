@@ -60,10 +60,6 @@ SLOT_ELIGIBILITY: dict[str, frozenset[str]] = {
 #: The bench. A player here is not starting, so his bye costs nothing.
 BENCH_SLOTS = frozenset({"BE", "BN", "BENCH"})
 
-#: Slots that are not the lineup at all — a player here cannot be started and is
-#: not a candidate to replace anyone.
-_RESERVE_SLOTS = frozenset({"IR", "RES", "TAXI", "IR/RES"})
-
 #: Injury statuses that still let a player take the field. Everything else —
 #: OUT, DOUBTFUL, SUSPENSION, INJURY_RESERVE — makes him no better than the bye
 #: he is being asked to cover.

@@ -192,10 +192,39 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return serve(settings, reload=args.reload)
 
 
+def _cmd_cowork_config(args: argparse.Namespace) -> int:
+    """Print Cowork's scheduled tasks, rendered against this league.
+
+    Not generic advice. The waiver run's time comes from the league's own
+    processing day, because a claim submitted after the batch has run is worth
+    nothing — and an assumed Wednesday is exactly the confident wrong answer
+    that would go unnoticed for a season.
+    """
+    import json as _json
+
+    from hal_mary import cowork
+
+    settings = load_cli_settings()
+    conn = open_db(settings)
+    try:
+        schedule = cowork.render(conn, settings)
+    except cowork.CoworkConfigError as exc:
+        print(f"cannot render the Cowork schedule: {exc}", file=sys.stderr)
+        return EXIT_NOT_CONFIGURED
+    finally:
+        conn.close()
+
+    if args.json:
+        print(_json.dumps(cowork.as_json(schedule), indent=2))
+    else:
+        print(cowork.render_text(schedule))
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hal-mary", description=DESCRIPTION, epilog=EPILOG)
     subcommands = parser.add_subparsers(
-        dest="command", metavar="{sync,espn-check,serve,job}"
+        dest="command", metavar="{sync,espn-check,serve,job,cowork-config}"
     )
 
     sync = subcommands.add_parser("sync", help="pull league state and draft picks from ESPN")
@@ -218,6 +247,17 @@ def build_parser() -> argparse.ArgumentParser:
     job = subcommands.add_parser("job", help="run one job now, by name")
     job.add_argument("name", help="which job to run, e.g. board_build")
     job.set_defaults(handler=_cmd_job)
+
+    cowork_config = subcommands.add_parser(
+        "cowork-config",
+        help="print Claude Cowork's scheduled tasks, rendered for this league",
+    )
+    cowork_config.add_argument(
+        "--json",
+        action="store_true",
+        help="print the machine form instead of the paste-into-the-form one",
+    )
+    cowork_config.set_defaults(handler=_cmd_cowork_config)
 
     return parser
 
