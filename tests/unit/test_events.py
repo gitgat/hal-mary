@@ -119,23 +119,28 @@ async def test_closing_from_another_thread_wakes_a_parked_consumer():
     task = asyncio.create_task(consume())
     await asyncio.sleep(0)  # let the consumer park on an empty queue
 
+    closed_at = []
+
     def close_once_the_loop_is_idle():
         # The loop must be parked in select for this to mean anything: joining
         # the thread from the loop would keep it awake and hide the bug.
         time.sleep(0.2)
+        # The clock starts here, not before the sleep, so the measurement below
+        # is stall time only -- otherwise the deliberate 0.2s eats most of the
+        # budget and a loaded machine fails a correct implementation.
+        closed_at.append(time.monotonic())
         sub.close()
 
     thread = threading.Thread(target=close_once_the_loop_is_idle)
     thread.start()
 
-    started = time.monotonic()
     await asyncio.wait_for(task, timeout=5)
-    elapsed = time.monotonic() - started
+    stalled = time.monotonic() - closed_at[0]
     thread.join(timeout=2)
 
-    # Generous, but an order of magnitude below the full 5s park this
-    # regresses to when the wakeup does not reach the loop.
-    assert elapsed < 1.0, f"the close took {elapsed:.2f}s to wake the loop"
+    # A correct wakeup lands in microseconds; the regression parks for the full
+    # 5s. Anywhere in between is a second of pure stall and still a failure.
+    assert stalled < 1.0, f"the close took {stalled:.2f}s to wake the loop"
     assert bus.subscriber_count == 0
 
 
