@@ -36,6 +36,9 @@ packages = ["src/hal_mary"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+markers = [
+    "integration: spawns the real claude binary; needs HAL_MARY_LIVE=1 and costs money",
+]
 
 [tool.ruff]
 line-length = 100

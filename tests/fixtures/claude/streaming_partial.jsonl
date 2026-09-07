@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","session_id":"sess-partial","cwd":"/scratch","tools":[],"mcp_servers":[],"permissionMode":"dontAsk"}
+{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_01"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Start "}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"then end."}}}
+{"type":"stream_event","event":{"type":"message_stop"}}
+{"type":"assistant","message":{"id":"msg_01","role":"assistant","content":[{"type":"text","text":"Start then end."}]},"session_id":"sess-fixture"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"duration_api_ms":1100,"num_turns":1,"session_id":"sess-partial","total_cost_usd":0.0042,"stop_reason":"end_turn","usage":{"input_tokens":12,"output_tokens":7},"result":"Start then end."}

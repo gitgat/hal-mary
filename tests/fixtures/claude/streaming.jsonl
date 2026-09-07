@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"sess-stream","cwd":"/scratch","tools":[],"mcp_servers":[],"permissionMode":"dontAsk"}
+{"type":"assistant","message":{"id":"msg_01","role":"assistant","content":[{"type":"text","text":"First chunk. "}]},"session_id":"sess-fixture"}
+{"type":"assistant","message":{"id":"msg_02","role":"assistant","content":[{"type":"text","text":"Second chunk. "}]},"session_id":"sess-fixture"}
+{"type":"assistant","message":{"id":"msg_03","role":"assistant","content":[{"type":"text","text":"Third chunk."}]},"session_id":"sess-fixture"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"duration_api_ms":1100,"num_turns":1,"session_id":"sess-stream","total_cost_usd":0.0042,"stop_reason":"end_turn","usage":{"input_tokens":12,"output_tokens":7},"result":"First chunk. Second chunk. Third chunk."}
