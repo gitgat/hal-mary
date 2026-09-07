@@ -113,16 +113,23 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     Commits on a clean exit, rolls back on any exception — including
     ``KeyboardInterrupt`` and a job timeout — and re-raises it unchanged.
 
+    The COMMIT is inside the ``try`` because a COMMIT can fail on its own:
+    SQLITE_FULL, an IO error, SQLITE_BUSY on a WAL checkpoint, or a deferred
+    constraint. SQLite leaves the transaction open when that happens, so a
+    commit failure that escaped without rolling back would poison the
+    connection — every later BEGIN would raise "cannot start a transaction
+    within a transaction", blaming innocent code far from the real fault.
+
     SQLite has no nested transactions: calling this inside another
     ``transaction()`` raises ``sqlite3.OperationalError``.
     """
     conn.execute("BEGIN")
     try:
         yield conn
+        conn.execute("COMMIT")
     except BaseException:
         _rollback_quietly(conn)
         raise
-    conn.execute("COMMIT")
 
 
 def _migration_files(migrations_dir: Path) -> list[Path]:

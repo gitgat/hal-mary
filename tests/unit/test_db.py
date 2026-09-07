@@ -501,3 +501,28 @@ def test_a_migration_that_lost_its_transaction_still_reports_its_own_error(tmp_p
     assert "syntax error" in str(excinfo.value)
     assert "no transaction is active" not in str(excinfo.value)
     connection.close()
+
+
+def test_transaction_leaves_the_connection_usable_when_the_commit_fails(conn):
+    """A COMMIT can fail on its own — SQLITE_FULL, an IO error, SQLITE_BUSY on a
+    WAL checkpoint, or a deferred constraint. SQLite leaves the transaction open
+    when it does, so a commit that escapes without rolling back poisons the
+    connection: every later BEGIN raises "cannot start a transaction within a
+    transaction", pointing at innocent code far from the real fault.
+
+    Deferred foreign keys are the deterministic way to make COMMIT be the
+    statement that fails.
+    """
+    with pytest.raises(sqlite3.IntegrityError), db.transaction(conn):
+        conn.execute("PRAGMA defer_foreign_keys = ON")
+        conn.execute(
+            "INSERT INTO roster_slots(team_id, player_id, slot, week) VALUES (999, 888, 'WR', 1)"
+        )
+
+    assert not conn.in_transaction
+
+    # The connection still works, and nothing from the failed block survived.
+    with db.transaction(conn):
+        conn.execute("INSERT INTO teams(team_id, name) VALUES (1, 'One')")
+    assert conn.execute("SELECT COUNT(*) FROM teams").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM roster_slots").fetchone()[0] == 0
