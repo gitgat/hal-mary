@@ -22,3 +22,6 @@ logs/
 
 # SDD workspace (scratch)
 .superpowers/
+
+# Claude subprocess working directory (config: claude.scratch_dir)
+.hal-mary-scratch/
