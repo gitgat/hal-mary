@@ -21,6 +21,7 @@ plain English. She makes every click herself; the application never writes to ES
 ```bash
 uv sync
 cp .env.example .env        # fill in ESPN cookies and league id
+uv run hal-mary espn-check  # check the ESPN cookies work
 uv run hal-mary sync        # pull league state
 uv run hal-mary serve       # web app + scheduler
 ```

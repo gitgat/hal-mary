@@ -22,7 +22,7 @@ __all__ = ["build_parser", "main"]
 
 DESCRIPTION = "hal-mary — a Claude-powered fantasy football advisor."
 
-EPILOG = "serve, job and draft-spike are added by later tasks."
+EPILOG = "serve and job are added by later tasks."
 
 #: The environment keys ``sync`` cannot run without. ``WEB_PASSWORD`` is needed
 #: to serve the web app but has nothing to do with reading ESPN.
