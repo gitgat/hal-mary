@@ -40,9 +40,11 @@ SLOT_LABELS = {
     "RB": "Running back",
     "WR": "Wide receiver",
     "TE": "Tight end",
-    "RB/WR/TE": "Spare running back, receiver or tight end",
-    "WR/TE": "Spare receiver or tight end",
-    "OP": "Spare attacking player",
+    # "Another", not "spare": these are starting slots, and "spare" reads as
+    # optional or bench — which is the opposite of what an open one means.
+    "RB/WR/TE": "Another running back, receiver or tight end",
+    "WR/TE": "Another receiver or tight end",
+    "OP": "Another attacking player",
     "D/ST": "Defense",
     "K": "Kicker",
     "BE": "Bench",

@@ -23,7 +23,7 @@
   <div class="card">
     {% for group in groups %}
       <div class="slot">
-        <h3>{{ group.label }} ({{ group.slot }})</h3>
+        <h3>{{ group.label }}</h3>
         {% for player in group.players %}
           <div class="player">
             <span class="who">
@@ -31,7 +31,7 @@
               {% if player.hurt %}<span class="chip bad">{{ player.injury }}</span>{% endif %}
             </span>
             <span class="meta">
-              {{ player.position or '' }}{% if player.pro_team %} · {{ player.pro_team }}{% endif %}
+              {{ player.position_word }}{% if player.pro_team %} · {{ player.pro_team }}{% endif %}
               {% if player.bye_week %}<br>Bye week {{ player.bye_week }}{% endif %}
             </span>
           </div>

@@ -149,6 +149,96 @@ def seed_advice(db_path: Path, **payload: Any) -> None:
     conn.close()
 
 
+# --- fixtures built by running the loop --------------------------------------
+#
+# Everything about an advice card below — above all *which pick it is for* — is
+# produced by the code that runs on draft night, not by a dict written here.
+# A hand-written advice row encodes what the author believed the loop stores, so
+# no assertion over it can contradict the belief that produced the bug: this
+# file once asserted, and a browser once showed, a card/pick alignment the loop
+# cannot actually produce.
+
+#: Picks in board order, skipping Bijan Robinson so he is still there to be
+#: recommended. Real names, so they match the board rather than piling up
+#: unmatched warnings that have nothing to do with the test.
+PICKED_IN_ORDER = (
+    "Ja'Marr Chase",
+    "Justin Jefferson",
+    "Saquon Barkley",
+    "Brock Bowers",
+    "Josh Allen",
+    "Puka Nacua",
+    "Trey McBride",
+)
+
+#: What the fake Claude answers with. The advisor decides which pick the card is
+#: *for*; this only decides who is in it.
+LOOP_ADVICE = {
+    "pick": "Bijan Robinson",
+    "reason": "He plays every down and catches passes, which is worth a lot here.",
+    "backups": [{"name": "Jahmyr Gibbs", "reason": "Scores nearly as often."}],
+    "watch_out": "Check he is playing before you take him.",
+}
+
+
+def espn_picks(count: int) -> list[dict[str, Any]]:
+    """``count`` picks as ESPN reports them, in a six-team snake."""
+    order = [1, 2, 3, 4, 5, 6]
+    picks = []
+    for overall in range(1, count + 1):
+        index = (overall - 1) % 6
+        if ((overall - 1) // 6) % 2 == 1:
+            index = 5 - index
+        picks.append(
+            {
+                "overall_pick": overall,
+                "round_num": (overall - 1) // 6 + 1,
+                "round_pick": index + 1,
+                "team_id": order[index],
+                "player_id": 9000 + overall,
+                "player_name": PICKED_IN_ORDER[overall - 1],
+            }
+        )
+    return picks
+
+
+async def advise_through_the_loop(db_path: Path, settings, picks_made: int):
+    """Run one real tick against ``picks_made`` picks; return the loop and client.
+
+    The board is seeded first because that is the state draft night starts in:
+    the research job ran yesterday.
+    """
+    from draft_fixtures import FakeEspnClient, FakeRunner, RecordingBus, ok_result
+
+    from hal_mary.draft.loop import DraftLoop
+
+    conn = open_conn(db_path)
+    seed_board(conn, SAMPLE_BOARD)
+    client = FakeEspnClient(picks=espn_picks(picks_made))
+    loop = DraftLoop(conn, settings, client, FakeRunner(settings, [ok_result(LOOP_ADVICE)]),
+                     RecordingBus())
+    await loop.run_once()
+    conn.close()
+    return loop, client
+
+
+def let_the_picks_land(db_path: Path, client, count: int) -> None:
+    """The first half of a tick: ESPN reports more picks, the board takes them.
+
+    Deliberately the loop's own two calls in the loop's own order, and
+    deliberately *without* the advisor — that is the window a tick passes
+    through every turn, while the next card is still being written.
+    """
+    from hal_mary.draft.loop import apply_new_picks, pending_picks
+    from hal_mary.espn.sync import sync_draft
+
+    client.picks = espn_picks(count)
+    conn = open_conn(db_path)
+    sync_draft(conn, client)
+    apply_new_picks(conn, pending_picks(conn), None)
+    conn.close()
+
+
 def text_of(html: str) -> str:
     """The page with its tags removed — what she actually reads."""
     return re.sub(r"<[^>]+>", " ", html)
@@ -268,20 +358,64 @@ def test_advice_for_an_earlier_pick_is_not_presented_as_current(db_path: Path, s
     assert "was for pick 6" in readable
 
 
-def test_a_stale_card_being_replaced_says_both_things_in_one_line(db_path: Path, settings):
-    """Two bands saying overlapping things is two thirds of a phone screen
-    spent before she reaches the recommendation."""
+async def test_the_card_names_her_pick_not_the_pick_it_was_written_on(
+    db_path: Path, settings
+):
+    """The card is written *before* her turn — that is the whole point of it.
+
+    The loop advises as soon as she is within ``advise_within_picks``, so a card
+    for pick 6 is normally written while pick 4 is on the clock. Labelling it
+    with the pick it was written on makes a correct, current card announce that
+    it is out of date and promise a replacement no code will ever write — on her
+    turn, every turn, not as an edge case.
+    """
     seed_league(db_path)
-    conn = open_conn(db_path)
-    seed_board(conn, SAMPLE_BOARD)
-    conn.close()
-    seed_advice(db_path, next_overall_pick=6)
-    # Picks 1..6 made, so pick 7 — also hers — is on the clock and a new card
-    # is being written while the pick-6 one is still on screen.
-    seed_picks(db_path, [(n, n, f"Player {n}") for n in range(1, 7)])
+    _loop, client = await advise_through_the_loop(db_path, settings, picks_made=3)
+    # Two more picks land, so hers is now on the clock — the card was for this.
+    let_the_picks_land(db_path, client, count=5)
+
+    with signed_in(db_path, settings) as client_:
+        body = client_.get("/draft").text
+    readable = text_of(body).lower()
+
+    assert "take at pick 6" in readable, "the card must name the pick it is for"
+    assert "pick 4" not in readable
+    assert "advice--stale" not in body, "a card for the pick on the clock is current"
+    assert "working out" not in readable, "nothing is being written; this is the card"
+    assert "it is your pick" in readable
+
+
+async def test_a_card_still_counts_while_her_turn_is_approaching(
+    db_path: Path, settings
+):
+    """The ordinary case: the card exists, her pick is two away, all is well."""
+    seed_league(db_path)
+    await advise_through_the_loop(db_path, settings, picks_made=3)
 
     with signed_in(db_path, settings) as client:
         body = client.get("/draft").text
+    readable = text_of(body).lower()
+    assert "take at pick 6" in readable
+    assert "advice--stale" not in body
+    assert "2 picks until yours" in readable
+
+
+async def test_a_stale_card_being_replaced_says_both_things_in_one_line(
+    db_path: Path, settings
+):
+    """Her pick has been made and the next one is also hers.
+
+    This is the window every turn passes through: the board has taken the new
+    picks and the next card has not been written yet. Two bands saying
+    overlapping things would be two thirds of a phone screen spent before she
+    reaches the recommendation, so they merge.
+    """
+    seed_league(db_path)
+    _loop, client = await advise_through_the_loop(db_path, settings, picks_made=3)
+    let_the_picks_land(db_path, client, count=6)
+
+    with signed_in(db_path, settings) as client_:
+        body = client_.get("/draft").text
     assert body.count("advice-band") == 1, "one band, not a stack of them"
     readable = text_of(body).lower()
     assert "working out pick 7" in readable
@@ -289,17 +423,76 @@ def test_a_stale_card_being_replaced_says_both_things_in_one_line(db_path: Path,
 
 
 def test_advice_being_worked_on_is_shown_as_a_state(db_path: Path, settings):
-    """Her pick is imminent and the newest card is for an older pick."""
+    """Her pick is imminent, something is polling, and no card exists yet."""
     seed_league(db_path)
     conn = open_conn(db_path)
     seed_board(conn, SAMPLE_BOARD)
     conn.close()
     # Picks 1..5 made; pick 6 is hers and is on the clock, and no card exists
-    # for it yet.
+    # for it yet. The fresh sync is the loop's own evidence of life.
     seed_picks(db_path, [(n, n, f"Player {n}") for n in range(1, 6)])
+    record_draft_sync(db_path, seconds_ago=1)
     with signed_in(db_path, settings) as client:
         body = text_of(client.get("/draft").text).lower()
     assert "working out" in body
+
+
+def test_nothing_promises_a_card_when_nothing_is_polling(db_path: Path, settings):
+    """"Working out your pick" is an inference, and it needs a falsifier.
+
+    The loop is allowed to be absent — ``start_draft_loop`` tolerates one that
+    will not start — and with nothing polling, no card is coming. A band that
+    promises one forever is worse than no band, because she waits.
+    """
+    seed_league(db_path)
+    conn = open_conn(db_path)
+    seed_board(conn, SAMPLE_BOARD)
+    conn.close()
+    seed_picks(db_path, [(n, n, f"Player {n}") for n in range(1, 6)])
+    # No sync_runs row at all: nothing has ever polled ESPN.
+    with signed_in(db_path, settings) as client:
+        body = text_of(client.get("/draft").text).lower()
+    assert "working out" not in body
+    assert "no advice yet" in body
+
+
+def test_a_long_dead_poller_stops_promising_a_card(db_path: Path, settings):
+    seed_league(db_path)
+    conn = open_conn(db_path)
+    seed_board(conn, SAMPLE_BOARD)
+    conn.close()
+    seed_picks(db_path, [(n, n, f"Player {n}") for n in range(1, 6)])
+    record_draft_sync(db_path, seconds_ago=600)
+    with signed_in(db_path, settings) as client:
+        body = text_of(client.get("/draft").text).lower()
+    assert "working out" not in body
+
+
+def test_a_loop_that_is_not_running_says_so_on_the_page(db_path: Path, settings):
+    """She must never be looking at frozen data with no sign anything is wrong."""
+    from hal_mary.web.serve import start_draft_loop
+
+    class RefusingThread:
+        def __init__(self, settings_, bus) -> None:
+            self.error = "EspnError: the ESPN cookies have expired"
+
+        def start(self) -> bool:
+            return False
+
+        def stop(self) -> None:  # pragma: no cover - never reached
+            pass
+
+    seed_league(db_path)
+    app = build_app(db_path, settings)
+    start_draft_loop(app, settings, thread_factory=RefusingThread)
+
+    with TestClient(app, follow_redirects=False) as client:
+        client.post("/login", data={"password": PASSWORD})
+        body = client.get("/draft").text
+    readable = text_of(body).lower()
+    assert "not following the draft" in readable
+    assert "by hand" in readable, "tell her what still works"
+    assert "espn cookies have expired" in readable, "and what to fix"
 
 
 # --- turn status -------------------------------------------------------------
@@ -439,6 +632,18 @@ def record_unmatched(db_path: Path, name: str, overall_pick: int = 4) -> int:
     return int(row_id)
 
 
+def test_an_unknown_position_does_not_put_a_code_in_a_sentence(db_path: Path, settings):
+    """The page's rule is no jargon; a fallback that prints the code breaks it."""
+    seed_league(db_path)
+    conn = open_conn(db_path)
+    seed_board(conn, SAMPLE_BOARD)
+    conn.close()
+    with signed_in(db_path, settings) as client:
+        readable = text_of(client.get("/draft?position=ZZ").text)
+    assert "ZZ" not in readable
+    assert "that position" in readable.lower()
+
+
 def test_unmatched_picks_appear_next_to_the_manual_entry_control(db_path: Path, settings):
     """The board and reality disagree about who is gone.
 
@@ -532,6 +737,31 @@ def test_a_manual_pick_naming_nobody_on_the_board_says_so_plainly(db_path: Path,
     assert "could not find" in readable
     assert "nobody at all" in readable
     assert "spelling" in readable, "tell her what to do about it"
+
+
+def test_a_manual_pick_with_no_board_does_not_claim_he_was_crossed_off(
+    db_path: Path, settings
+):
+    """Draft morning, an unbuilt board and ESPN down is *the* lifeline case.
+
+    ``apply_new_picks`` crosses nobody off when there is no board, and telling
+    her "the next recommendation knows it" when no list exists is a false
+    reassurance at exactly the moment she is relying on this control.
+    """
+    seed_league(db_path)  # league, but deliberately no board
+    with signed_in(db_path, settings) as client:
+        response = post(
+            client,
+            settings,
+            "/draft/pick",
+            {"player_name": "Bijan Robinson", "team_id": "2"},
+            headers={"HX-Request": "true"},
+        )
+    assert response.status_code == 200
+    readable = text_of(response.text).lower()
+    assert "the next recommendation knows it" not in readable
+    assert "no researched list" in readable
+    assert "recorded" in readable, "the pick is still kept"
 
 
 def test_a_manual_pick_with_no_name_is_refused_kindly(db_path: Path, settings):

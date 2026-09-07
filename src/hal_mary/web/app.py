@@ -61,7 +61,7 @@ from hal_mary.draft import loop as draft_loop
 from hal_mary.espn.sync import last_sync
 from hal_mary.memory import standing_memory_files
 from hal_mary.web.draft_page import draft_context
-from hal_mary.web.positions import SLOT_LABELS, slot_sort_key
+from hal_mary.web.positions import SLOT_LABELS, position_word, slot_sort_key
 
 __all__ = [
     "CSRF_FIELD",
@@ -694,10 +694,26 @@ def create_app(
 
     # -- the draft page ----------------------------------------------------
 
+    def loop_error(request: Request) -> str | None:
+        """Why the draft loop is not running, if it is not.
+
+        ``start_draft_loop`` deliberately tolerates a loop that will not start,
+        because serving the page matters more than the loop that feeds it. The
+        cost of that is a page which would otherwise show frozen data with no
+        sign anything is wrong, so the reason is read back off the app and put
+        in front of her.
+        """
+        thread = getattr(request.app.state, "draft_loop", None)
+        if thread is None or getattr(thread, "alive", False):
+            return None
+        return getattr(thread, "error", None)
+
     @private.get("/draft", response_class=HTMLResponse)
     async def draft(request: Request, position: str = "") -> HTMLResponse:
         with database() as conn:
-            context = draft_context(conn, settings, position=position)
+            context = draft_context(
+                conn, settings, position=position, loop_error=loop_error(request)
+            )
         return page(request, "draft.html", **context)
 
     @private.get("/draft/live", response_class=HTMLResponse)
@@ -709,7 +725,9 @@ def create_app(
         and the ten-second fallback poll both land here.
         """
         with database() as conn:
-            context = draft_context(conn, settings, position=position)
+            context = draft_context(
+                conn, settings, position=position, loop_error=loop_error(request)
+            )
         return _fragment(request, "partials/draft_live.html", **context)
 
     @private.post("/draft/pick")
@@ -756,6 +774,10 @@ def create_app(
             name=name,
             already=not outcome.get("recorded"),
             unmatched=bool(outcome.get("unmatched")),
+            # With no board, apply_new_picks crossed nobody off and reported no
+            # unmatched picks either — so without this the fragment would claim
+            # he is off a list that does not exist.
+            board_missing=bool(outcome.get("board_missing")),
         )
 
     @private.post("/draft/unmatched/resolve")
@@ -1034,6 +1056,7 @@ def _team_context(conn: sqlite3.Connection, settings: Settings) -> dict[str, Any
             {
                 "name": row["name"],
                 "position": row["position"],
+                "position_word": position_word(row["position"]),
                 "pro_team": row["pro_team"],
                 "bye_week": row["bye_week"],
                 "injury": (row["injury_status"] or "").upper(),

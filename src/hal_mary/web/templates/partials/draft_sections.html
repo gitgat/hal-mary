@@ -2,6 +2,18 @@
    Included by the page itself and by GET /draft/live, so both are the same
    markup by construction. #}
 
+{% if loop_error %}
+  {# The page must never be frozen data with no sign anything is wrong. The
+     loop is allowed to fail — serving the page matters more — but she has to
+     know that nothing is watching ESPN, and that the manual control still is. #}
+  <div class="stale-banner">
+    <strong>hal-mary is not following the draft.</strong>
+    Nothing is reading ESPN, so nobody will be crossed off on their own and no
+    new advice is coming. You can still mark picks by hand at the bottom of this
+    page. The reason was: {{ loop_error }}
+  </div>
+{% endif %}
+
 {% if stale %}
   <div class="stale-banner">
     <strong>hal-mary last heard from ESPN {{ stale.age }}.</strong>

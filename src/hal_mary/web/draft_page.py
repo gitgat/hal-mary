@@ -49,6 +49,7 @@ from hal_mary.draft import store
 from hal_mary.espn.sync import last_sync
 from hal_mary.league import LeagueContext, LeagueUnknown, load_league_context
 from hal_mary.web.positions import (
+    POSITION_WORDS,
     position_plural,
     position_word,
     slot_label,
@@ -194,8 +195,33 @@ def _latest_advice(conn: sqlite3.Connection) -> dict[str, Any] | None:
     return payload
 
 
+def _written_for(payload: dict[str, Any]) -> int | None:
+    """Which of *her* picks this card is advice for.
+
+    **Not ``next_overall_pick``.** That field is the pick that was on the clock
+    when the advisor ran, and the whole design is that it runs early: the loop
+    fires as soon as she is within ``draft.advise_within_picks``, so a card for
+    her pick 6 is normally written while pick 4 is on the clock, and then
+    ``_last_advised_pick`` stops it being written again. Labelling the card with
+    the pick it was written *on* makes a correct, current recommendation
+    announce that it is out of date and promise a replacement that no code will
+    ever write — on her turn, every turn.
+
+    ``my_next_picks[0]`` is the pick the advisor actually reasoned about.
+    ``next_overall_pick`` is kept only as a fallback for a row written before
+    this was understood.
+    """
+    upcoming = payload.get("my_next_picks") or []
+    if upcoming:
+        try:
+            return int(upcoming[0])
+        except (TypeError, ValueError):  # pragma: no cover - a corrupt row
+            pass
+    return payload.get("next_overall_pick")
+
+
 def _advice_card(
-    payload: dict[str, Any] | None, next_pick: int, over: bool
+    payload: dict[str, Any] | None, her_next_pick: int | None, over: bool
 ) -> dict[str, Any] | None:
     """The card, plus the two flags that decide how it is drawn.
 
@@ -204,10 +230,15 @@ def _advice_card(
     call was even attempted — the budget was gone, or the advisor never got that
     far. Both are fallbacks and both are drawn as fallbacks; the distinction only
     changes the sentence.
+
+    ``stale`` compares the card against **her next pick**, not against the pick
+    on the clock: a card written two picks early is the normal case, not a stale
+    one. It goes stale when she has picked and her next turn is a different
+    pick — which is precisely when the loop writes a new one.
     """
     if payload is None:
         return None
-    written_for = payload.get("next_overall_pick")
+    written_for = _written_for(payload)
     attempts = payload.get("attempts")
     return {
         "pick": payload.get("pick"),
@@ -222,9 +253,15 @@ def _advice_card(
         "created_at": payload.get("created_at"),
         "researched": payload.get("source") == "claude",
         "tried_to_research": bool(attempts),
-        # A card written for an earlier pick is not this pick's advice. Once the
-        # draft is over nothing is "current", so nothing is marked stale either.
-        "stale": (not over) and written_for is not None and written_for != next_pick,
+        # Once the draft is over nothing is "current", so nothing is stale
+        # either; and with no league there is no next pick to compare against,
+        # so the card is left alone rather than called wrong on a guess.
+        "stale": (
+            (not over)
+            and written_for is not None
+            and her_next_pick is not None
+            and written_for != her_next_pick
+        ),
     }
 
 
@@ -345,7 +382,13 @@ def _board_view(board: list[dict[str, Any]], position: str | None) -> dict[str, 
         "position_label": position_plural(position) if position else None,
         # Singular, for "every tight end has been taken" — the plural label
         # belongs on the button and reads as a grammatical error in a sentence.
-        "position_word": position_word(position) if position else None,
+        #
+        # Looked up directly rather than through ``position_word``, which falls
+        # back to the raw code. That fallback is right beside a player's name,
+        # where the code is what ESPN shows her; in a sentence it produces
+        # "every ZZ on the list has been taken", which is jargon arriving by
+        # accident on the page whose whole rule is that there is none.
+        "position_word": POSITION_WORDS.get(position) if position else None,
         "built_at": next((entry.get("built_at") for entry in board if entry.get("built_at")), None),
     }
 
@@ -382,6 +425,26 @@ def _unmatched(conn: sqlite3.Connection, teams: dict[int, str]) -> list[dict[str
     return rows
 
 
+def _something_is_polling(
+    conn: sqlite3.Connection, settings: Settings
+) -> bool:
+    """Is anything actually reading ESPN right now?
+
+    The draft loop is allowed to be absent — ``start_draft_loop`` tolerates a
+    loop that will not start, because serving the page matters more than the
+    loop that feeds it. So "a card is being written" must be falsifiable, or the
+    page promises one forever and she waits for it.
+
+    ``sync_draft`` writes a ``sync_runs`` row every tick, so a recent one is the
+    loop's own evidence of life. No row at all means nothing has ever polled.
+    """
+    row = last_sync(conn, "draft")
+    if row is None:
+        return False
+    seconds = seconds_since(row["finished_at"] or row["started_at"])
+    return seconds is not None and seconds <= settings.web.draft_stale_seconds
+
+
 def _staleness(
     conn: sqlite3.Connection, settings: Settings, turn: dict[str, Any]
 ) -> dict[str, Any] | None:
@@ -406,7 +469,11 @@ def _staleness(
 
 
 def draft_context(
-    conn: sqlite3.Connection, settings: Settings, *, position: str | None = None
+    conn: sqlite3.Connection,
+    settings: Settings,
+    *,
+    position: str | None = None,
+    loop_error: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the draft page. Never raises on a database in any state."""
     code = (position or "").strip().upper() or None
@@ -423,13 +490,17 @@ def draft_context(
     teams = _teams(conn)
     next_pick = store.next_overall_pick(conn)
     turn = _turn(league, teams, next_pick)
-    advice = _advice_card(_latest_advice(conn), next_pick, bool(turn.get("over")))
+    her_next_pick = (turn.get("my_next_picks") or [None])[0]
+    advice = _advice_card(_latest_advice(conn), her_next_pick, bool(turn.get("over")))
 
     # "Working on it" is derived, not stored: the advisor publishes when it is
     # done and says nothing when it starts. Her pick being inside the advisor's
-    # window with no card for the pick on the clock is exactly the window in
-    # which a card is being written — and showing that beats showing an empty
-    # space or, worse, last pick's recommendation dressed as this one's.
+    # window with no card for it is exactly the window in which one is being
+    # written — and showing that beats showing an empty space or, worse, last
+    # turn's recommendation dressed as this one's.
+    #
+    # Gated on something actually polling, because the inference is otherwise
+    # unfalsifiable: with no loop running the band would promise a card forever.
     advising = bool(
         league is not None
         and board
@@ -437,6 +508,7 @@ def draft_context(
         and turn.get("picks_until_mine") is not None
         and turn["picks_until_mine"] <= settings.draft.advise_within_picks
         and (advice is None or advice["stale"])
+        and _something_is_polling(conn, settings)
     )
 
     return {
@@ -448,6 +520,7 @@ def draft_context(
         "board": _board_view(board, code),
         "unmatched": _unmatched(conn, teams),
         "stale": _staleness(conn, settings, turn),
+        "loop_error": loop_error,
         "teams": [{"team_id": team_id, "name": name} for team_id, name in teams.items()],
         "my_team_id": league.my_team_id if league is not None else settings.team_id,
         "position": code,

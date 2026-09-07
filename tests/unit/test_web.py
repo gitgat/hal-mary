@@ -499,10 +499,27 @@ def test_team_page_shows_open_slots_as_empty_rows(db_path: Path):
     with client_for(db_path) as client:
         login(client)
         text = client.get("/team").text
-    # Every configured starting slot is visible even with nobody in it.
-    for slot in ("QB", "RB", "WR", "TE"):
+    # Every configured starting slot is visible even with nobody in it — and
+    # named, because "QB" is not a word Caroline has any reason to know.
+    for slot in ("Quarterback", "Running back", "Wide receiver", "Tight end"):
         assert slot in text
     assert "empty" in text.lower()
+
+
+def test_team_page_names_slots_and_positions_in_words(db_path: Path):
+    """``web/positions.py`` states the rule; this page has to follow it too.
+
+    It used to print the slot code in brackets after the heading it had just
+    spelled out, and the raw position beside every player.
+    """
+    populate_league(db_path)
+    populate_roster(db_path)
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/team").text
+    assert "running back · ATL" in text, "a player's position belongs in words"
+    for code in ("(QB)", "(RB)", "(WR)", "(TE)", "(RB/WR/TE)", "(BE)"):
+        assert code not in text, f"{code} is a code standing on its own"
 
 
 def test_team_page_shows_drafted_players_with_injury_and_bye(db_path: Path):

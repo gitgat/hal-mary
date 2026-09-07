@@ -13,6 +13,17 @@
     offer him. Check the spelling against ESPN and try again, or carry on and
     treat the next recommendation with suspicion.
   </p>
+{% elif board_missing %}
+  {# There is no board, so apply_new_picks crossed nobody off. Saying "the next
+     recommendation knows it" here would be a false reassurance at exactly the
+     moment she is relying on this control: draft morning, an unbuilt board and
+     ESPN down is the whole reason it exists. #}
+  <p class="result warn">{{ name }} is recorded as taken.</p>
+  <p class="small muted">
+    There is no researched list of players for hal-mary to cross him off, so this
+    is a record and nothing more — its advice cannot account for him until that
+    list is built.
+  </p>
 {% else %}
   <p class="result ok">{{ name }} is marked taken.</p>
   <p class="small muted">He is off the list, and the next recommendation knows it.</p>

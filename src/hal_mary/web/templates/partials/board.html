@@ -6,6 +6,12 @@
    twenty are crossed out is a list with nothing on it. #}
 <div class="card board">
   <h2>Still available</h2>
+  {% if not board.missing %}
+    <p class="small muted">
+      Best first. A group is a set of players the research rated as much the
+      same; group 1 is the strongest.
+    </p>
+  {% endif %}
 
   {% if board.missing %}
     <p><strong>There is no researched list of players yet.</strong></p>
@@ -41,6 +47,8 @@
         {% if board.position_word %}
           Every {{ board.position_word }} on the list has been taken. Try another
           position, or “Everyone”.
+        {% elif board.position %}
+          Nobody on the list plays that position. Try another one, or “Everyone”.
         {% else %}
           Every player on the list has been taken.
         {% endif %}
