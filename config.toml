@@ -1,0 +1,77 @@
+# hal-mary configuration. Every tunable lives here — models, cadences, tool
+# allowlists, timeouts and budgets. Code reads these through hal_mary.config;
+# nothing in src/ hardcodes a model name, timeout or cadence.
+
+[claude]
+binary = "claude"                  # overridable so tests point at a fake
+default_model = "opus"
+permission_mode = "dontAsk"
+scratch_dir = ".hal-mary-scratch"  # cwd for claude subprocesses, never the repo
+system_prompt_file = "prompts/system.md"
+
+[paths]
+prompts_dir = "prompts"
+memory_dir = "memory"
+
+[draft]
+poll_seconds = 5
+advise_within_picks = 2
+
+[web]
+host = "0.0.0.0"
+port = 8080
+session_cookie = "hal_mary_session"
+
+[jobs.board_build]
+model = "opus"
+tools = ["WebSearch", "WebFetch"]
+timeout_s = 900
+max_budget_usd = 5.0
+enabled = true
+cron = "0 6 * * *"
+
+[jobs.draft_advice]
+model = "opus"
+tools = []                # no web tools: this runs on the pick clock
+timeout_s = 45
+max_budget_usd = 1.0
+enabled = true
+
+[jobs.chat]
+model = "opus"
+tools = ["WebSearch", "WebFetch"]
+timeout_s = 300
+max_budget_usd = 2.0
+enabled = true
+
+[jobs.news_sweep]
+model = "opus"
+tools = ["WebSearch", "WebFetch"]
+timeout_s = 900
+max_budget_usd = 3.0
+enabled = true
+cron = "0 7 * * 3,6"
+
+[jobs.waiver_scan]
+model = "opus"
+tools = ["WebSearch", "WebFetch"]
+timeout_s = 900
+max_budget_usd = 3.0
+enabled = true
+cron = "0 8 * * 2"
+
+[jobs.lineup_check]
+model = "opus"
+tools = ["WebSearch", "WebFetch"]
+timeout_s = 600
+max_budget_usd = 3.0
+enabled = true
+cron = "0 9 * * 0"
+
+[jobs.weekly_recap]
+model = "opus"
+tools = ["WebSearch", "WebFetch"]
+timeout_s = 600
+max_budget_usd = 2.0
+enabled = true
+cron = "0 10 * * 2"
