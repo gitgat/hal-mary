@@ -433,6 +433,23 @@ def test_standing_memory_keeps_the_preserve_sentinel(memory_dir):
     assert "Hand-written." in text
 
 
+def test_standing_memory_ignores_example_templates(memory_dir):
+    """`memory/league.example.md` is a tracked placeholder, not standing context.
+
+    It ships in git so a fresh checkout has the template; it sits in the same
+    directory as the generated `league.md`. Feeding both to Claude would put a
+    "nothing has synced yet" placeholder in the same prompt as the real league.
+    """
+    (memory_dir / "league.example.md").write_text("Placeholder, not real.", encoding="utf-8")
+    (memory_dir / "league.md").write_text("Ten-team PPR.", encoding="utf-8")
+
+    text = memory.standing_memory(settings_for(memory_dir))
+
+    assert "league.example.md" not in text
+    assert "Placeholder, not real." not in text
+    assert text == "## From league.md\n\nTen-team PPR."
+
+
 def test_standing_memory_ignores_non_markdown_files(memory_dir):
     (memory_dir / "notes.txt").write_text("not markdown", encoding="utf-8")
     (memory_dir / "caroline.md").write_text("markdown", encoding="utf-8")

@@ -8,7 +8,9 @@ Three properties matter more than the mapping, and each has its own tests:
 * **A failed sync leaves the previous snapshot intact.** The web app showing
   stale data behind a banner beats it showing nothing while the pick clock runs.
 * **``write_league_memory`` preserves everything below the sentinel.** The
-  committed ``memory/league.md`` promises that in writing.
+  committed template ``memory/league.example.md`` promises that in writing.
+  ``memory/league.md`` itself is generated and gitignored — it holds real
+  leaguemates' names — so every test here writes into a ``tmp_path``.
 """
 
 from __future__ import annotations
