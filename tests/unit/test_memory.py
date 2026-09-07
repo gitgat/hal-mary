@@ -1,0 +1,501 @@
+"""Tests for the memory module: notes, FTS retrieval, standing files, prompt context.
+
+Every test uses a real database file under ``tmp_path`` because the FTS5 index is
+maintained by triggers, and an in-memory shortcut would not exercise the same
+migration path production runs.
+"""
+
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from hal_mary import db, memory
+from hal_mary.config import PathsConfig, load_settings
+
+
+@pytest.fixture
+def conn(tmp_path):
+    connection = db.connect(tmp_path / "hal.db")
+    db.migrate(connection)
+    yield connection
+    connection.close()
+
+
+def note(text="Bijan Robinson is questionable with an ankle injury", **kwargs):
+    """A Note with the boring fields filled in, so tests name only what matters."""
+    kwargs.setdefault("source_job", "news_sweep")
+    return memory.Note(text=text, **kwargs)
+
+
+# --- writing -----------------------------------------------------------------
+
+
+def test_write_note_round_trips_and_sets_created_at(conn):
+    note_id = memory.write_note(
+        conn,
+        memory.Note(
+            text="Ja'Marr Chase practiced in full on Friday",
+            source_job="news_sweep",
+            topic="injury",
+            player_name="Ja'Marr Chase",
+            team_abbr="CIN",
+            source_url="https://example.com/chase",
+        ),
+    )
+
+    row = conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
+    assert row["text"] == "Ja'Marr Chase practiced in full on Friday"
+    assert row["source_job"] == "news_sweep"
+    assert row["topic"] == "injury"
+    assert row["player_name"] == "Ja'Marr Chase"
+    assert row["team_abbr"] == "CIN"
+    assert row["source_url"] == "https://example.com/chase"
+    assert row["expires_at"] is None
+    # Written by the function, not the caller: ISO-8601 UTC to seconds.
+    assert row["created_at"] == db.utc_now()
+
+
+def test_write_note_rejects_blank_text(conn):
+    with pytest.raises(ValueError):
+        memory.write_note(conn, note(text="   \n\t "))
+    assert conn.execute("SELECT count(*) AS n FROM notes").fetchone()["n"] == 0
+
+
+def test_write_notes_returns_ids_in_order(conn):
+    ids = memory.write_notes(conn, [note(text="first"), note(text="second")])
+
+    assert len(ids) == 2
+    texts = [row["text"] for row in conn.execute("SELECT text FROM notes ORDER BY id")]
+    assert texts == ["first", "second"]
+
+
+def test_write_notes_is_atomic(conn):
+    with pytest.raises(ValueError):
+        memory.write_notes(conn, [note(text="good"), note(text="  "), note(text="also good")])
+
+    assert conn.execute("SELECT count(*) AS n FROM notes").fetchone()["n"] == 0
+
+
+def test_write_notes_with_no_notes_is_a_no_op(conn):
+    assert memory.write_notes(conn, []) == []
+
+
+# --- retrieval ---------------------------------------------------------------
+
+
+def backdate(conn, note_id, days):
+    """Move a note's created_at ``days`` into the past, FTS triggers and all."""
+    when = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
+    conn.execute("UPDATE notes SET created_at = ? WHERE id = ?", (when, note_id))
+
+
+def iso_in(days):
+    return (datetime.now(UTC) + timedelta(days=days)).isoformat(timespec="seconds")
+
+
+def test_search_notes_on_empty_database_returns_empty_list(conn):
+    assert memory.search_notes(conn, "anything") == []
+    assert memory.search_notes(conn, players=["Nobody"]) == []
+    assert memory.search_notes(conn) == []
+
+
+def test_search_finds_a_note_by_a_word_in_its_text(conn):
+    memory.write_note(conn, note(text="Kyren Williams left with a hamstring strain"))
+    memory.write_note(conn, note(text="The Bills are on bye in week 12"))
+
+    rows = memory.search_notes(conn, "hamstring")
+
+    assert [row["text"] for row in rows] == ["Kyren Williams left with a hamstring strain"]
+
+
+def test_search_finds_a_note_by_player_name(conn):
+    memory.write_note(
+        conn, note(text="Full practice on Friday", player_name="Puka Nacua", topic="injury")
+    )
+    memory.write_note(conn, note(text="Unrelated", player_name="Garrett Wilson"))
+
+    rows = memory.search_notes(conn, "Puka Nacua")
+
+    assert [row["player_name"] for row in rows] == ["Puka Nacua"]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Ja'Marr Chase",
+        "RB*",
+        '"quoted"',
+        "a OR b",
+        "NEAR/2",
+        "-",
+        "AND",
+        "NOT NEAR(a b)",
+        "^start",
+        "text:injury",
+        'unbalanced " quote',
+        "",
+        "   ",
+        "***",
+        "(a b) OR c",
+    ],
+)
+def test_search_never_raises_on_hostile_fts_syntax(conn, query):
+    memory.write_note(
+        conn,
+        note(text="Ja'Marr Chase is fine", player_name="Ja'Marr Chase", topic="injury"),
+    )
+
+    rows = memory.search_notes(conn, query)
+
+    assert isinstance(rows, list)
+
+
+def test_search_matches_a_name_containing_an_apostrophe(conn):
+    memory.write_note(
+        conn,
+        note(text="Ja'Marr Chase practiced in full", player_name="Ja'Marr Chase"),
+    )
+    memory.write_note(conn, note(text="Somebody else entirely", player_name="Chris Olave"))
+
+    rows = memory.search_notes(conn, "Ja'Marr Chase")
+
+    assert [row["player_name"] for row in rows] == ["Ja'Marr Chase"]
+
+
+def test_search_filters_by_players_with_no_query(conn):
+    memory.write_note(conn, note(text="older", player_name="Bijan Robinson"))
+    memory.write_note(conn, note(text="newer", player_name="Bijan Robinson"))
+    memory.write_note(conn, note(text="other", player_name="Breece Hall"))
+
+    rows = memory.search_notes(conn, players=["Bijan Robinson"])
+
+    # Newest first, so the freshest fact about a player leads the prompt.
+    assert [row["text"] for row in rows] == ["newer", "older"]
+
+
+def test_search_filters_by_topics_with_no_query(conn):
+    memory.write_note(conn, note(text="hurt", topic="injury"))
+    memory.write_note(conn, note(text="claimed", topic="waivers"))
+
+    rows = memory.search_notes(conn, topics=["injury"])
+
+    assert [row["text"] for row in rows] == ["hurt"]
+
+
+def test_search_ors_within_players_and_ands_across_filters(conn):
+    memory.write_note(conn, note(text="match", player_name="Bijan Robinson", topic="injury"))
+    memory.write_note(conn, note(text="wrong topic", player_name="Bijan Robinson", topic="usage"))
+    memory.write_note(conn, note(text="wrong player", player_name="Breece Hall", topic="injury"))
+    memory.write_note(conn, note(text="both other", player_name="Breece Hall", topic="usage"))
+
+    rows = memory.search_notes(
+        conn, players=["Bijan Robinson", "Nobody Here"], topics=["injury", "suspension"]
+    )
+
+    assert [row["text"] for row in rows] == ["match"]
+
+
+def test_search_applies_filters_alongside_a_query(conn):
+    memory.write_note(conn, note(text="ankle sprain", player_name="Bijan Robinson"))
+    memory.write_note(conn, note(text="ankle sprain", player_name="Breece Hall"))
+
+    rows = memory.search_notes(conn, "ankle", players=["Breece Hall"])
+
+    assert [row["player_name"] for row in rows] == ["Breece Hall"]
+
+
+def test_max_age_days_excludes_older_notes(conn):
+    fresh = memory.write_note(conn, note(text="fresh"))
+    stale = memory.write_note(conn, note(text="stale"))
+    backdate(conn, stale, days=40)
+
+    assert [row["id"] for row in memory.search_notes(conn, max_age_days=21)] == [fresh]
+    assert [
+        row["text"] for row in memory.search_notes(conn, "fresh OR stale", max_age_days=21)
+    ] == ["fresh"]
+    assert len(memory.search_notes(conn, max_age_days=None)) == 2
+
+
+def test_expired_notes_are_excluded_by_default_and_included_on_request(conn):
+    live = memory.write_note(conn, note(text="still true", expires_at=iso_in(3)))
+    dead = memory.write_note(conn, note(text="out for week 4", expires_at=iso_in(-3)))
+
+    assert [row["id"] for row in memory.search_notes(conn)] == [live]
+    assert sorted(row["id"] for row in memory.search_notes(conn, include_expired=True)) == sorted(
+        [live, dead]
+    )
+    assert [row["id"] for row in memory.search_notes(conn, "week OR true")] == [live]
+
+
+def test_limit_is_respected(conn):
+    for index in range(5):
+        memory.write_note(conn, note(text=f"note {index} about injury"))
+
+    assert len(memory.search_notes(conn, limit=2)) == 2
+    assert len(memory.search_notes(conn, "injury", limit=3)) == 3
+
+
+def test_a_multi_word_query_matches_any_term_best_match_first(conn):
+    both = memory.write_note(conn, note(text="Chase hamstring update"))
+    one = memory.write_note(conn, note(text="Chase is on bye"))
+
+    rows = memory.search_notes(conn, "Chase hamstring")
+
+    # OR, not AND: retrieval for a prompt should degrade to the next-best note
+    # rather than to nothing, and rank puts the note matching both terms first.
+    assert [row["id"] for row in rows] == [both, one]
+
+
+def test_empty_filter_lists_are_treated_as_no_filter(conn):
+    memory.write_note(conn, note(text="anything"))
+
+    assert len(memory.search_notes(conn, players=[], topics=[])) == 1
+
+
+# --- standing memory ---------------------------------------------------------
+
+
+@pytest.fixture
+def memory_dir(tmp_path):
+    directory = tmp_path / "memory"
+    directory.mkdir()
+    return directory
+
+
+def settings_for(memory_dir):
+    """Real Settings from the real config.toml, pointed at a temp memory dir.
+
+    ``env={}`` so the test never depends on whether this box has a .env.
+    """
+    base = load_settings(env={})
+    return base.model_copy(
+        update={
+            "paths": PathsConfig(prompts_dir=base.paths.prompts_dir, memory_dir=str(memory_dir))
+        }
+    )
+
+
+def test_standing_memory_concatenates_files_in_filename_order(memory_dir):
+    (memory_dir / "league.md").write_text("League is a 10-team PPR.\n", encoding="utf-8")
+    (memory_dir / "caroline.md").write_text("She is new to fantasy.\n", encoding="utf-8")
+
+    text = memory.standing_memory(settings_for(memory_dir))
+
+    assert text == (
+        "## From caroline.md\n\nShe is new to fantasy.\n\n"
+        "## From league.md\n\nLeague is a 10-team PPR."
+    )
+
+
+def test_standing_memory_keeps_the_preserve_sentinel(memory_dir):
+    (memory_dir / "league.md").write_text(
+        "Above.\n\n<!-- hal-mary:preserve-below -->\n\nHand-written.\n", encoding="utf-8"
+    )
+
+    text = memory.standing_memory(settings_for(memory_dir))
+
+    assert "<!-- hal-mary:preserve-below -->" in text
+    assert "Hand-written." in text
+
+
+def test_standing_memory_ignores_non_markdown_files(memory_dir):
+    (memory_dir / "notes.txt").write_text("not markdown", encoding="utf-8")
+    (memory_dir / "caroline.md").write_text("markdown", encoding="utf-8")
+
+    assert memory.standing_memory(settings_for(memory_dir)) == "## From caroline.md\n\nmarkdown"
+
+
+def test_standing_memory_skips_empty_files(memory_dir):
+    (memory_dir / "blank.md").write_text("   \n", encoding="utf-8")
+    (memory_dir / "caroline.md").write_text("real content", encoding="utf-8")
+
+    text = memory.standing_memory(settings_for(memory_dir))
+
+    assert "blank.md" not in text
+    assert text == "## From caroline.md\n\nreal content"
+
+
+def test_standing_memory_on_a_missing_directory_is_empty(tmp_path):
+    settings = settings_for(tmp_path / "does-not-exist")
+
+    assert memory.standing_memory(settings) == ""
+
+
+def test_standing_memory_on_an_empty_directory_is_empty(memory_dir):
+    assert memory.standing_memory(settings_for(memory_dir)) == ""
+
+
+def test_standing_memory_reflects_an_edit_without_a_restart(memory_dir):
+    path = memory_dir / "caroline.md"
+    path.write_text("first version", encoding="utf-8")
+    settings = settings_for(memory_dir)
+    assert "first version" in memory.standing_memory(settings)
+
+    # Bryan edits the file while the service is running; no cache may hide this.
+    path.write_text("second version", encoding="utf-8")
+
+    text = memory.standing_memory(settings)
+    assert "second version" in text
+    assert "first version" not in text
+
+
+# --- build_context -----------------------------------------------------------
+
+
+def test_build_context_orders_standing_memory_then_extras_then_notes(conn, memory_dir):
+    (memory_dir / "caroline.md").write_text("Explain every term.", encoding="utf-8")
+    memory.write_note(
+        conn,
+        memory.Note(
+            text="Practiced in full on Friday",
+            source_job="news_sweep",
+            topic="injury",
+            player_name="Ja'Marr Chase",
+            source_url="https://example.com/chase",
+        ),
+    )
+
+    text = memory.build_context(
+        conn,
+        settings_for(memory_dir),
+        players=["Ja'Marr Chase"],
+        extra_sections={"Her roster": "WR Ja'Marr Chase", "The board": "1. Bijan Robinson"},
+    )
+
+    assert text == (
+        "## What you always know\n\n"
+        "## From caroline.md\n\nExplain every term.\n\n"
+        "## Her roster\n\nWR Ja'Marr Chase\n\n"
+        "## The board\n\n1. Bijan Robinson\n\n"
+        "## What we have learned recently\n\n"
+        f"- [{db.utc_now()[:10]}] (Ja'Marr Chase, injury) Practiced in full on Friday"
+        " — source: https://example.com/chase"
+    )
+
+
+def test_build_context_renders_a_bare_note_without_stray_punctuation(conn, memory_dir):
+    memory.write_note(conn, memory.Note(text="Something happened", source_job="chat"))
+
+    text = memory.build_context(conn, settings_for(memory_dir))
+
+    assert text == (
+        f"## What we have learned recently\n\n- [{db.utc_now()[:10]}] Something happened"
+    )
+
+
+def test_build_context_renders_a_note_with_only_a_player(conn, memory_dir):
+    memory.write_note(
+        conn, memory.Note(text="Doubtful", source_job="chat", player_name="Breece Hall")
+    )
+
+    text = memory.build_context(conn, settings_for(memory_dir))
+
+    assert text.endswith("(Breece Hall) Doubtful")
+
+
+def test_build_context_renders_a_note_with_only_a_topic(conn, memory_dir):
+    memory.write_note(
+        conn, memory.Note(text="Waivers run Wednesday", source_job="chat", topic="rules")
+    )
+
+    text = memory.build_context(conn, settings_for(memory_dir))
+
+    assert text.endswith("(rules) Waivers run Wednesday")
+
+
+def test_build_context_omits_empty_sections_entirely(conn, memory_dir):
+    text = memory.build_context(
+        conn, settings_for(memory_dir), extra_sections={"Her roster": "", "The board": "  "}
+    )
+
+    assert text == ""
+    assert "##" not in text
+
+
+def test_build_context_with_only_notes_has_no_standing_heading(conn, memory_dir):
+    memory.write_note(conn, memory.Note(text="One fact", source_job="chat"))
+
+    text = memory.build_context(conn, settings_for(memory_dir))
+
+    assert "What you always know" not in text
+    assert "What we have learned recently" in text
+
+
+def test_build_context_is_byte_identical_across_identical_calls(conn, memory_dir):
+    (memory_dir / "caroline.md").write_text("Standing.", encoding="utf-8")
+    for index in range(6):
+        memory.write_note(
+            conn, memory.Note(text=f"fact {index} about injury", source_job="news_sweep")
+        )
+    settings = settings_for(memory_dir)
+
+    first = memory.build_context(conn, settings, query="injury", extra_sections={"Board": "b"})
+    second = memory.build_context(conn, settings, query="injury", extra_sections={"Board": "b"})
+
+    assert first == second
+
+
+def test_build_context_defaults_to_three_weeks_of_notes(conn, memory_dir):
+    fresh = memory.write_note(conn, memory.Note(text="fresh fact", source_job="chat"))
+    stale = memory.write_note(conn, memory.Note(text="stale fact", source_job="chat"))
+    backdate(conn, stale, days=40)
+    assert fresh  # both were written
+
+    default_text = memory.build_context(conn, settings_for(memory_dir))
+    history_text = memory.build_context(conn, settings_for(memory_dir), max_age_days=None)
+
+    assert "stale fact" not in default_text
+    assert "fresh fact" in default_text
+    assert "stale fact" in history_text
+
+
+def test_build_context_respects_note_limit(conn, memory_dir):
+    for index in range(5):
+        memory.write_note(conn, memory.Note(text=f"fact {index}", source_job="chat"))
+
+    text = memory.build_context(conn, settings_for(memory_dir), note_limit=2)
+
+    assert sum(1 for line in text.splitlines() if line.startswith("- ")) == 2
+
+
+def test_build_context_on_an_empty_database_and_no_memory_files(conn, memory_dir):
+    assert memory.build_context(conn, settings_for(memory_dir)) == ""
+
+
+# --- pruning -----------------------------------------------------------------
+
+
+def test_prune_notes_on_an_empty_table_returns_zero(conn):
+    assert memory.prune_notes(conn, older_than_days=30) == 0
+
+
+def test_prune_notes_deletes_old_notes_and_keeps_unexpired_ones(conn):
+    recent = memory.write_note(conn, note(text="recent"))
+    old = memory.write_note(conn, note(text="old"))
+    backdate(conn, old, days=90)
+    old_but_still_valid = memory.write_note(conn, note(text="old but valid", expires_at=iso_in(30)))
+    backdate(conn, old_but_still_valid, days=90)
+    old_and_expired = memory.write_note(conn, note(text="old and expired", expires_at=iso_in(-1)))
+    backdate(conn, old_and_expired, days=90)
+
+    deleted = memory.prune_notes(conn, older_than_days=30)
+
+    assert deleted == 2
+    remaining = [row["id"] for row in conn.execute("SELECT id FROM notes ORDER BY id")]
+    assert remaining == [recent, old_but_still_valid]
+    assert old not in remaining and old_and_expired not in remaining
+
+
+def test_prune_notes_keeps_the_fts_index_in_step(conn):
+    old = memory.write_note(conn, note(text="hamstring news from long ago"))
+    backdate(conn, old, days=90)
+    memory.write_note(conn, note(text="hamstring news from today"))
+
+    memory.prune_notes(conn, older_than_days=30)
+
+    assert [row["text"] for row in memory.search_notes(conn, "hamstring")] == [
+        "hamstring news from today"
+    ]
+    # The two-argument form is the only one that compares the index against the
+    # content table; the one-argument form does not detect a stale index.
+    conn.execute("INSERT INTO notes_fts(notes_fts, rank) VALUES('integrity-check', 1)")
