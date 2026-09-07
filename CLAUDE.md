@@ -79,13 +79,23 @@ pick-clock path is wrong.
 
 - **The ESPN API is unofficial.** Cookies (`ESPN_S2`, `SWID`) expire. The status page checks auth
   hourly; when it breaks in-season, that is the first thing to look at.
+- **ESPN pre-populates the whole draft board before the draft starts.** `draftDetail.picks` holds
+  one row per slot — 96 for a 6-team, 16-round league — every one with `playerId: -1` and no name,
+  from the moment the league exists. A pick counts only when a real player is attached to it;
+  `hal_mary.espn.client.pick_is_made` is the single definition and `draft_picks()` applies it at the
+  boundary so nothing downstream has to. The empty rows are the pick schedule, not noise:
+  `draft_schedule()` returns them.
+- **`draftSettings.pickOrder` is provisional until the draft opens.** This league's `orderType` is
+  `DRAFT_START`, so ESPN assigns the real order when the draft begins. Re-read it then; never cache
+  a pre-draft order or a pre-draft `draft_schedule()`.
 - **Never poll a live draft through `espn-api`.** `refresh_draft()` appends to a list cleared only
   in the constructor, and `_fetch_draft` returns early unless `draftDetail.drafted` is true — a flag
   that may only be set once the draft is over. `hal_mary.espn.client.draft_picks()` reads the raw
   `mDraftDetail` endpoint and ignores that flag; see `docs/DECISIONS.md`.
 - **The ESPN fixtures in `tests/fixtures/espn/` are synthetic** until someone runs
-  `uv run python scripts/record_espn_fixtures.py` with real cookies. No test may reach the network;
-  `tests/conftest.py` blocks both HTTP stacks.
+  `uv run python scripts/record_espn_fixtures.py` with real cookies — the one exception is
+  `draft_detail_prepopulated_real_league.json`, built field for field from the real pre-draft
+  payload. No test may reach the network; `tests/conftest.py` blocks both HTTP stacks.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export
   mounted on every node, and SQLite on NFS corrupts. The production VM keeps `hal.db` on its own
   disk.

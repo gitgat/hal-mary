@@ -343,6 +343,15 @@ def sync_draft(conn: sqlite3.Connection, client: Any) -> list[dict[str, Any]]:
 
     Picks already stored keep their original ``seen_at``, so "when did we first
     see this pick" survives a correction to the pick itself.
+
+    **Every pick here is a pick that happened.** ESPN pre-populates the whole
+    draft board before a draft starts — 96 empty slots for a 6-team, 16-round
+    league — and ``client.draft_picks()`` filters those out at the boundary, so
+    ``draft_picks`` never holds a row for a slot nobody has drafted into. Until
+    that filter existed the very first sync reported an entire draft in one tick.
+    The empty slots are the pick schedule and are read from
+    ``client.draft_schedule()`` instead; they are deliberately not persisted
+    here, because which team owns a slot can change when the draft opens.
     """
     _require_no_open_transaction(conn, "sync_draft")
     run_id = _sync_run_started(conn, "draft")

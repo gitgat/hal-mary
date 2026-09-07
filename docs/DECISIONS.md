@@ -237,3 +237,48 @@ maps to a stable fake.
 shapes in the `espn_api` source, because there were no credentials when the client was written. They
 pin the mapping honestly but cannot be trusted about ESPN's real vocabulary. Re-record them the
 first time cookies exist.
+
+---
+
+## 2026-09-07 — A pick is not a pick until a player is attached to it
+
+**Decision:** `EspnClient.draft_picks()` returns only slots that a real player has been drafted into.
+`playerId` must be present and greater than zero; `-1`, `0`, `null` and a missing key all mean "not
+yet picked". The rule is written down once, as `hal_mary.espn.client.pick_is_made`, and applied at
+the client boundary. `EspnClient.draft_schedule()` returns every slot, made or not.
+
+**Why:** ESPN **pre-populates the entire draft board before the draft starts.** The first real sync
+of Caroline's real league returned 96 rows — 6 teams by 16 rounds — every one carrying `playerId: -1` and
+no name, with `draftDetail.drafted` and `inProgress` both false. Reading those as picks broke the
+draft path in the ordinary case, not an edge case: `sync_draft` returned 96 "new" picks on its first
+call, so the loop would believe a whole draft happened in one tick; `picks_until_mine` would reason
+from a finished board; `apply_picks` would try to match a player with id `-1` and no name against
+every board row — and the board deliberately allows negative ids for researched players, so that is a
+real collision, not a theoretical one. The advisor would then be asked to recommend a pick for a
+draft it thought was over.
+
+**Why the client layer:** it is the one place that knows ESPN's vocabulary. Filtering in `sync_draft`
+would leave the same trap set for the draft loop, the board and every future consumer, each of which
+would have to remember a rule that is invisible in the data. The boundary filters once; nothing
+downstream carries the knowledge.
+
+**Why keep the placeholder rows:** they are the pick schedule. They say which team owns each overall
+pick and how many rounds the draft runs, which is exactly what `picks_until_mine` and
+`my_upcoming_picks` need. Reading that from ESPN beats deriving it from a pick order plus a snake
+rule that we would have to keep in step with the league's settings by hand.
+
+**Why the schedule is not persisted:** it is derived from `draftSettings.pickOrder`, and this
+league's `draftSettings.orderType` is `DRAFT_START` — ESPN assigns the real order when the draft
+begins. The pre-draft board is built from a provisional order (currently the identity `[1,2,3,4,5,6]`
+in a league only four of six managers have joined), so a cached schedule would be a plausible-looking
+lie about who picks when. It costs one HTTP call the loop is already making to re-read, and the
+`mDraftDetail` response carries `settings.draftSettings` — pick order, type and clock — alongside the
+picks, so one request answers both questions.
+
+**Pinned by:** `test_a_prepopulated_board_is_no_picks_at_all` and
+`test_sync_draft_ignores_espns_prepopulated_board`, both against
+`tests/fixtures/espn/draft_detail_prepopulated_real_league.json` — 96 slots built field for field
+from the real payload, and the only fixture in the tree that is not synthetic.
+
+**Would revisit if:** ESPN ever starts using a positive placeholder id, which would make the rule
+unenforceable from the pick row alone and would need cross-checking against `draftDetail.inProgress`.
