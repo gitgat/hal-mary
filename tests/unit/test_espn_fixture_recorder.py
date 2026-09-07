@@ -233,6 +233,112 @@ def test_ordinary_league_data_is_left_alone(recorder):
     assert recorder.scrub(payload) == payload
 
 
+ADVERSARIAL_LEAGUE = {
+    "id": 1234567,
+    "settings": {"name": "The Gridiron Gauntlet", "size": 4},
+    "members": [
+        {"id": REAL_SWID, "firstName": "Caroline", "lastName": "Reed", "displayName": "creed88"},
+    ],
+    "teams": [
+        # Fully populated, the shape roster.json has.
+        {
+            "id": 1,
+            "abbrev": "CARO",
+            "owners": [REAL_SWID],
+            "location": "Caroline's",
+            "nickname": "Chaos",
+            "name": "Caroline's Chaos",
+            "logo": "https://example.com/u/caroline-reed/avatar.png",
+        },
+        # Name and abbrev only.
+        {"id": 2, "abbrev": "DANA", "name": "Dana's Destroyers"},
+        # Name only, and nothing else at all. No marker key can see this one.
+        {"id": 3, "name": "Bare Name Only"},
+    ],
+    # ESPN nests abbreviated team references here, outside any `teams` list.
+    "schedule": [{"home": {"teamId": 1, "name": "Nested Ref Name"}}],
+    "communication": {
+        "topics": [{"messages": [{"id": 1, "text": "Marcus owes the pot $20"}]}],
+    },
+    "contact": {"email": "caroline@example.com"},
+}
+
+#: Every real value in ADVERSARIAL_LEAGUE that must not survive.
+IDENTIFYING = (
+    "Caroline",
+    "Reed",
+    "creed88",
+    "CARO",
+    "DANA",
+    "Chaos",
+    "Destroyers",
+    "Bare Name Only",
+    "Nested Ref Name",
+    "Marcus",
+    "caroline@example.com",
+    "example.com",
+    REAL_SWID,
+)
+
+
+def test_nothing_identifying_survives_an_adversarial_payload(recorder):
+    """"What could ESPN send", as opposed to "what did ESPN send".
+
+    The real-payload test below is the better test of the two for catching
+    fields I did not think about, but every team object in that fixture is
+    fully populated, so it cannot reach a team that carries a name and nothing
+    else — and that is exactly the shape that kept its real name through two
+    rounds of fixes.
+    """
+    scrubbed = json.dumps(recorder.scrub(ADVERSARIAL_LEAGUE, secrets=[REAL_S2, REAL_SWID]))
+
+    leaked = [value for value in IDENTIFYING if value in scrubbed]
+    assert leaked == []
+
+
+def test_a_team_is_a_team_because_of_where_it_sits_not_what_it_carries(recorder):
+    """Position, not shape.
+
+    Marker-sniffing asks "does this dict look like a team", which is a guess and
+    was wrong twice. Anything under a key that holds teams *is* a team, whatever
+    fields it happens to carry.
+    """
+    scrubbed = recorder.scrub({"teams": [{"id": 3, "name": "Bare Name Only"}]})
+
+    assert scrubbed["teams"][0]["name"].startswith("Team ")
+    assert scrubbed["teams"][0]["id"] == 3
+
+
+def test_a_nested_team_reference_is_a_team_too(recorder):
+    """`home` and `away` hold one team each, not a list of them."""
+    payload = {"schedule": [{"home": {"teamId": 1, "name": "Caroline's Chaos"}}]}
+
+    scrubbed = recorder.scrub(payload)
+
+    assert scrubbed["schedule"][0]["home"]["name"].startswith("Team ")
+    assert scrubbed["schedule"][0]["home"]["teamId"] == 1
+
+
+def test_our_own_swid_is_pseudonymised_like_everyone_elses(recorder):
+    """The recorder passes Caroline's SWID as a secret, and it is also a member id.
+
+    Redacting it while pseudonymising the others would single her out and break
+    the owner-to-member link for her team alone.
+    """
+    payload = {
+        "members": [{"id": REAL_SWID}, {"id": OTHER_SWID}],
+        "teams": [{"id": 1, "owners": [REAL_SWID]}],
+    }
+
+    scrubbed = recorder.scrub(payload, secrets=[REAL_SWID])
+
+    ours = scrubbed["members"][0]["id"]
+    assert REAL_SWID not in json.dumps(scrubbed)
+    assert ours != recorder.REDACTED
+    assert ours != scrubbed["members"][1]["id"]
+    assert scrubbed["teams"][0]["owners"] == [ours]
+
+
 def test_the_scrubber_reaches_every_identity_field_of_a_real_league_payload(recorder):
     """Run it over a whole league response, not a payload shaped by my assumptions.
 

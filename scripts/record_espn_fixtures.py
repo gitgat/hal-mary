@@ -81,17 +81,34 @@ REDACTED_VALUE_KEYS = frozenset(
     {"logo", "logoUrl", "message", "messages", "text", "note", "notes", "comment"}
 )
 
-#: What makes a dict team-shaped, and therefore its ``name`` a person's problem.
+#: Keys whose contents are teams, whatever fields those teams happen to carry.
 #:
-#: Deliberately broad. 2023-and-later payloads send a team's ``name`` with no
-#: ``owners``, ``roster`` or ``playoffSeed`` alongside it, so a narrow marker set
-#: silently keeps the real value. Erring wide costs an NFL team's name in the
-#: pro-schedule fixture, which nothing reads — the library resolves pro teams by
-#: id — while erring narrow costs somebody's name in git forever.
+#: This is the primary rule and it is about **position, not shape**. Asking "does
+#: this dict look like a team" is a guess, and it was wrong twice: a team object
+#: carrying only ``id`` and ``name`` matches no marker at all and kept its real
+#: name through two rounds of fixes. Anything under one of these keys *is* a
+#: team; there is nothing to infer.
 #:
-#: What this deliberately does *not* match: the league's own ``settings.name``
-#: and the division names, which are not personal data in the way a member's
-#: name is and are much of the reason to re-record at all.
+#: Applies to a list's items (``teams``) and to a single nested dict alike
+#: (``home``/``away`` in a schedule entry), because ESPN uses both.
+TEAM_CONTAINER_KEYS = frozenset(
+    {"teams", "home", "away", "team", "opponent", "nominatingTeam"}
+)
+
+#: Fallback for team-shaped dicts that appear somewhere else.
+#:
+#: ESPN nests abbreviated team references inside schedule and matchup payloads,
+#: outside any ``teams`` list, and those can carry a name and little else. So the
+#: shape heuristic stays — as a second net under the positional rule, never as
+#: the only one.
+#:
+#: Deliberately broad. Erring wide costs an NFL team's name in the pro-schedule
+#: fixture, which nothing reads because the library resolves pro teams by id;
+#: erring narrow costs somebody's name in git forever.
+#:
+#: What neither rule matches, on purpose: the league's own ``settings.name`` and
+#: the division names. They are not personal data in the way a member's name is,
+#: and real vocabulary is much of the reason to re-record at all.
 TEAM_MARKER_KEYS = frozenset(
     {
         "abbrev",
@@ -103,6 +120,7 @@ TEAM_MARKER_KEYS = frozenset(
         "playoffSeed",
         "record",
         "roster",
+        "teamId",
         "transactionCounter",
         "waiverRank",
     }
@@ -158,10 +176,15 @@ def scrub(payload: Any, secrets: list[str] | None = None) -> Any:
     def scrub_string(value: str, key: str | None) -> str:
         if key and SECRET_KEY_RE.search(key):
             return REDACTED
-        if any(secret and secret in value for secret in live):
-            return REDACTED
+        # SWID shape before the live-secret check, deliberately. Our own SWID is
+        # passed in as a secret *and* appears as a member id, and redacting it
+        # while pseudonymising everyone else's would single Caroline out and
+        # break the owner-to-member link for her team alone. Pseudonymising is
+        # just as safe: the real value does not survive either way.
         if SWID_RE.match(value):
             return swids.for_value(value)
+        if any(secret and secret in value for secret in live):
+            return REDACTED
         if OPAQUE_TOKEN_RE.match(value):
             return REDACTED
         return value
@@ -176,16 +199,17 @@ def scrub(payload: Any, secrets: list[str] | None = None) -> Any:
                 return team_abbrevs.for_value(value)
             if name in TEAM_NAME_KEYS or (name == "name" and is_team):
                 return team_names.for_value(value)
-        return walk(value, name)
+        return walk(value, name, name in TEAM_CONTAINER_KEYS)
 
-    def walk(node: Any, key: str | None = None) -> Any:
+    def walk(node: Any, key: str | None = None, in_teams: bool = False) -> Any:
         if isinstance(node, dict):
-            is_team = bool(TEAM_MARKER_KEYS & node.keys())
+            # Position first, shape only as a fallback.
+            is_team = in_teams or bool(TEAM_MARKER_KEYS & node.keys())
             return {
                 name: scrub_field(str(name), value, is_team) for name, value in node.items()
             }
         if isinstance(node, list):
-            return [walk(item, key) for item in node]
+            return [walk(item, key, in_teams) for item in node]
         if isinstance(node, str):
             return scrub_string(node, key)
         return node
