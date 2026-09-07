@@ -17,6 +17,17 @@ memory_dir = "memory"
 poll_seconds = 5
 advise_within_picks = 2
 
+# How much of the board each prompt sees. board_size is the pre-draft research
+# job, which has fifteen minutes. The advice_* sizes run against a 90-second
+# pick clock: bigger is better reasoning right up until the answer arrives after
+# the pick was due. advice_retry_candidates is the shorter second attempt.
+board_size = 200
+research_note_limit = 30
+advice_candidates = 14
+advice_retry_candidates = 5
+advice_recent_picks = 8
+advice_note_limit = 12
+
 # The manual fallback for the league's own settings.
 #
 # Normally `hal-mary sync` reads these from ESPN into the league_settings table

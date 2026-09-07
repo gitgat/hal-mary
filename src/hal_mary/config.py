@@ -90,8 +90,26 @@ class PathsConfig(_Frozen):
 
 
 class DraftConfig(_Frozen):
+    """How the draft loop behaves, and how much of the board each prompt sees.
+
+    The sizes are here rather than in the code because they are the dial between
+    a prompt that is too thin to reason from and one that will not come back
+    inside the pick clock. Defaults are supplied so an older ``config.toml``
+    without them still loads.
+    """
+
     poll_seconds: int
     advise_within_picks: int
+    #: How many players the pre-draft research job is asked to rank.
+    board_size: int = 200
+    #: Notes retrieved into the (slow, pre-draft) research prompt.
+    research_note_limit: int = 30
+    #: Board rows shown to the advisor on the clock, and on its shorter retry.
+    advice_candidates: int = 14
+    advice_retry_candidates: int = 5
+    #: Recent picks shown to the advisor, and notes retrieved for its candidates.
+    advice_recent_picks: int = 8
+    advice_note_limit: int = 12
 
 
 class EspnConfig(_Frozen):
