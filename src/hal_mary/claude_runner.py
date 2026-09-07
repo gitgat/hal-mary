@@ -121,7 +121,12 @@ CONTEXT_SEPARATOR = "\n\n--- END CONTEXT ---\n\n"
 #: Also not here: ``ANTHROPIC_API_KEY`` and the rest of ``ANTHROPIC_*``. The
 #: binary authenticates from the subscription credentials under ``HOME``, which
 #: is why ``HOME`` is on the list. A box that meant to bill an API key instead
-#: would need it added here explicitly, which is the right way round.
+#: would need it added here explicitly, which is the right way round — and
+#: :func:`child_environment` says so in the log when it drops one, because that
+#: is the single case in this whole list that would otherwise be silent: a box
+#: carrying both a login and a key keeps working, on the subscription, and the
+#: only evidence is the invoice. A box with no ``~/.claude`` at all fails on the
+#: next call, loudly, and needs no warning.
 ENV_PASSTHROUGH: tuple[str, ...] = (
     "PATH",          # find node, and whatever the binary shells out to
     "HOME",          # ~/.claude — the subscription credentials and CLI state
@@ -163,6 +168,14 @@ def child_environment(source: Mapping[str, str] | None = None) -> dict[str, str]
     file written to the wrong place.
     """
     env = os.environ if source is None else source
+    if env.get("ANTHROPIC_API_KEY"):
+        log.warning(
+            "ANTHROPIC_API_KEY is set but is not passed to %s; the call will be "
+            "billed to the subscription credentials under HOME instead. Add it "
+            "to claude_runner.ENV_PASSTHROUGH if this box is meant to bill the "
+            "key.",
+            "claude",
+        )
     return {
         key: value
         for key, value in env.items()

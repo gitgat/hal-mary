@@ -83,6 +83,13 @@ DEFAULT_DB_PATH = "./hal.db"
 #: Config keys that name a path and are anchored to the config file's directory,
 #: keyed by the section attribute they live on. Adding a path to config.toml
 #: means adding it here; nothing else has to change.
+#:
+#: ``claude.binary`` is deliberately **not** here and must not be added. It is a
+#: command name, not a path: the shipped value is a bare ``"claude"``, which has
+#: to reach ``subprocess`` unchanged so it is looked up on ``PATH``. Anchoring it
+#: would turn that into ``<config dir>/claude`` and break every call. The cost is
+#: that a *relative* binary path like ``"./bin/claude"`` still resolves against
+#: the working directory — write it absolute if you need to point at one.
 ANCHORED_PATHS: dict[str, tuple[str, ...]] = {
     "claude": ("scratch_dir", "system_prompt_file"),
     "paths": ("prompts_dir", "memory_dir"),
@@ -276,8 +283,15 @@ class Settings(_Frozen):
         Settings — a direct construction in a test, a ``model_validate``, a
         future loader — can produce one carrying a working-directory-relative
         path. Absolute values pass through exactly as given.
+
+        ``config_path`` is itself resolved first, and that ``.resolve()`` is what
+        makes the promise above true rather than nearly true. ``load_settings``
+        always hands over an absolute path, but ``config_path`` is a public
+        field: a relative one would anchor every other path to a relative root,
+        which is the original bug wearing the guard's uniform.
         """
-        root = self.config_path.expanduser().parent
+        root = self.config_path.expanduser().resolve().parent
+        object.__setattr__(self, "config_path", self.config_path.expanduser().resolve())
         for section, fields in ANCHORED_PATHS.items():
             current = getattr(self, section)
             object.__setattr__(

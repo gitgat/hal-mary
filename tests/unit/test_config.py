@@ -10,7 +10,16 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from hal_mary.config import ENV_KEYS, ConfigError, Settings, load_settings
+from hal_mary.config import (
+    ENV_KEYS,
+    ClaudeConfig,
+    ConfigError,
+    DraftConfig,
+    PathsConfig,
+    Settings,
+    WebConfig,
+    load_settings,
+)
 
 MINIMAL_TOML = """
 [claude]
@@ -392,3 +401,48 @@ def test_resolved_paths_reports_each_path_and_whether_it_exists(minimal_config, 
     assert report["Memory"] == (tmp_path / "memory", True)
     assert report["Prompts"] == (tmp_path / "prompts", False)
     assert report["Config file"] == (minimal_config, True)
+
+
+def test_a_relative_config_path_still_yields_absolute_paths(tmp_path, monkeypatch):
+    """The validator's promise is that *no* route to a Settings produces a
+    cwd-relative path. ``config_path`` is a public field, so a future loader or
+    test helper setting a relative one must not reintroduce the bug with the
+    guard apparently still standing.
+    """
+    (tmp_path / "config.toml").write_text(textwrap.dedent(MINIMAL_TOML))
+    monkeypatch.chdir(tmp_path)
+
+    loaded = load_settings(config_path=tmp_path / "config.toml", env={})
+    # model_validate is the route a future loader would take; the relative
+    # config_path is what it might plausibly hand over.
+    settings = Settings.model_validate({**loaded.model_dump(), "config_path": "config.toml"})
+
+    assert settings.config_path.is_absolute()
+    assert settings.paths.memory_dir == tmp_path / "memory"
+    assert settings.db_path == tmp_path / "hal.db"
+    assert settings.claude.scratch_dir.is_absolute()
+
+
+def test_settings_constructed_directly_with_a_relative_config_path_anchors_absolutely(
+    tmp_path, monkeypatch
+):
+    """The same thing by the shortest route: a plain constructor call."""
+    monkeypatch.chdir(tmp_path)
+
+    settings = Settings(
+        config_path=Path("deploy/config.toml"),
+        claude=ClaudeConfig(
+            default_model="m",
+            permission_mode="dontAsk",
+            scratch_dir=".scratch",
+            system_prompt_file="prompts/system.md",
+        ),
+        paths=PathsConfig(prompts_dir="prompts", memory_dir="memory"),
+        draft=DraftConfig(poll_seconds=5, advise_within_picks=2),
+        web=WebConfig(host="127.0.0.1", port=8080, session_cookie="c"),
+        jobs={},
+    )
+
+    assert settings.paths.memory_dir == tmp_path / "deploy" / "memory"
+    assert settings.claude.system_prompt_file == tmp_path / "deploy" / "prompts" / "system.md"
+    assert settings.db_path == tmp_path / "deploy" / "hal.db"

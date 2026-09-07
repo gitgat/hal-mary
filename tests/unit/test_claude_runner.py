@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass
@@ -778,3 +779,29 @@ def test_an_unset_allowlisted_variable_is_simply_absent(monkeypatch):
     monkeypatch.delenv("TMPDIR", raising=False)
 
     assert "TMPDIR" not in child_environment()
+
+
+def test_dropping_an_api_key_says_so(monkeypatch, caplog):
+    """The one genuinely silent case in the allowlist.
+
+    A box with no ``~/.claude`` fails loudly on the next call. A box carrying
+    both a login *and* an ANTHROPIC_API_KEY meant for billing does not: it falls
+    back to the subscription and the only evidence is the invoice.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-whatever")
+
+    with caplog.at_level(logging.WARNING, logger="hal_mary.claude_runner"):
+        built = child_environment()
+
+    assert "ANTHROPIC_API_KEY" not in built
+    assert "ANTHROPIC_API_KEY" in caplog.text
+    assert "subscription" in caplog.text.lower()
+
+
+def test_no_api_key_means_no_warning(monkeypatch, caplog):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    with caplog.at_level(logging.WARNING, logger="hal_mary.claude_runner"):
+        child_environment()
+
+    assert caplog.records == []

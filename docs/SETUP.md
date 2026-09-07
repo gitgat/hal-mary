@@ -57,7 +57,22 @@ Fill in:
 | `TEAM_ID` | Caroline's team id |
 | `SEASON` | the season year, e.g. `2026` |
 | `WEB_PASSWORD` | a password for the web app; anyone on the network who knows it can read the league |
-| `DB_PATH` | where the database lives; defaults to `./hal.db` |
+| `DB_PATH` | where the database lives; defaults to `./hal.db`. A relative value is resolved against the directory holding `config.toml`, **not** the working directory — see below. Set it absolute for a real deployment. |
+
+### Every path is resolved against `config.toml`, not the working directory
+
+`paths.prompts_dir`, `paths.memory_dir`, `claude.scratch_dir`, `claude.system_prompt_file` and
+`DB_PATH` are all anchored to the directory holding the `config.toml` that was actually loaded —
+which `HAL_MARY_CONFIG` can move. Absolute values are used exactly as given.
+
+This matters because the failure it prevents is silent. Resolved against the *working* directory, a
+service started anywhere but the checkout finds no `memory/`, so every prompt goes out without the
+standing context that says who Caroline is and what the league's rules are — no crash, no error, just
+worse advice — and a relative `DB_PATH` opens a brand new empty database instead of the real one.
+
+The status page has a **"Where the files are"** card listing every resolved path and whether it
+exists. If the advice ever looks like it has forgotten who it is talking to, look there first:
+a missing memory directory is called out by name in the problems box at the top of that page.
 
 Verify with:
 
