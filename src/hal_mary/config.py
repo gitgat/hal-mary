@@ -34,6 +34,7 @@ __all__ = [
     "ClaudeConfig",
     "ConfigError",
     "DraftConfig",
+    "EspnConfig",
     "JobConfig",
     "PathsConfig",
     "Settings",
@@ -92,6 +93,20 @@ class DraftConfig(_Frozen):
     advise_within_picks: int
 
 
+class EspnConfig(_Frozen):
+    """Transport limits for the raw ESPN reads.
+
+    These belong here rather than in the client because they are bounded by the
+    thing configured immediately above them: the pick clock is 60 to 90 seconds
+    and ``draft.poll_seconds`` is 5, so a read that outlives its poll silently
+    stops the draft loop. Defaults are supplied so an older ``config.toml``
+    without an ``[espn]`` section still loads.
+    """
+
+    connect_timeout_s: float = 10.0
+    read_timeout_s: float = 15.0
+
+
 class WebConfig(_Frozen):
     host: str
     port: int
@@ -120,6 +135,7 @@ class Settings(_Frozen):
     claude: ClaudeConfig
     paths: PathsConfig
     draft: DraftConfig
+    espn: EspnConfig = EspnConfig()
     web: WebConfig
     jobs: dict[str, JobConfig]
 
@@ -246,6 +262,7 @@ def load_settings(
         claude = ClaudeConfig(**raw.get("claude", {}))
         paths = PathsConfig(**raw.get("paths", {}))
         draft = DraftConfig(**raw.get("draft", {}))
+        espn = EspnConfig(**raw.get("espn", {}))
         web = WebConfig(**raw.get("web", {}))
     except Exception as exc:
         raise ConfigError(f"{path} is missing or has an invalid section: {exc}") from exc
@@ -261,6 +278,7 @@ def load_settings(
         claude=claude,
         paths=paths,
         draft=draft,
+        espn=espn,
         web=web,
         jobs=jobs,
         espn_s2=values.get("ESPN_S2"),

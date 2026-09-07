@@ -246,3 +246,31 @@ def test_an_explicit_env_mapping_ignores_the_dotenv_overrides(minimal_config, mo
     settings = load_settings(config_path=minimal_config, env={"ESPN_S2": "explicit"})
     assert settings.espn_s2 == "explicit"
     assert settings.swid is None
+
+
+def test_espn_timeouts_are_read_from_the_toml(tmp_path):
+    """Transport limits are config, not constants: CLAUDE.md rule 5 names timeouts."""
+    path = tmp_path / "config.toml"
+    path.write_text(
+        textwrap.dedent(MINIMAL_TOML) + "\n[espn]\nconnect_timeout_s = 3.5\nread_timeout_s = 7.0\n"
+    )
+
+    settings = load_settings(config_path=path, env={})
+
+    assert settings.espn.connect_timeout_s == 3.5
+    assert settings.espn.read_timeout_s == 7.0
+
+
+def test_espn_section_is_optional_and_defaults_are_sane(minimal_config):
+    """An older config.toml still loads; the defaults are bounded by the pick clock."""
+    settings = load_settings(config_path=minimal_config, env={})
+
+    assert settings.espn.connect_timeout_s > 0
+    assert settings.espn.read_timeout_s > settings.draft.poll_seconds
+
+
+def test_the_shipped_config_declares_the_espn_timeouts():
+    settings = load_settings(env={})
+
+    assert settings.espn.connect_timeout_s == 10.0
+    assert settings.espn.read_timeout_s == 15.0

@@ -1,0 +1,143 @@
+{
+  "players": [
+    {
+      "id": 4426515,
+      "onTeamId": 0,
+      "status": "FREEAGENT",
+      "keeperValue": 0,
+      "keeperValueFuture": 0,
+      "lineupLocked": false,
+      "rosterLocked": false,
+      "tradeLocked": false,
+      "waiverProcessDate": null,
+      "player": {
+        "id": 4426515,
+        "fullName": "Sam LaPorta",
+        "firstName": "Sam",
+        "lastName": "LaPorta",
+        "proTeamId": 8,
+        "defaultPositionId": 4,
+        "eligibleSlots": [
+          6,
+          5,
+          23,
+          7,
+          20,
+          21
+        ],
+        "jersey": "87",
+        "active": true,
+        "droppable": true,
+        "injured": true,
+        "injuryStatus": "OUT",
+        "ownership": {
+          "percentOwned": 62.3,
+          "percentStarted": 57.3,
+          "percentChange": 0.0
+        },
+        "stats": [],
+        "positionalRanking": 12
+      },
+      "ratings": {
+        "0": {
+          "positionalRanking": 12,
+          "totalRanking": 96,
+          "totalRating": 0.0
+        }
+      }
+    },
+    {
+      "id": 4431299,
+      "onTeamId": 0,
+      "status": "FREEAGENT",
+      "keeperValue": 0,
+      "keeperValueFuture": 0,
+      "lineupLocked": false,
+      "rosterLocked": false,
+      "tradeLocked": false,
+      "waiverProcessDate": null,
+      "player": {
+        "id": 4431299,
+        "fullName": "Rome Odunze",
+        "firstName": "Rome",
+        "lastName": "Odunze",
+        "proTeamId": 3,
+        "defaultPositionId": 3,
+        "eligibleSlots": [
+          4,
+          3,
+          5,
+          23,
+          7,
+          20,
+          21
+        ],
+        "jersey": "15",
+        "active": true,
+        "droppable": true,
+        "injured": false,
+        "injuryStatus": "ACTIVE",
+        "ownership": {
+          "percentOwned": 41.7,
+          "percentStarted": 36.7,
+          "percentChange": 0.0
+        },
+        "stats": [],
+        "positionalRanking": 12
+      },
+      "ratings": {
+        "0": {
+          "positionalRanking": 12,
+          "totalRanking": 96,
+          "totalRating": 0.0
+        }
+      }
+    },
+    {
+      "id": 15818,
+      "onTeamId": 0,
+      "status": "FREEAGENT",
+      "keeperValue": 0,
+      "keeperValueFuture": 0,
+      "lineupLocked": false,
+      "rosterLocked": false,
+      "tradeLocked": false,
+      "waiverProcessDate": null,
+      "player": {
+        "id": 15818,
+        "fullName": "Justin Tucker",
+        "firstName": "Justin",
+        "lastName": "Tucker",
+        "proTeamId": 33,
+        "defaultPositionId": 5,
+        "eligibleSlots": [
+          17,
+          20,
+          21
+        ],
+        "jersey": "9",
+        "active": true,
+        "droppable": true,
+        "injured": false,
+        "injuryStatus": "ACTIVE",
+        "ownership": {
+          "percentOwned": 18.2,
+          "percentStarted": 13.2,
+          "percentChange": 0.0
+        },
+        "stats": [],
+        "positionalRanking": 12
+      },
+      "ratings": {
+        "0": {
+          "positionalRanking": 12,
+          "totalRanking": 96,
+          "totalRating": 0.0
+        }
+      }
+    }
+  ],
+  "positionAgainstOpponent": {
+    "positionalRatings": {}
+  }
+}

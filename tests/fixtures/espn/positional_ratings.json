@@ -1,0 +1,228 @@
+{
+  "positionAgainstOpponent": {
+    "positionalRatings": {
+      "1": {
+        "average": 0.0,
+        "ratingsByOpponent": {
+          "12": {
+            "rank": 14,
+            "average": 0.0
+          },
+          "1": {
+            "rank": 3,
+            "average": 0.0
+          },
+          "4": {
+            "rank": 6,
+            "average": 0.0
+          },
+          "8": {
+            "rank": 10,
+            "average": 0.0
+          },
+          "14": {
+            "rank": 16,
+            "average": 0.0
+          },
+          "33": {
+            "rank": 3,
+            "average": 0.0
+          },
+          "3": {
+            "rank": 5,
+            "average": 0.0
+          },
+          "25": {
+            "rank": 27,
+            "average": 0.0
+          }
+        }
+      },
+      "2": {
+        "average": 0.0,
+        "ratingsByOpponent": {
+          "12": {
+            "rank": 15,
+            "average": 0.0
+          },
+          "1": {
+            "rank": 4,
+            "average": 0.0
+          },
+          "4": {
+            "rank": 7,
+            "average": 0.0
+          },
+          "8": {
+            "rank": 11,
+            "average": 0.0
+          },
+          "14": {
+            "rank": 17,
+            "average": 0.0
+          },
+          "33": {
+            "rank": 4,
+            "average": 0.0
+          },
+          "3": {
+            "rank": 6,
+            "average": 0.0
+          },
+          "25": {
+            "rank": 28,
+            "average": 0.0
+          }
+        }
+      },
+      "3": {
+        "average": 0.0,
+        "ratingsByOpponent": {
+          "12": {
+            "rank": 16,
+            "average": 0.0
+          },
+          "1": {
+            "rank": 5,
+            "average": 0.0
+          },
+          "4": {
+            "rank": 8,
+            "average": 0.0
+          },
+          "8": {
+            "rank": 12,
+            "average": 0.0
+          },
+          "14": {
+            "rank": 18,
+            "average": 0.0
+          },
+          "33": {
+            "rank": 5,
+            "average": 0.0
+          },
+          "3": {
+            "rank": 7,
+            "average": 0.0
+          },
+          "25": {
+            "rank": 29,
+            "average": 0.0
+          }
+        }
+      },
+      "4": {
+        "average": 0.0,
+        "ratingsByOpponent": {
+          "12": {
+            "rank": 17,
+            "average": 0.0
+          },
+          "1": {
+            "rank": 6,
+            "average": 0.0
+          },
+          "4": {
+            "rank": 9,
+            "average": 0.0
+          },
+          "8": {
+            "rank": 13,
+            "average": 0.0
+          },
+          "14": {
+            "rank": 19,
+            "average": 0.0
+          },
+          "33": {
+            "rank": 6,
+            "average": 0.0
+          },
+          "3": {
+            "rank": 8,
+            "average": 0.0
+          },
+          "25": {
+            "rank": 30,
+            "average": 0.0
+          }
+        }
+      },
+      "5": {
+        "average": 0.0,
+        "ratingsByOpponent": {
+          "12": {
+            "rank": 18,
+            "average": 0.0
+          },
+          "1": {
+            "rank": 7,
+            "average": 0.0
+          },
+          "4": {
+            "rank": 10,
+            "average": 0.0
+          },
+          "8": {
+            "rank": 14,
+            "average": 0.0
+          },
+          "14": {
+            "rank": 20,
+            "average": 0.0
+          },
+          "33": {
+            "rank": 7,
+            "average": 0.0
+          },
+          "3": {
+            "rank": 9,
+            "average": 0.0
+          },
+          "25": {
+            "rank": 31,
+            "average": 0.0
+          }
+        }
+      },
+      "16": {
+        "average": 0.0,
+        "ratingsByOpponent": {
+          "12": {
+            "rank": 29,
+            "average": 0.0
+          },
+          "1": {
+            "rank": 18,
+            "average": 0.0
+          },
+          "4": {
+            "rank": 21,
+            "average": 0.0
+          },
+          "8": {
+            "rank": 25,
+            "average": 0.0
+          },
+          "14": {
+            "rank": 31,
+            "average": 0.0
+          },
+          "33": {
+            "rank": 18,
+            "average": 0.0
+          },
+          "3": {
+            "rank": 20,
+            "average": 0.0
+          },
+          "25": {
+            "rank": 10,
+            "average": 0.0
+          }
+        }
+      }
+    }
+  }
+}

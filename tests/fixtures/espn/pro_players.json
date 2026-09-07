@@ -1,0 +1,144 @@
+[
+  {
+    "id": 3139477,
+    "fullName": "Patrick Mahomes",
+    "defaultPositionId": 1,
+    "proTeamId": 12,
+    "active": true,
+    "droppable": true,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4362628,
+    "fullName": "Bijan Robinson",
+    "defaultPositionId": 2,
+    "proTeamId": 1,
+    "active": true,
+    "droppable": true,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4241389,
+    "fullName": "Ja'Marr Chase",
+    "defaultPositionId": 3,
+    "proTeamId": 4,
+    "active": true,
+    "droppable": true,
+    "eligibleSlots": [
+      4,
+      3,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3116365,
+    "fullName": "Travis Kelce",
+    "defaultPositionId": 4,
+    "proTeamId": 12,
+    "active": true,
+    "droppable": true,
+    "eligibleSlots": [
+      6,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4426515,
+    "fullName": "Sam LaPorta",
+    "defaultPositionId": 4,
+    "proTeamId": 8,
+    "active": true,
+    "droppable": true,
+    "eligibleSlots": [
+      6,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4569618,
+    "fullName": "Puka Nacua",
+    "defaultPositionId": 3,
+    "proTeamId": 14,
+    "active": true,
+    "droppable": true,
+    "eligibleSlots": [
+      4,
+      3,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4429795,
+    "fullName": "Jahmyr Gibbs",
+    "defaultPositionId": 2,
+    "proTeamId": 8,
+    "active": true,
+    "droppable": true,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4431299,
+    "fullName": "Rome Odunze",
+    "defaultPositionId": 3,
+    "proTeamId": 3,
+    "active": true,
+    "droppable": true,
+    "eligibleSlots": [
+      4,
+      3,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 15818,
+    "fullName": "Justin Tucker",
+    "defaultPositionId": 5,
+    "proTeamId": 33,
+    "active": true,
+    "droppable": true,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  }
+]

@@ -17,6 +17,13 @@ memory_dir = "memory"
 poll_seconds = 5
 advise_within_picks = 2
 
+[espn]
+# Transport limits for the raw ESPN reads. Bounded by the pick clock above: a
+# read that outlives its poll interval silently stops the draft loop, and a
+# hung request during a draft is worse than a failed one.
+connect_timeout_s = 10.0
+read_timeout_s = 15.0
+
 [web]
 host = "0.0.0.0"
 port = 8080
