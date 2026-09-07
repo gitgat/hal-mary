@@ -1,0 +1,13 @@
+{# Swapped into #sync-result after POST /sync. Kept to one line so the page does
+   not move under a thumb that is already reaching for something else. #}
+{% if notice %}
+  {# Not an error: nothing went wrong, the answer is just "wait". #}
+  <p class="chip warn">{{ notice }}</p>
+{% elif error %}
+  <p class="chip bad">Sync failed: {{ error }}</p>
+{% else %}
+  <p class="chip ok">Synced {{ when }}</p>
+  <p class="small muted">
+    {% for key, value in summary.items() %}{{ key }} {{ value }}{% if not loop.last %} · {% endif %}{% endfor %}
+  </p>
+{% endif %}

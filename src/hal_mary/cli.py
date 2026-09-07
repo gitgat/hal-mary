@@ -22,7 +22,7 @@ __all__ = ["build_parser", "main"]
 
 DESCRIPTION = "hal-mary — a Claude-powered fantasy football advisor."
 
-EPILOG = "serve and job are added by later tasks."
+EPILOG = "job is added by a later task."
 
 #: The environment keys ``sync`` cannot run without. ``WEB_PASSWORD`` is needed
 #: to serve the web app but has nothing to do with reading ESPN.
@@ -122,9 +122,27 @@ def _cmd_espn_check(_args: argparse.Namespace) -> int:
     return EXIT_ESPN_FAILED
 
 
+def _cmd_serve(args: argparse.Namespace) -> int:
+    settings = load_cli_settings()
+    if not (settings.web_password or "").strip():
+        # Refused, not warned. This binds every interface on the house network
+        # and the database it serves holds live ESPN session cookies.
+        print(
+            "cannot serve: WEB_PASSWORD not set. The web app would put Caroline's "
+            "ESPN session on the network with no password at all. Set WEB_PASSWORD "
+            "in .env (see .env.example).",
+            file=sys.stderr,
+        )
+        return EXIT_NOT_CONFIGURED
+
+    from hal_mary.web.serve import serve
+
+    return serve(settings, reload=args.reload)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hal-mary", description=DESCRIPTION, epilog=EPILOG)
-    subcommands = parser.add_subparsers(dest="command", metavar="{sync,espn-check}")
+    subcommands = parser.add_subparsers(dest="command", metavar="{sync,espn-check,serve}")
 
     sync = subcommands.add_parser("sync", help="pull league state and draft picks from ESPN")
     sync.set_defaults(handler=_cmd_sync)
@@ -134,6 +152,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="report whether the ESPN cookies still work; exits nonzero when they do not",
     )
     check.set_defaults(handler=_cmd_espn_check)
+
+    serve = subcommands.add_parser("serve", help="run the web app on the LAN")
+    serve.add_argument(
+        "--reload",
+        action="store_true",
+        help="restart on code changes (development only)",
+    )
+    serve.set_defaults(handler=_cmd_serve)
 
     return parser
 

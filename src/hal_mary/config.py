@@ -108,9 +108,33 @@ class EspnConfig(_Frozen):
 
 
 class WebConfig(_Frozen):
+    """How the web app listens, signs sessions and paces its background work.
+
+    The three tunables below carry defaults so a ``config.toml`` written before
+    the web app existed still loads. They live here rather than in the code
+    because they are exactly what CLAUDE.md rule 5 is about: a session lifetime
+    that logs Caroline out mid-draft, a heartbeat too slow for a phone's proxy,
+    or an ESPN auth check hammering an unofficial endpoint are all things to
+    change in config on the box, not to ship as code.
+    """
+
     host: str
     port: int
     session_cookie: str
+    #: How long a login lasts. Long by design: being logged out with a
+    #: 90-second pick clock running is worse than the risk on a home LAN.
+    session_max_age_days: int = 30
+    #: Comment-frame interval on ``/events``. Phone browsers and anything
+    #: between them and the box drop a silent stream; this keeps it open.
+    sse_heartbeat_s: float = 15.0
+    #: How often the status page re-checks the ESPN cookies. It is a network
+    #: call on the page most likely to be reloaded when something looks wrong.
+    auth_check_seconds: int = 3600
+    #: Failed logins from one client before it is locked out, and for how long.
+    #: The only thing between a device on the network and guessing a household
+    #: password a few thousand times a second.
+    login_max_attempts: int = 5
+    login_lockout_seconds: float = 60.0
 
 
 class JobConfig(_Frozen):

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}hal-mary{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  {# Vendored, not a CDN: the box may have no internet and the draft will not wait. #}
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+  {% if nav != 'login.html' %}
+  <header>
+    <h1>hal-mary</h1>
+    <nav>
+      <a href="/status" {% if nav == 'status.html' %}aria-current="page"{% endif %}>Status</a>
+      <a href="/team" {% if nav == 'team.html' %}aria-current="page"{% endif %}>My team</a>
+      <a href="/league" {% if nav == 'league.html' %}aria-current="page"{% endif %}>League</a>
+    </nav>
+  </header>
+  {% endif %}
+  {% block content %}{% endblock %}
+</div>
+</body>
+</html>
