@@ -1,0 +1,19 @@
+{# What comes back after a hand-entered pick. One outcome, one sentence.
+
+   A sentence, not a chip: `.chip` is uppercased, and "TREY MCBRIDE IS MARKED
+   TAKEN" shouts at someone who has just done exactly the right thing. #}
+{% if error %}
+  <p class="result bad">{{ error }}</p>
+{% elif already %}
+  <p class="result warn">{{ name }} was already marked taken — nothing to do.</p>
+{% elif unmatched %}
+  <p class="result bad">hal-mary could not find {{ name }} on its list.</p>
+  <p class="small muted">
+    The pick is recorded, but nobody has been crossed off — so hal-mary may still
+    offer him. Check the spelling against ESPN and try again, or carry on and
+    treat the next recommendation with suspicion.
+  </p>
+{% else %}
+  <p class="result ok">{{ name }} is marked taken.</p>
+  <p class="small muted">He is off the list, and the next recommendation knows it.</p>
+{% endif %}

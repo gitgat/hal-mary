@@ -1,0 +1,16 @@
+{# The live half of the draft page, in the order she reads it under pressure.
+   Included by the page itself and by GET /draft/live, so both are the same
+   markup by construction. #}
+
+{% if stale %}
+  <div class="stale-banner">
+    <strong>hal-mary last heard from ESPN {{ stale.age }}.</strong>
+    Picks made since then are not on this page yet, so trust the ESPN app over
+    this one until it catches up.
+  </div>
+{% endif %}
+
+{% include "partials/advice_card.html" %}
+{% include "partials/turn.html" %}
+{% include "partials/roster.html" %}
+{% include "partials/board.html" %}

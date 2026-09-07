@@ -580,3 +580,65 @@ exit 0, $0.0017.
 
 **Would revisit if:** a CLI upgrade needs a variable that is not on the list. The symptom is the live
 integration test failing to authenticate, which is loud.
+
+---
+
+## 2026-09-07 — CSRF is a property of the router, not of a handler
+
+**Decision.** Every POST on the authenticated router requires a double-submit token: a
+`hal_mary_csrf` cookie issued by middleware on the first response, echoed back in a hidden
+`csrf_token` field (or an `X-CSRF-Token` header) and compared with `secrets.compare_digest`. A
+mismatch is a 403 with a sentence, never a redirect.
+
+**Why.** 7a shipped without one on the grounds that its only POST was a sync, whose worst case was
+an extra read of ESPN. Manual pick entry is the first genuinely state-changing POST: any page open
+in any tab on the house network could otherwise write a pick into Caroline's draft, mark the wrong
+player gone, and make the next recommendation actively wrong — which is precisely the failure the
+unmatched-pick warning exists to catch.
+
+Putting the check on the router rather than in each handler is the same argument as `require_session`:
+a route added to the private router is protected by construction, and nobody has to remember. That
+covers `/logout` too, which used to be a hidden form post away from logging her out mid-draft.
+
+**Consequences.** Every rendered form carries the token, so `page()` and the fragment renderer both
+inject it and a test walks the draft page asserting no form is missing it. Tests that post to a
+private route go through a `post()` helper that supplies the token; a test that posts without one is
+testing the refusal, not the handler. The cookie is `HttpOnly`: the token is rendered server-side, so
+nothing needs to read it in the browser, and a cookie script cannot read is one XSS cannot steal.
+
+## 2026-09-07 — The draft loop runs on its own thread, started where the app is built
+
+**Decision.** `hal_mary.draft.runner.DraftLoopThread` runs `DraftLoop.run_forever` on a daemon
+thread with **its own** SQLite connection, and `web.serve.app_from_env` starts it with the app's own
+`EventBus`. `start()` returns a bool and records `error`; it never raises.
+
+**Why.** `run_once` deliberately blocks — on the web app's loop it would freeze every request for the
+length of a Claude call, including `/events`, which is how the page learns anything happened. And
+`db.connect` leaves `check_same_thread` on, so a connection opened on the web thread and used by the
+loop is an intermittent `ProgrammingError` rather than a clean failure. The connection is therefore
+opened *inside* the thread, which is why `start` waits on an event to report how it went rather than
+simply returning.
+
+It starts in `app_from_env` rather than in `serve` because that is where the app — and so the bus the
+loop publishes onto — is built, and it is what `--reload` re-runs, so development and production take
+one path.
+
+**Consequences.** A loop that cannot start (no ESPN cookies, no `claude` binary, an unwritable
+database) is logged and nothing more: the page still renders, and picks can still be entered by hand.
+That is the right trade, because the page is where the operator would find out.
+
+## 2026-09-07 — A fallback advice card is a different object, not a footnote
+
+**Decision.** Advice with `source == "fallback"` renders with a dashed amber border and a band
+saying it is the ranking list's own answer. A researched card gets a solid border and a
+"Researched" chip. The difference is visible without reading.
+
+**Why.** The advisor always produces a card — that is its promise — but a card computed from tiers
+alone knows nothing about who is already on Caroline's team or who went in the last four picks.
+Advice she cannot tell apart from a researched recommendation is advice she cannot weigh, and she
+will act on it at the same speed either way. The distinction has to survive a glance, a grayscale
+screen and a colour-blind reader, which is why the border style changes as well as the colour.
+
+**Consequences.** `attempts == 0` (no model call was even started) and `attempts > 0` with a fallback
+result differ only in one sentence — "had no time to think about this one" versus "ran out of time
+thinking about this one" — because to her they mean the same thing about how much to trust the card.

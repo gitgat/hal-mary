@@ -1,0 +1,32 @@
+{# Her team so far, with the open slots as empty rows.
+
+   The empty rows are the point: "no quarterback yet" has to be visible without
+   counting, because during a draft nobody counts. Every heading is in words —
+   "QB" is not a term she has any reason to know. #}
+<div class="card">
+  <h2>Your team so far</h2>
+  {% if roster %}
+    {% for group in roster %}
+      <div class="slot">
+        <h3>{{ group.label }}</h3>
+        {% for player in group.players %}
+          <div class="player">
+            <span class="who">{{ player.name }}</span>
+            <span class="meta">
+              {{ player.position_word }}{% if player.pro_team %} · {{ player.pro_team }}{% endif %}
+              {% if player.bye_week %}<br>Bye week {{ player.bye_week }}{% endif %}
+            </span>
+          </div>
+        {% endfor %}
+        {% for _ in range(group.open) %}
+          <div class="player open"><span class="who">— empty —</span></div>
+        {% endfor %}
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="muted">
+      hal-mary does not know your roster shape yet, so it cannot show what is
+      still open. Sync from ESPN on the status page.
+    </p>
+  {% endif %}
+</div>

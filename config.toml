@@ -78,11 +78,19 @@ read_timeout_s = 15.0
 host = "0.0.0.0"                   # every interface: this is opened from a phone
 port = 8080
 session_cookie = "hal_mary_session"
+csrf_cookie = "hal_mary_csrf"      # the double-submit token for state-changing posts
 session_max_age_days = 30          # she must not be logged out mid-draft
 sse_heartbeat_s = 15.0             # comment frame that keeps a phone's stream open
 auth_check_seconds = 3600          # how often the status page re-checks the ESPN cookies
 login_max_attempts = 5             # wrong passwords from one device before it is locked out
 login_lockout_seconds = 60.0       # and for how long
+
+# How far behind the draft sync may fall before the draft page bands itself with
+# a warning, and how often the page re-fetches once its event stream has dropped.
+# Both are sized against the pick clock: 30 seconds is a third of a 90-second
+# turn, which is late enough not to cry wolf and early enough to matter.
+draft_stale_seconds = 30
+live_poll_ms = 10000
 
 [jobs.board_build]
 model = "opus"

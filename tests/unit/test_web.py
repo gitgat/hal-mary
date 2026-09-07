@@ -100,6 +100,17 @@ def login(client: TestClient, password: str = PASSWORD):
     return client.post("/login", data={"password": password})
 
 
+def post(client: TestClient, url: str, data: dict | None = None, **kwargs):
+    """A state-changing post carrying the CSRF token, as a rendered form does.
+
+    Every POST on the private router is checked, so a test that posts without
+    one is testing the refusal rather than the handler.
+    """
+    settings = load_settings(env={**FIXTURE_ENV, "TEAM_ID": str(HER_TEAM_ID)})
+    token = client.cookies[settings.web.csrf_cookie]
+    return client.post(url, data={"csrf_token": token, **(data or {})}, **kwargs)
+
+
 def flatten_routes(app: Any) -> list[Any]:
     """Every real route, through whatever wrapper the framework put in the way.
 
@@ -204,7 +215,9 @@ def test_create_app_refuses_an_empty_password(db_path: Path):
 # --- auth -------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", ["/", "/status", "/team", "/league", "/events"])
+@pytest.mark.parametrize(
+    "path", ["/", "/status", "/team", "/league", "/draft", "/draft/live", "/events"]
+)
 def test_unauthenticated_pages_redirect_to_login(db_path: Path, path: str):
     with client_for(db_path) as client:
         response = client.get(path)
@@ -228,7 +241,19 @@ def test_no_route_escapes_the_password_by_accident(db_path: Path):
     # `app.routes` held three entries with no `.path` between them and the loop
     # below checked nothing at all while appearing to check everything.
     found = {route.path for route in routes if getattr(route, "path", None)}
-    assert {"/", "/status", "/team", "/league", "/sync", "/events", "/logout"} <= found, (
+    assert {
+        "/",
+        "/status",
+        "/team",
+        "/league",
+        "/draft",
+        "/draft/live",
+        "/draft/pick",
+        "/draft/unmatched/resolve",
+        "/sync",
+        "/events",
+        "/logout",
+    } <= found, (
         f"the route walk found only {sorted(found)}"
     )
 
@@ -311,7 +336,7 @@ def test_logout_clears_the_session(db_path: Path):
     with client_for(db_path) as client:
         login(client)
         assert client.get("/status").status_code == 200
-        client.post("/logout")
+        post(client, "/logout")
         assert client.get("/status").status_code in (302, 303, 307)
 
 
@@ -439,7 +464,7 @@ def test_login_ignores_an_offsite_next(db_path: Path):
 # --- pages on an empty database --------------------------------------------
 
 
-@pytest.mark.parametrize("path", ["/status", "/team", "/league"])
+@pytest.mark.parametrize("path", ["/status", "/team", "/league", "/draft"])
 def test_every_page_renders_on_an_empty_database(db_path: Path, path: str):
     with client_for(db_path) as client:
         login(client)
@@ -448,12 +473,13 @@ def test_every_page_renders_on_an_empty_database(db_path: Path, path: str):
     assert "<html" in response.text.lower()
 
 
-def test_root_redirects_to_status(db_path: Path):
+def test_root_redirects_to_the_draft_page(db_path: Path):
+    """The draft page is what she opens on the night, so it is where / lands."""
     with client_for(db_path) as client:
         login(client)
         response = client.get("/")
     assert response.status_code in (302, 303, 307)
-    assert response.headers["location"] == "/status"
+    assert response.headers["location"] == "/draft"
 
 
 # --- /team ------------------------------------------------------------------
@@ -663,7 +689,7 @@ def test_sync_runs_off_the_event_loop_and_reports_the_outcome(db_path: Path):
 
     with client_for(db_path, run_sync=fake_sync) as client:
         login(client)
-        response = client.post("/sync", headers={"HX-Request": "true"})
+        response = post(client, "/sync", headers={"HX-Request": "true"})
     assert response.status_code == 200
     assert seen["on_loop"] is False
     assert "6" in response.text and "200" in response.text
@@ -675,7 +701,7 @@ def test_sync_failure_is_reported_not_raised(db_path: Path):
 
     with client_for(db_path, run_sync=failing_sync) as client:
         login(client)
-        response = client.post("/sync", headers={"HX-Request": "true"})
+        response = post(client, "/sync", headers={"HX-Request": "true"})
     assert response.status_code == 200
     assert "ESPN said 401" in response.text
 
@@ -683,7 +709,7 @@ def test_sync_failure_is_reported_not_raised(db_path: Path):
 def test_sync_without_htmx_redirects_back_to_status(db_path: Path):
     with client_for(db_path, run_sync=lambda: {"teams": 6}) as client:
         login(client)
-        response = client.post("/sync")
+        response = post(client, "/sync")
     assert response.status_code in (302, 303)
     assert response.headers["location"] == "/status"
 
@@ -710,13 +736,13 @@ def test_two_taps_do_not_start_two_syncs(db_path: Path):
         first: dict[str, object] = {}
 
         def run_first() -> None:
-            first["response"] = client.post("/sync", headers={"HX-Request": "true"})
+            first["response"] = post(client, "/sync", headers={"HX-Request": "true"})
 
         thread = threading.Thread(target=run_first)
         thread.start()
         try:
             assert running.wait(timeout=5), "the first sync never started"
-            second = client.post("/sync", headers={"HX-Request": "true"})
+            second = post(client, "/sync", headers={"HX-Request": "true"})
         finally:
             release.set()
             thread.join(timeout=5)
@@ -932,7 +958,7 @@ def rendered_contexts(db_path: Path) -> dict[str, dict]:
     with client_for(db_path) as client:
         contexts["/login"] = client.get("/login").context
         login(client)
-        for path in ("/status", "/team", "/league"):
+        for path in ("/status", "/team", "/league", "/draft"):
             contexts[path] = client.get(path).context
     assert all(context is not None for context in contexts.values())
     return contexts
@@ -969,7 +995,10 @@ def test_no_page_loads_anything_from_the_internet(db_path: Path):
     populate_league(db_path)
     with client_for(db_path) as client:
         login(client)
-        pages = [client.get(path).text for path in ("/login", "/status", "/team", "/league")]
+        pages = [
+            client.get(path).text
+            for path in ("/login", "/status", "/team", "/league", "/draft")
+        ]
     for text in pages:
         for marker in ("https://", "http://", "//cdn", "//unpkg"):
             assert marker not in text, f"page reaches off-box: {marker}"

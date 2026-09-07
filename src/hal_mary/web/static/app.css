@@ -284,3 +284,216 @@ label { display: block; font-weight: 600; margin-bottom: 0.35rem; }
 table { width: 100%; border-collapse: collapse; }
 td, th { text-align: left; padding: 0.35rem 0; border-top: 1px solid var(--line); }
 th { color: var(--ink-soft); font-size: 0.78rem; text-transform: uppercase; }
+
+/* --- the draft page ------------------------------------------------------ */
+
+/* Everything on this page is sized for one glance at arm's length with a
+ * 90-second clock running. The advice card is the only thing that gets to be
+ * big, because it is the only thing she is guaranteed to read. */
+
+.stale-banner {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.8rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.92rem;
+}
+
+.advice {
+  background: var(--card);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0.9rem;
+  margin: 0 0 0.75rem;
+}
+
+/* A fallback card is a different object, not the same card with a footnote.
+ * The border and the band change together so the difference survives a
+ * grayscale screen, a glance, and a colour-blind reader. */
+.advice--fallback {
+  border-color: var(--warn);
+  border-style: dashed;
+}
+
+.advice--stale { opacity: 0.88; }
+
+.advice-band {
+  margin: -0.9rem -0.9rem 0.8rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: calc(var(--radius) - 2px) calc(var(--radius) - 2px) 0 0;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+/* Two bands can stack — "this is a guess" and "and it is for an older pick" —
+ * so only the first one hugs the top of the card. */
+.advice-band + .advice-band {
+  margin-top: -0.8rem;
+  border-radius: 0;
+}
+
+.advice-band.working {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.advice-eyebrow {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.advice-pick {
+  margin: 0.15rem 0 0.5rem;
+  font-size: 1.85rem;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.advice-reason { margin: 0 0 0.7rem; }
+
+.advice-sub {
+  margin: 0.8rem 0 0.3rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.advice-backups { margin: 0; padding-left: 1.1rem; }
+.advice-backups li { margin: 0.25rem 0; }
+
+.advice-watch {
+  margin: 0.8rem 0 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 0.92rem;
+}
+
+.advice-when { margin: 0.7rem 0 0; }
+
+/* --- turn ---------------------------------------------------------------- */
+
+.turn p { margin: 0.15rem 0; }
+.turn-now { font-size: 1.05rem; }
+.turn-mine { font-size: 1.25rem; color: var(--ok); }
+.turn-wait { font-size: 1.25rem; }
+
+/* --- board --------------------------------------------------------------- */
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0 0.6rem;
+}
+
+.filters a {
+  flex: 1 1 auto;
+  min-height: 2.4rem;
+  padding: 0 0.7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.filters a[aria-current="page"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.tier {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  font-weight: 700;
+  vertical-align: 0.1rem;
+}
+
+.board .note {
+  margin: -0.2rem 0 0.45rem;
+  padding-right: 4.5rem;
+}
+
+.slot-head {
+  margin: 1rem 0 0.2rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* Taken, not gone. She has to see that the name she was about to say is no
+ * longer available — deleting it silently is how she says it anyway. */
+.player--gone { color: var(--ink-soft); }
+.player--gone .who { font-weight: 500; }
+
+/* --- manual entry -------------------------------------------------------- */
+
+details summary {
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+input[type="text"], select {
+  width: 100%;
+  min-height: var(--tap);
+  margin-bottom: 0.6rem;
+  padding: 0 0.7rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/* The dismiss button beside a warning is not the primary action on the page. */
+.alarm .row form { margin: 0; }
+.alarm .row button { width: auto; min-height: 2.4rem; padding: 0 0.8rem; }
+.alarm h3 { margin: 0 0 0.4rem; color: var(--bad); }
+.alarm p { margin: 0.3rem 0; }
+
+/* A player row is a name that may wrap and a right-hand column that may not:
+   "wide receiver · NYG" split across two lines reads as two facts. */
+.player .who { flex: 1 1 auto; min-width: 0; }
+.player .meta { flex: 0 0 auto; }
+.alarm .row button { white-space: nowrap; }
+
+/* An open slot is a fact, not a row of data: it can be shorter than a player. */
+.draft-roster .player.open, .card .player.open { min-height: 2rem; padding: 0.15rem 0; }
+
+/* The answer to something she just did. A sentence in its own colour, not a
+   chip: chips are uppercased labels, and shouting at her for getting it right
+   is the wrong tone thirty seconds before a pick. */
+.result {
+  margin: 0.4rem 0 0.2rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius);
+  font-weight: 600;
+}
+.result.ok { background: var(--ok-bg); color: var(--ok); }
+.result.bad { background: var(--bad-bg); color: var(--bad); }
+.result.warn { background: var(--warn-bg); color: var(--warn); }

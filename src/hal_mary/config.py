@@ -215,9 +215,22 @@ class WebConfig(_Frozen):
     host: str
     port: int
     session_cookie: str
+    #: The double-submit CSRF cookie. Named apart from the session cookie
+    #: because they answer different questions: the session says who she is,
+    #: this one says the form came from a page hal-mary itself served.
+    csrf_cookie: str = "hal_mary_csrf"
     #: How long a login lasts. Long by design: being logged out with a
     #: 90-second pick clock running is worse than the risk on a home LAN.
     session_max_age_days: int = 30
+    #: How far behind the draft sync may fall before the draft page bands
+    #: itself with a warning. A cadence, not a constant: it is sized against
+    #: ``draft.poll_seconds`` and the league's pick clock, both of which live
+    #: in this file, and what is right for a 90-second clock is wrong for a
+    #: 30-second one.
+    draft_stale_seconds: int = 30
+    #: How often the draft page re-fetches its live fragment once the event
+    #: stream has dropped. Milliseconds, because that is what it is handed to.
+    live_poll_ms: int = 10000
     #: Comment-frame interval on ``/events``. Phone browsers and anything
     #: between them and the box drop a silent stream; this keeps it open.
     sse_heartbeat_s: float = 15.0
