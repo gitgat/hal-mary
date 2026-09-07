@@ -158,3 +158,27 @@ def test_publishing_survives_a_subscriber_whose_loop_has_gone_away():
 
     assert bus.publish("board_updated", {"pick": 1}) is None
     assert bus.subscriber_count == 0
+
+
+async def test_many_threads_publishing_at_once_all_get_through():
+    """Fan-out reads the subscriber list while the loop thread is adding to and
+    removing from it. Nothing may raise, and nothing may go missing."""
+    bus = EventBus()
+    async with bus.subscribe(maxsize=1000) as sub:
+        threads = [
+            threading.Thread(target=lambda n=n: [bus.publish("tick", {"n": n, "i": i})
+                                                 for i in range(20)])
+            for n in range(4)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+
+        received = [await asyncio.wait_for(anext(sub), timeout=2) for _ in range(80)]
+
+    assert sub.dropped == 0
+    assert sorted((p["n"], p["i"]) for _event, p in received) == sorted(
+        (n, i) for n in range(4) for i in range(20)
+    )

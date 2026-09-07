@@ -48,6 +48,7 @@ hal-mary/
     db.py                   # sqlite connection, migrations (plain SQL files in src/hal_mary/migrations/)
     claude_runner.py        # the only module that spawns `claude`
     memory.py               # notes write/search (FTS5), standing memory files
+    events.py               # in-process pub/sub hub: the draft loop publishes, the web layer subscribes
     espn/
       client.py             # thin wrapper over espn_api.football.League, returns plain dicts
       sync.py               # persist league settings, teams, rosters, draft picks, free agents
@@ -64,7 +65,7 @@ hal-mary/
       lineup_check.py
       weekly_recap.py
     web/
-      app.py                # FastAPI app factory, auth middleware, SSE bus
+      app.py                # FastAPI app factory, auth middleware, SSE endpoint over hal_mary.events
       routes/{draft,team,advice,chat,status}.py
       templates/*.html
       static/
@@ -142,7 +143,7 @@ Tables: `notes(id, created_at, source_job, topic, player_name, team_abbr, text, 
 
 ### Draft (`draft/`)
 
-- `board.py` pure functions over dicts: `apply_picks(board, picks)`, `roster_needs(roster, slots)`, `scarcity(board, by_position)`, `picks_until_mine(pick_order, current_pick, my_team_id, snake=True)`.
+- `board.py` pure functions over dicts, no DB/network/clock imports: `pick_slot(overall_pick, draft_order, snake=True)`, `picks_until_mine(...)`, `my_upcoming_picks(..., rounds=)`, `apply_picks(board, picks) -> (updated_board, unmatched_picks)`, `roster_needs(roster, roster_slots)`, `scarcity(board, within_tiers=2)`, `available(board, limit=40, positions=None)`. Name matching is player_id, then suffix-preserving normalized name, then suffix-stripped, each requiring a unique hit; an ambiguous or unknown name comes back as an unmatched pick rather than a guess.
 - `loop.py`: every `config.draft.poll_seconds` (5), sync draft picks; on new picks, update board, broadcast SSE `board_updated`; when `picks_until_mine <= config.draft.advise_within_picks` (default 2) run advisor.
 - `advisor.py`: prompt from `prompts/draft_advice.md` with board top-N by tier, my roster and needs, scarcity, last N picks, retrieved notes for candidate players. Tools off. `--json-schema` for `{pick, reason, backups:[{name,reason}], watch_out}`. Retry once on parse failure with shorter prompt; on second failure emit a deterministic fallback (top of board by tier filtered by need). Persist to `advice` table and broadcast SSE `advice`.
 
