@@ -2,6 +2,36 @@
 
 Design of record: [2026-09-07-hal-mary-design.md](../specs/2026-09-07-hal-mary-design.md)
 
+## Resequencing during execution (2026-09-07)
+
+The plan below is the original task order. Execution changed it three times, for reasons worth
+recording:
+
+**Tasks 3, 4 and 5 ran in parallel, in separate git worktrees.** They share no source file, and the
+draft deadline made serialising three independent modules a poor trade. Three implementers cannot
+share one working tree, so each got its own worktree branched off the same commit.
+
+**Task 6 was split.** `draft/board.py` (the pure snake-draft and name-matching functions) and
+`events.py` depend on nothing else being built — no database, no network, no Claude — so they became
+**Task 6a** and started immediately rather than waiting. **Task 6b** keeps the board-building job, the
+advisor, and the draft loop, which do depend on 3, 4 and 5. This took the longest task off the
+critical path by roughly its own duration.
+
+**Task 11 was added and given priority.** Two implementers independently discovered that every
+relative path in `[paths]`, plus `claude.scratch_dir` and `claude.system_prompt_file`, resolves
+against the process working directory. Under the systemd unit that Task 10 installs, the memory
+directory would not be found, `standing_memory()` would return an empty string, and every prompt would
+silently go out without the standing context that tells Claude who Caroline is and what the league
+rules are. No crash, no log line, just quietly worse advice.
+
+That is the same class of defect Task 1 fixed for the config file and `.env`, where the fix did not
+generalise. Task 11 anchors every configured path to the directory containing the resolved
+`config.toml` and makes a missing directory loud rather than silent. It runs immediately after 3, 4
+and 5 merge, and **before Task 10**, because Task 10 is what would ship the bug.
+
+Task briefs for every task live in the execution workspace and carry the interfaces as actually built,
+which supersede the sketches below wherever they differ.
+
 ## Implementation plan
 
 Ordered by the draft deadline. Each task is executed subagent-driven with TDD: implementer subagent writes failing tests, then code; reviewer subagent checks against this plan. Task 0 and Task 1 come first, no exceptions.
