@@ -434,12 +434,22 @@ def test_recording_empties_the_rosters_in_the_teams_fixture(recorder, tmp_path):
     assert roster["teams"][0]["roster"]["entries"] == [{"playerId": 7}]
 
 
+MADE = {"overallPickNumber": 1, "playerId": 4362628}
+#: What ESPN really writes into an unmade slot on its pre-populated board.
+UNMADE = {"overallPickNumber": 1, "playerId": -1}
+
+
 @pytest.mark.parametrize(
     ("drafted", "picks", "expected"),
     [
         (False, [], "draft_detail_empty.json"),
-        (False, [{"overallPickNumber": 1}], "draft_detail_partial.json"),
-        (True, [{"overallPickNumber": 1}], "draft_detail_full.json"),
+        # A board of placeholders is not a draft in progress; recording it over
+        # draft_detail_partial.json would replace a real mid-draft payload with
+        # a pre-draft one and nobody would notice until the fixture was needed.
+        (False, [UNMADE], "draft_detail_prepopulated_real_league.json"),
+        (False, [MADE], "draft_detail_partial.json"),
+        (False, [UNMADE, MADE], "draft_detail_partial.json"),
+        (True, [MADE], "draft_detail_full.json"),
     ],
 )
 def test_the_draft_is_recorded_into_the_file_that_matches_its_state(

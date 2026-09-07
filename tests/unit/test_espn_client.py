@@ -307,6 +307,157 @@ def test_draft_picks_are_fetched_fresh_every_call(settings, fake_espn):
     assert len(seen) == 2
 
 
+# --- the pre-populated board: a pick is not a pick without a player ---------
+#
+# ESPN writes every slot of the draft board before the draft starts. The real
+# 2026 league answered the very first sync with 96 rows — 6 teams by 16 rounds —
+# every one carrying ``playerId: -1``. ``draft_detail_prepopulated_real_league.json``
+# is that payload's shape.
+
+PREPOPULATED = "draft_detail_prepopulated_real_league.json"
+
+#: Players the fake ESPN can name, for the slots a test fills in.
+MADE_PLAYERS = (4362628, 4241389, 3139477)
+
+
+def _board_with_picks_made(count: int = 3, *, reverse: bool = True) -> dict:
+    """The pre-populated board with the first ``count`` slots given real players.
+
+    The picks list is reversed by default so that a test asserting overall order
+    is asserting the sort, not the order ESPN happened to send.
+    """
+    payload = load_espn_fixture(PREPOPULATED)
+    picks = payload["draftDetail"]["picks"]
+    for index in range(count):
+        picks[index]["playerId"] = MADE_PLAYERS[index % len(MADE_PLAYERS)]
+    if reverse:
+        picks.reverse()
+    return payload
+
+
+def test_the_prepopulated_board_reads_back_as_ninety_six_empty_slots():
+    """Pins the fixture against the payload it was built from."""
+    picks = load_espn_fixture(PREPOPULATED)["draftDetail"]["picks"]
+
+    assert len(picks) == 96
+    assert {pick["playerId"] for pick in picks} == {-1}
+    assert {pick["roundId"] for pick in picks} == set(range(1, 17))
+    assert {pick["teamId"] for pick in picks} == {1, 2, 3, 4, 5, 6}
+
+
+def test_a_prepopulated_board_is_no_picks_at_all(settings, fake_espn):
+    """The bug: 96 placeholder rows were read as 96 completed picks."""
+    payload = load_espn_fixture(PREPOPULATED)
+    client = client_for(settings, transport=draft_transport(payload))
+
+    assert client.draft_picks() == []
+
+
+def test_only_the_slots_with_a_real_player_count_as_picks(settings, fake_espn):
+    payload = _board_with_picks_made(3)
+    client = client_for(settings, transport=draft_transport(payload))
+
+    picks = client.draft_picks()
+
+    assert [pick["overall_pick"] for pick in picks] == [1, 2, 3]
+    assert [pick["player_id"] for pick in picks] == list(MADE_PLAYERS)
+
+
+@pytest.mark.parametrize(
+    ("player_id", "why"),
+    [
+        (-1, "what ESPN really writes into an unmade slot"),
+        (0, "the other falsy id ESPN could plausibly use"),
+        (None, "an explicit null"),
+        ("missing", "no playerId key at all"),
+    ],
+)
+def test_a_slot_without_a_real_player_id_is_not_a_pick(settings, fake_espn, player_id, why):
+    payload = load_espn_fixture("draft_detail_partial.json")
+    for raw in payload["draftDetail"]["picks"]:
+        if player_id == "missing":
+            del raw["playerId"]
+        else:
+            raw["playerId"] = player_id
+    client = client_for(settings, transport=draft_transport(payload))
+
+    assert client.draft_picks() == [], why
+
+
+def test_a_board_with_no_made_picks_does_not_build_the_player_name_map(settings, fake_espn):
+    """Naming nobody costs a whole league fetch; the draft loop polls this."""
+    payload = load_espn_fixture(PREPOPULATED)
+    client = client_for(settings, transport=draft_transport(payload))
+
+    client.draft_picks()
+
+    assert fake_espn.calls == []
+
+
+# --- the schedule the placeholders carry -----------------------------------
+
+
+def test_draft_schedule_returns_every_slot_of_the_prepopulated_board(settings, fake_espn):
+    payload = load_espn_fixture(PREPOPULATED)
+    client = client_for(settings, transport=draft_transport(payload))
+
+    schedule = client.draft_schedule()
+
+    assert len(schedule) == 96
+    assert [slot["overall_pick"] for slot in schedule] == list(range(1, 97))
+    assert not any(slot["made"] for slot in schedule)
+
+
+def test_draft_schedule_maps_the_documented_shape(settings, fake_espn):
+    payload = load_espn_fixture(PREPOPULATED)
+    client = client_for(settings, transport=draft_transport(payload))
+
+    schedule = client.draft_schedule()
+
+    assert schedule[0] == {
+        "overall_pick": 1,
+        "round_num": 1,
+        "round_pick": 1,
+        "team_id": 1,
+        "made": False,
+    }
+    assert schedule[-1] == {
+        "overall_pick": 96,
+        "round_num": 16,
+        "round_pick": 6,
+        "team_id": 1,
+        "made": False,
+    }
+
+
+def test_draft_schedule_owns_each_slot_to_the_right_team(settings, fake_espn):
+    """A six-team snake off pickOrder [1..6]: down, then back up."""
+    payload = load_espn_fixture(PREPOPULATED)
+    client = client_for(settings, transport=draft_transport(payload))
+
+    owners = [slot["team_id"] for slot in client.draft_schedule()]
+
+    assert owners[:12] == [1, 2, 3, 4, 5, 6, 6, 5, 4, 3, 2, 1]
+    assert owners[90:] == [6, 5, 4, 3, 2, 1]
+
+
+def test_draft_schedule_marks_the_slots_that_have_been_filled(settings, fake_espn):
+    payload = _board_with_picks_made(3)
+    client = client_for(settings, transport=draft_transport(payload))
+
+    schedule = client.draft_schedule()
+
+    assert [slot["overall_pick"] for slot in schedule if slot["made"]] == [1, 2, 3]
+    assert len(schedule) == 96
+
+
+def test_draft_schedule_is_empty_when_espn_has_no_board_yet(settings, fake_espn):
+    payload = load_espn_fixture("draft_detail_empty.json")
+    client = client_for(settings, transport=draft_transport(payload))
+
+    assert client.draft_schedule() == []
+
+
 # --- error mapping ---------------------------------------------------------
 
 

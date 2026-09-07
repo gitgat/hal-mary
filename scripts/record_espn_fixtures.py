@@ -283,8 +283,17 @@ SPECS = (
     FixtureSpec("mDraftDetail", "draft_detail.json", "league", params={"view": "mDraftDetail"}),
 )
 
+#: One per state the draft board can be in, newest state last. Only the file
+#: matching the board's current state is refreshed by a run.
+#:
+#: ``prepopulated`` is a state of its own because ESPN fills every slot of the
+#: board in before the draft starts: a payload with 96 rows and no player in any
+#: of them is *not* a draft in progress, and recording it over
+#: ``draft_detail_partial.json`` would quietly replace a real mid-draft fixture
+#: with a pre-draft one.
 DRAFT_FILENAMES = (
     "draft_detail_empty.json",
+    "draft_detail_prepopulated_real_league.json",
     "draft_detail_partial.json",
     "draft_detail_full.json",
 )
@@ -360,9 +369,19 @@ def _strip_rosters(league: Any) -> Any:
 
 
 def _draft_filename(draft_detail: dict[str, Any]) -> str:
+    """Which of :data:`DRAFT_FILENAMES` this payload is an example of.
+
+    ``pick_is_made`` is imported rather than restated: the rule about ESPN's
+    placeholder rows is defined once, in ``hal_mary.espn.client``, and this
+    script is a consumer of it like any other.
+    """
+    from hal_mary.espn.client import pick_is_made
+
     picks = draft_detail.get("picks") or []
     if not picks:
         return "draft_detail_empty.json"
+    if not any(pick_is_made(pick) for pick in picks if isinstance(pick, dict)):
+        return "draft_detail_prepopulated_real_league.json"
     return "draft_detail_full.json" if draft_detail.get("drafted") else "draft_detail_partial.json"
 
 

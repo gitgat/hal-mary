@@ -333,6 +333,34 @@ def test_sync_draft_tolerates_a_player_nobody_can_name(conn):
     assert new[0]["player_name"] is None
 
 
+def test_sync_draft_ignores_espns_prepopulated_board(conn, settings, fake_espn):
+    """The bug this test exists for.
+
+    ESPN writes all 96 slots of the board before the draft starts. The first real
+    sync read them as 96 completed picks, which would have told the draft loop an
+    entire draft happened in one tick.
+    """
+    payload = load_espn_fixture("draft_detail_prepopulated_real_league.json")
+    assert len(payload["draftDetail"]["picks"]) == 96
+    client = EspnClient(settings, transport=draft_transport(payload))
+
+    assert sync_draft(conn, client) == []
+    assert count(conn, "draft_picks") == 0
+
+
+def test_sync_draft_sees_the_first_real_pick_land_on_that_board(conn, settings, fake_espn):
+    payload = load_espn_fixture("draft_detail_prepopulated_real_league.json")
+    client = EspnClient(settings, transport=draft_transport(payload))
+    sync_draft(conn, client)
+
+    payload["draftDetail"]["picks"][0]["playerId"] = 4362628
+    new = sync_draft(conn, EspnClient(settings, transport=draft_transport(payload)))
+
+    assert [pick["overall_pick"] for pick in new] == [1]
+    assert new[0]["player_name"] == "Bijan Robinson"
+    assert count(conn, "draft_picks") == 1
+
+
 def test_sync_draft_records_a_sync_run(conn):
     sync_draft(conn, StubClient())
 

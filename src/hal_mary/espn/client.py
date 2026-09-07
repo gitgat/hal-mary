@@ -16,6 +16,13 @@ early unless ``draftDetail.drafted`` is true, and ``refresh_draft()`` appends to
 a list it never clears. :meth:`EspnClient.draft_picks` reads
 ``draftDetail.picks`` from the raw endpoint and ignores the ``drafted`` flag
 entirely.
+
+**A pick is not a pick until a player is attached to it.** ESPN pre-populates the
+whole draft board before a draft starts, so that raw payload arrives full of
+empty slots. :meth:`EspnClient.draft_picks` returns only the slots a player has
+actually been drafted into; :meth:`EspnClient.draft_schedule` returns every slot,
+because those empty rows are the pick schedule. :func:`pick_is_made` is the one
+place that rule is written down.
 """
 
 from __future__ import annotations
@@ -40,11 +47,13 @@ __all__ = [
     "DRAFT_VIEW",
     "LEAGUE_ENDPOINT_TEMPLATE",
     "NAME_MAP_RETRY_COOLDOWN_S",
+    "UNMADE_PLAYER_ID",
     "EspnAuthError",
     "EspnClient",
     "EspnError",
     "EspnLeagueNotFound",
     "EspnUnavailable",
+    "pick_is_made",
 ]
 
 #: The read-only ESPN fantasy host. Same base the library uses.
@@ -61,6 +70,13 @@ SETTINGS_VIEW = "mSettings"
 
 #: Free-agent pull size. Big enough to cover a full waiver wire mid-season.
 DEFAULT_FREE_AGENT_SIZE = 200
+
+#: What ESPN puts in an unmade slot's ``playerId``.
+#:
+#: ESPN writes the *entire* draft board before a draft starts: one row per slot,
+#: every round, every team. The first real sync of the 2026 league answered with
+#: 96 such rows — 6 teams by 16 rounds — all carrying this id and no player.
+UNMADE_PLAYER_ID = -1
 
 # How long to leave a failed player-name-map build alone. Rebuilding it is a
 # full league fetch, so retrying on every five-second draft poll would hammer an
@@ -123,6 +139,35 @@ def _epoch_ms_to_iso(value: Any) -> str | None:
     if not isinstance(value, (int, float)) or value <= 0:
         return None
     return datetime.fromtimestamp(value / 1000, UTC).isoformat(timespec="seconds")
+
+
+def pick_is_made(raw: dict[str, Any]) -> bool:
+    """Has a real player been drafted into this raw ``draftDetail.picks`` row?
+
+    **This is the only definition of "a pick happened" in the project.** It lives
+    here, at the boundary, so that no consumer downstream has to remember that
+    ESPN's board is pre-populated. :mod:`scripts.record_espn_fixtures` imports it
+    rather than restating the rule.
+
+    A pick counts only when a player is attached: ``playerId`` present and above
+    zero. :data:`UNMADE_PLAYER_ID` is what ESPN really writes, but ``0``, ``None``
+    and a missing key are treated the same way — the cost of being wrong is a
+    phantom pick that tells the draft loop the draft is further along than it is,
+    and no plausible reading of any of those four is "somebody was drafted".
+
+    ``bool`` is excluded explicitly because ``True`` is an ``int`` greater than
+    zero in Python and would otherwise sail through as player id 1.
+    """
+    player_id = raw.get("playerId")
+    return isinstance(player_id, int) and not isinstance(player_id, bool) and player_id > 0
+
+
+def _overall_pick_order(raw: dict[str, Any]) -> tuple[bool, int]:
+    """Sort key that puts a row with no ``overallPickNumber`` last without raising."""
+    overall = raw.get("overallPickNumber")
+    if isinstance(overall, int) and not isinstance(overall, bool):
+        return (False, overall)
+    return (True, 0)
 
 
 def _owner_name(owners: list[Any]) -> str | None:
@@ -465,32 +510,79 @@ class EspnClient:
 
     # -- draft -------------------------------------------------------------
 
-    def draft_picks(self) -> list[dict[str, Any]]:
-        """Every pick ESPN has recorded, sorted by overall pick number.
+    def _raw_draft_rows(self) -> list[dict[str, Any]]:
+        """``draftDetail.picks`` from the raw endpoint, one fresh GET per call.
 
-        Reads ``draftDetail.picks`` straight from the raw endpoint and **ignores
-        ``draftDetail.drafted``**. The library gates on that flag, which may not
-        be set until the draft is over — by which time the answer is useless.
+        **``draftDetail.drafted`` is ignored.** The library gates on that flag,
+        which may not be set until the draft is over — by which time the answer
+        is useless.
         """
         payload = self._get(DRAFT_VIEW)
-        raw_picks = (payload.get("draftDetail", {}) or {}).get("picks") or []
-        names = self._names_or_empty() if raw_picks else {}
+        rows = (payload.get("draftDetail", {}) or {}).get("picks") or []
+        rows = [row for row in rows if isinstance(row, dict)]
+        rows.sort(key=_overall_pick_order)
+        return rows
 
-        picks: list[dict[str, Any]] = []
-        for raw in raw_picks:
-            player_id = raw.get("playerId")
-            picks.append(
-                {
-                    "overall_pick": raw.get("overallPickNumber"),
-                    "round_num": raw.get("roundId"),
-                    "round_pick": raw.get("roundPickNumber"),
-                    "team_id": raw.get("teamId"),
-                    "player_id": player_id,
-                    "player_name": names.get(player_id) if player_id is not None else None,
-                }
-            )
-        picks.sort(key=lambda pick: (pick["overall_pick"] is None, pick["overall_pick"]))
-        return picks
+    def draft_picks(self) -> list[dict[str, Any]]:
+        """Picks that have actually happened, sorted by overall pick number.
+
+        **ESPN pre-populates the whole draft board before the draft starts**, so
+        ``draftDetail.picks`` is 96 rows for a 6-team, 16-round league from the
+        moment the league exists — every one an empty slot carrying
+        :data:`UNMADE_PLAYER_ID`. Those rows are filtered out here, at the
+        boundary, by :func:`pick_is_made`: a pick is a pick only once a real
+        player is attached to it. Filtering at this layer is deliberate — it is
+        the one place that knows ESPN's vocabulary, so nothing downstream has to
+        remember the rule. Before the draft this returns ``[]``, which is the
+        truthful answer and the one the draft loop is built on.
+
+        The empty slots are not thrown away: they are the pick schedule, and
+        :meth:`draft_schedule` returns them.
+        """
+        made = [row for row in self._raw_draft_rows() if pick_is_made(row)]
+        # Naming nobody costs a full league fetch, and the draft loop polls this
+        # every five seconds through however long the board sits empty.
+        names = self._names_or_empty() if made else {}
+        return [
+            {
+                "overall_pick": raw.get("overallPickNumber"),
+                "round_num": raw.get("roundId"),
+                "round_pick": raw.get("roundPickNumber"),
+                "team_id": raw.get("teamId"),
+                "player_id": raw["playerId"],
+                "player_name": names.get(raw["playerId"]),
+            }
+            for raw in made
+        ]
+
+    def draft_schedule(self) -> list[dict[str, Any]]:
+        """Every slot on the draft board, filled or not, by overall pick number.
+
+        The rows :meth:`draft_picks` filters out carry real information: which
+        team owns which overall pick, and how many rounds the draft runs. That is
+        exactly what the pick countdown needs, and reading it from ESPN beats
+        deriving it from a pick order and a snake rule we would have to keep in
+        step with the league's settings.
+
+        Each slot is ``{"overall_pick", "round_num", "round_pick", "team_id",
+        "made"}``. Returns ``[]`` when ESPN has not built a board yet.
+
+        **The ownership is only as current as ESPN's draft order.** This league's
+        ``draftSettings.orderType`` is ``DRAFT_START``, meaning the order is
+        assigned when the draft begins; the board ESPN pre-populates is derived
+        from the provisional order, so ``team_id`` here can change the moment the
+        draft opens. Re-read it then rather than caching it from a pre-draft sync.
+        """
+        return [
+            {
+                "overall_pick": raw.get("overallPickNumber"),
+                "round_num": raw.get("roundId"),
+                "round_pick": raw.get("roundPickNumber"),
+                "team_id": raw.get("teamId"),
+                "made": pick_is_made(raw),
+            }
+            for raw in self._raw_draft_rows()
+        ]
 
     # -- health ------------------------------------------------------------
 
