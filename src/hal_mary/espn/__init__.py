@@ -21,6 +21,13 @@ from hal_mary.espn.client import (
     EspnLeagueNotFound,
     EspnUnavailable,
 )
+from hal_mary.espn.sync import (
+    last_sync,
+    sync_draft,
+    sync_league,
+    sync_players,
+    write_league_memory,
+)
 
 __all__ = [
     "EspnAuthError",
@@ -28,4 +35,9 @@ __all__ = [
     "EspnError",
     "EspnLeagueNotFound",
     "EspnUnavailable",
+    "last_sync",
+    "sync_draft",
+    "sync_league",
+    "sync_players",
+    "write_league_memory",
 ]
