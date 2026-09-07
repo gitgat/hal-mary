@@ -57,9 +57,9 @@ advice_note_limit = 12
 # TE = 1
 # "D/ST" = 1
 # K = 1
-# FLEX = 1
-# BE = 7
-# IR = 1
+# "RB/WR/TE" = 1               # the flex slot; ESPN spells it this way
+# BE = 7                       # bench
+# IR = 1                       # injured reserve; not drafted
 
 [espn]
 # Transport limits for the raw ESPN reads. Bounded by the pick clock above: a

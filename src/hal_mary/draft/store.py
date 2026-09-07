@@ -24,6 +24,7 @@ from hal_mary import db
 
 __all__ = [
     "all_picks",
+    "identifies_a_player",
     "load_board",
     "mark_drafted",
     "next_overall_pick",
@@ -40,6 +41,24 @@ _BOARD_COLUMNS = (
 )
 
 _PICK_COLUMNS = "overall_pick, round_num, round_pick, team_id, player_id, player_name, seen_at"
+
+#: A pick that actually names somebody.
+#:
+#: ESPN pre-populates every one of this league's 96 picks before the draft opens,
+#: each with ``playerId: -1`` and no name — confirmed from the live payload on
+#: 2026-09-07. Those rows identify nobody: they can never match a board row, and
+#: counting them puts the next pick at 97, which every end-of-draft check reads
+#: as "the draft is over" before it has begun. A hand-entered pick has no player
+#: id at all and is kept, because it has a name.
+_IDENTIFIED = "(player_name IS NOT NULL OR (player_id IS NOT NULL AND player_id > 0))"
+
+
+def identifies_a_player(pick: dict[str, Any]) -> bool:
+    """The Python half of :data:`_IDENTIFIED`, for picks already in memory."""
+    if pick.get("player_name"):
+        return True
+    player_id = pick.get("player_id")
+    return player_id is not None and player_id > 0
 
 
 def load_board(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -182,7 +201,8 @@ def unmatched_picks(
 def recent_picks(conn: sqlite3.Connection, *, limit: int = 10) -> list[dict[str, Any]]:
     """The last few picks, most recent first."""
     rows = conn.execute(
-        f"SELECT {_PICK_COLUMNS} FROM draft_picks ORDER BY overall_pick DESC LIMIT ?",
+        f"SELECT {_PICK_COLUMNS} FROM draft_picks WHERE {_IDENTIFIED} "
+        "ORDER BY overall_pick DESC LIMIT ?",
         (max(int(limit), 0),),
     ).fetchall()
     return [dict(row) for row in rows]
@@ -213,10 +233,14 @@ def picks_for_team(conn: sqlite3.Connection, team_id: int | None) -> list[dict[s
 def next_overall_pick(conn: sqlite3.Connection) -> int:
     """The 1-based overall pick about to be made.
 
-    One past the highest pick recorded, which is 1 on an empty table. Reading the
+    One past the highest pick that actually named somebody, which is 1 on an empty
+    table — see :data:`_IDENTIFIED` for why "named somebody" and not "recorded".
+    Reading the
     maximum rather than counting rows is what makes this right when ESPN reports
     picks out of order, and hand-entered picks get a number from SQLite's rowid
     for exactly the same reason.
     """
-    row = conn.execute("SELECT MAX(overall_pick) AS highest FROM draft_picks").fetchone()
+    row = conn.execute(
+        f"SELECT MAX(overall_pick) AS highest FROM draft_picks WHERE {_IDENTIFIED}"
+    ).fetchone()
     return int(row["highest"] or 0) + 1

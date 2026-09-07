@@ -225,6 +225,11 @@ def pending_picks(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     for pick in store.all_picks(conn):
         if pick.get("overall_pick") in already_filed:
             continue
+        if not store.identifies_a_player(pick):
+            # ESPN pre-fills every pick of the draft with playerId -1 and no
+            # name. Such a pick can never match a board row, so applying it
+            # would file a warning about a pick nobody has made.
+            continue
         keys = _pick_keys(pick)
         if not (keys & claimed) or pick.get("team_id") is not None and (keys & unattributed):
             pending.append(pick)

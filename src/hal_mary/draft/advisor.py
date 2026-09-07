@@ -47,6 +47,16 @@ __all__ = ["ADVICE_SCHEMA", "JOB_NAME", "PROMPT_FILE", "RETRY_PROMPT_FILE", "adv
 
 log = logging.getLogger(__name__)
 
+#: Position codes in words Caroline uses. Anything not here is left as it is.
+_POSITION_WORDS = {
+    "QB": "quarterback",
+    "RB": "running back",
+    "WR": "receiver",
+    "TE": "tight end",
+    "K": "kicker",
+    "D/ST": "defence",
+}
+
 JOB_NAME = "draft_advice"
 PROMPT_FILE = "draft_advice.md"
 RETRY_PROMPT_FILE = "draft_advice_short.md"
@@ -377,15 +387,33 @@ def _team(state: dict[str, Any]) -> str:
         )
     else:
         held = "  - Nobody yet. This is her first pick."
-    open_slots = ", ".join(
-        f"{slot} x{count}" for slot, count in state["needs"].items() if count > 0
-    )
+    open_slots = [
+        f"  - {slot} x{count}{_slot_gloss(slot)}"
+        for slot, count in state["needs"].items()
+        if count > 0
+    ]
+    slots = "\n".join(open_slots) or "  - None. Every starting spot is filled."
     return (
         f"Players she has already drafted:\n{held}\n\n"
-        f"Starting slots still to fill: {open_slots or 'none — every starting spot is filled'}.\n"
-        "(A FLEX slot can be filled by a running back, a receiver or a tight end. "
-        "Bench spots are not listed: they are not a need.)"
+        f"Starting slots still to fill:\n{slots}\n\n"
+        "Bench spots are not listed: they are not a need."
     )
+
+
+def _slot_gloss(slot: str) -> str:
+    """Explain a multi-position slot **by the name this league gives it**.
+
+    ESPN names this league's flex slot ``RB/WR/TE``, not ``FLEX`` — confirmed
+    from the live payload. Hardcoding an explanation of "a FLEX slot" would
+    define a term that appears nowhere on Caroline's screen, which is worse than
+    no gloss at all. So the words come from the slot's own positions.
+    """
+    positions = slot_positions(slot)
+    if len(positions) < 2:
+        return ""
+    words = [_POSITION_WORDS.get(position, position) for position in sorted(positions)]
+    listed = ", ".join(f"a {word}" for word in words[:-1]) + f" or a {words[-1]}"
+    return f" — one extra starter who can be {listed}"
 
 
 def _available(candidates: list[dict[str, Any]]) -> str:

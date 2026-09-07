@@ -41,7 +41,7 @@ def test_settings_come_from_the_synced_row(tmp_path):
     assert league.draft_order == [1, 2, 3, 4, 5, 6]
     assert league.my_team_id == 6
     assert league.my_draft_slot == 6
-    assert league.roster_slots["FLEX"] == 1
+    assert league.roster_slots["RB/WR/TE"] == 1
     assert league.points_per_reception == 1.0
 
 

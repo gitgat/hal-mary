@@ -34,8 +34,13 @@ REAL_TEAM_COUNT = 6
 REAL_DRAFT_ORDER = [1, 2, 3, 4, 5, 6]
 REAL_MY_TEAM_ID = 6
 
-#: QB 1, RB 2, WR 2, TE 1, D/ST 1, K 1, FLEX 1, BE 7, IR 1. Sixteen of those are
-#: drafted (everything but the IR slot), which is where "16 rounds" comes from.
+#: QB 1, RB 2, WR 2, TE 1, D/ST 1, K 1, RB/WR/TE 1, BE 7, IR 1. Sixteen of those
+#: are drafted (everything but the IR slot), which is where "16 rounds" comes
+#: from.
+#:
+#: The flex slot is spelled **RB/WR/TE**, not FLEX — that is what a live sync of
+#: this league actually writes, and code or prose that only knows the word
+#: "FLEX" silently stops describing the real roster.
 REAL_ROSTER_SLOTS = {
     "QB": 1,
     "RB": 2,
@@ -43,7 +48,7 @@ REAL_ROSTER_SLOTS = {
     "TE": 1,
     "D/ST": 1,
     "K": 1,
-    "FLEX": 1,
+    "RB/WR/TE": 1,
     "BE": 7,
     "IR": 1,
 }
@@ -85,7 +90,7 @@ WR = 2
 TE = 1
 "D/ST" = 1
 K = 1
-FLEX = 1
+"RB/WR/TE" = 1
 BE = 7
 IR = 1
 """

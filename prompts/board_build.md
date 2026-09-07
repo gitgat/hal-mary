@@ -55,11 +55,15 @@ receiver to pair with him at 7").
 - Starting lineup and bench:
 {{roster_slots}}
 
-A **flex** slot means one extra starter who can be a running back, a receiver or a
-tight end — whichever of the three she has the best spare option at. A **bye week**
-is the one week in the season a player's real team does not play, so he scores
-nothing that week; if too many of her starters share a bye week she will have a
-bad week, so record each player's bye week accurately.
+A slot listed as **RB/WR/TE** — some leagues call the same thing a **flex** — is one
+extra starter who can be a running back, a receiver or a tight end, whichever of
+the three she has the best spare option at. `BE` is the bench: players she owns
+but does not start. `IR` is injured reserve and is not drafted, which is why
+there are {{rounds}} rounds and not one more.
+
+A **bye week** is the one week in the season a player's real team does not play,
+so he scores nothing that week; if too many of her starters share a bye week she
+will have a bad week, so record each player's bye week accurately.
 
 ## What to research
 

@@ -391,3 +391,37 @@ async def test_a_manual_pick_for_someone_not_on_the_board_is_still_recorded(tmp_
     assert [row["player_name"] for row in store.unmatched_picks(conn)] == [
         "Some Unranked Kicker"
     ]
+
+
+async def test_espns_pre_populated_placeholder_picks_are_ignored(tmp_path):
+    """ESPN fills all 96 picks in before the draft starts, every one of them with
+    `playerId: -1` and no name (confirmed from the live payload on 2026-09-07).
+
+    A pick that identifies nobody cannot match a board row, so applying it would
+    file 96 unmatched-pick warnings; and counting it would put the next pick at
+    97, which reads as "the draft is over" before it has begun. Task 12 filters
+    these at the client layer — this is the second lock on the same door, because
+    the failure is total and silent.
+    """
+    conn, loop, _, bus, _ = loop_ready(
+        tmp_path,
+        picks=[
+            {
+                "overall_pick": index,
+                "round_num": (index - 1) // 6 + 1,
+                "round_pick": (index - 1) % 6 + 1,
+                "team_id": (index - 1) % 6 + 1,
+                "player_id": -1,
+                "player_name": None,
+            }
+            for index in range(1, 97)
+        ],
+    )
+
+    result = await loop.run_once()
+
+    assert store.unmatched_picks(conn) == []
+    assert store.next_overall_pick(conn) == 1, "nobody has actually been drafted yet"
+    assert result["draft_over"] is False
+    assert advice_count(conn) == 0
+    assert bus.published == []

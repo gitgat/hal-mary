@@ -326,7 +326,12 @@ def test_the_context_carries_everything_the_advice_depends_on(tmp_path):
 
     assert "Bijan Robinson" in context, "the top of the board by tier"
     assert "Ja'Marr Chase" in context, "the last few picks"
-    assert "FLEX" in context, "her open starting slots"
+    assert "RB/WR/TE" in context, "her open starting slots, named as ESPN names them"
+    assert "RB/WR/TE x1 — one extra starter who can be" in context, (
+        "and glossed by its own name: Caroline does not know what a flex slot is, "
+        "and explaining a slot this league does not have would confuse her further"
+    )
+    assert "FLEX" not in context, "this league's flex slot is not called FLEX"
     assert "6, 7" in context or "6 and 7" in context, "both of her upcoming picks"
 
 
