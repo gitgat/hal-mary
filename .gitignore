@@ -2,6 +2,11 @@
 .env
 .env.local
 
+# Generated from the live ESPN payload — real leaguemates' names and the league
+# id. `hal-mary sync` rewrites it on every run. The tracked placeholder is
+# memory/league.example.md; names in git history cannot be removed by a commit.
+memory/league.md
+
 # Data — local to each box, never in git
 *.db
 *.db-wal
