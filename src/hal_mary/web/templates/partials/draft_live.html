@@ -1,0 +1,5 @@
+{# What GET /draft/live returns: the live sections, plus the warnings that live
+   down beside the manual-entry control, swapped out of band so one request
+   updates both places without moving anything else on the page. #}
+{% include "partials/draft_sections.html" %}
+<div id="alerts" hx-swap-oob="true">{% include "partials/unmatched.html" %}</div>
