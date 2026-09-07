@@ -490,3 +490,40 @@ async def test_a_schedule_that_cannot_be_read_falls_back_to_the_arithmetic(tmp_p
 
     assert result["error"] is None
     assert advice_count(conn) == 1, "the snake arithmetic still says she is two away"
+
+
+# --- surviving everything else -----------------------------------------------
+
+
+async def test_a_failure_inside_the_advisor_path_does_not_kill_the_loop(tmp_path, monkeypatch):
+    """The catch after the sync had no test: every other failure test drives ESPN,
+    which the first handler catches, so deleting this one kept the suite green."""
+    _, loop, client, _, _ = loop_ready(tmp_path, picks=picks_through(3))
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("the advisor exploded on its way out")
+
+    monkeypatch.setattr("hal_mary.draft.loop.advise", explode)
+
+    first = await loop.run_once()
+
+    assert "exploded" in first["error"], "the tick reports what went wrong"
+    assert first["new_picks"] == 3, "and everything before the failure still happened"
+
+    # The loop is alive and the board work of the next poll still lands.
+    client.picks = picks_through(4)
+    second = await loop.run_once()
+    assert second["error"] is None
+
+
+async def test_an_empty_board_does_not_file_a_warning_for_every_pick(tmp_path):
+    """With no board, nothing can match, so every pick is 'unmatched' — up to 95
+    warnings for the draft page to render, none of which mean what the warning
+    means. The real problem is the missing board, and it is one problem."""
+    conn, loop, _, bus, _ = loop_ready(tmp_path, picks=picks_through(8), board=[])
+
+    result = await loop.run_once()
+
+    assert store.unmatched_picks(conn) == []
+    assert result["unmatched"] == []
+    assert dict(bus.published)["board_updated"]["board_missing"] is True

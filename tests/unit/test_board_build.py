@@ -249,11 +249,31 @@ def test_the_prompt_file_is_a_real_deliverable():
         "injur",
         "rookie",
         "cite",
-        "six-team",
-        "full ppr",
         "bye week",
     ):
         assert required in text, f"prompts/board_build.md never mentions {required!r}"
+
+
+def test_the_prompt_file_states_no_league_fact_of_its_own():
+    """Every league fact reaches the prompt through a placeholder.
+
+    Writing "six-team" or "full PPR" into the file beside the placeholder that
+    carries the same fact means the two can disagree — and they will, the first
+    time the `[league]` config fallback describes a different league. A prompt
+    that contradicts itself is worse than one that is merely vague, because the
+    model has to guess which half to believe.
+    """
+    text = (REPO / "prompts" / "board_build.md").read_text(encoding="utf-8").lower()
+
+    for hardcoded in ("six-team", "six team", "full ppr", "half ppr", "drafts last", "snake"):
+        assert hardcoded not in text, (
+            f"prompts/board_build.md hardcodes {hardcoded!r}; it must come from a placeholder"
+        )
+    for placeholder in ("{{team_count}}", "{{scoring_summary}}", "{{draft_type}}",
+                        "{{my_draft_slot}}", "{{first_two_picks}}"):
+        assert placeholder in text.replace("{{scoring_summary}}", "{{scoring_summary}}"), (
+            f"prompts/board_build.md never uses {placeholder}"
+        )
 
 
 def test_the_prompt_file_explains_the_beginner_reading_it():

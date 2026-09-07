@@ -86,10 +86,22 @@ max_budget_usd = 5.0
 enabled = true
 cron = "0 6 * * *"
 
+# The two on-the-clock attempts. Both run with no web tools, and their timeouts
+# are a budget against a 90-second pick clock: 35 + 20 leaves 35 seconds for the
+# deterministic fallback card to render even when both attempts time out. A
+# tools-off call with a schema measures about 15 seconds, so neither deadline is
+# tight in the ordinary case. Raise these only by taking the sum below 60.
 [jobs.draft_advice]
 model = "opus"
 tools = []                # no web tools: this runs on the pick clock
-timeout_s = 45
+timeout_s = 35
+max_budget_usd = 1.0
+enabled = true
+
+[jobs.draft_advice_retry]
+model = "opus"
+tools = []                # no web tools: this runs on the pick clock too
+timeout_s = 20            # shorter on purpose: the first attempt already spent time
 max_budget_usd = 1.0
 enabled = true
 

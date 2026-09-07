@@ -43,7 +43,14 @@ from hal_mary.draft.board import (
 )
 from hal_mary.league import LeagueContext, load_league_context
 
-__all__ = ["ADVICE_SCHEMA", "JOB_NAME", "PROMPT_FILE", "RETRY_PROMPT_FILE", "advise"]
+__all__ = [
+    "ADVICE_SCHEMA",
+    "JOB_NAME",
+    "PROMPT_FILE",
+    "RETRY_JOB_NAME",
+    "RETRY_PROMPT_FILE",
+    "advise",
+]
 
 log = logging.getLogger(__name__)
 
@@ -58,8 +65,19 @@ _POSITION_WORDS = {
 }
 
 JOB_NAME = "draft_advice"
+#: The retry is its own job so it can have its own, shorter deadline. Sharing one
+#: budget meant two timeouts consumed the entire 90-second pick clock before the
+#: deterministic card could render — the fallback existed but arrived too late to
+#: be of any use, which is the same as not having one.
+RETRY_JOB_NAME = "draft_advice_retry"
 PROMPT_FILE = "draft_advice.md"
 RETRY_PROMPT_FILE = "draft_advice_short.md"
+
+#: Which position to name when there is no board at all and several slots are
+#: open. Alphabetical order puts ``D/ST`` first, so the worst-case card used to
+#: tell a first-time player to draft a defence in the first round. Kickers and
+#: defences go last because they are the two nobody takes early.
+_FALLBACK_POSITION_PRIORITY = ("RB", "WR", "TE", "QB", "K", "D/ST")
 
 #: What the draft page renders. Kept small on purpose: one recommendation, the
 #: reason, a couple of fallbacks for when he is taken first, and one warning.
@@ -114,15 +132,56 @@ def advise(
     ``attempts`` set to how many Claude calls were made, and leaves behind an
     ``advice`` row and a published ``advice`` event.
     """
+    try:
+        payload = _reason(conn, settings, runner, next_overall_pick)
+    except Exception:
+        # Everything the two Claude attempts can throw is already handled inside
+        # ``_ask``. This covers the rest — reading the league, loading the board,
+        # computing needs — where a locked database or a malformed row would
+        # otherwise escape into the draft loop, be swallowed there, and leave
+        # Caroline looking at nothing at all while the clock runs. The promise is
+        # "never an empty card", so it is kept here, where it is made.
+        log.exception("draft advice failed outside the model call; using the blind fallback")
+        payload = {
+            **_blind_fallback(),
+            "source": "fallback",
+            "attempts": 0,
+            "next_overall_pick": next_overall_pick,
+            "picks_until_mine": None,
+            "my_next_picks": [],
+            "board_built_at": None,
+        }
+
+    # Saving is bookkeeping; the card is the point. Losing the row is bad, losing
+    # the card while a clock runs is worse, so neither the publish nor the return
+    # depends on the write succeeding.
+    try:
+        payload["advice_id"] = _persist(conn, payload)
+    except Exception:
+        log.exception("could not save the advice row; showing the card anyway")
+        payload["advice_id"] = None
+    _publish(bus, payload)
+    return payload
+
+
+def _reason(
+    conn: sqlite3.Connection, settings: Settings, runner: Any, next_overall_pick: int
+) -> dict[str, Any]:
+    """Everything up to the answer: the two attempts, then the board's own answer."""
     league = load_league_context(conn, settings)
     board = store.load_board(conn)
-    state = _draft_state(conn, league, board, next_overall_pick)
+    state = _draft_state(conn, settings, league, board, next_overall_pick)
 
     advice: dict[str, Any] | None = None
     attempts = 0
-    for prompt_file, candidate_count, note_limit in (
-        (PROMPT_FILE, settings.draft.advice_candidates, settings.draft.advice_note_limit),
-        (RETRY_PROMPT_FILE, settings.draft.advice_retry_candidates, 0),
+    for job, prompt_file, candidate_count, note_limit in (
+        (
+            JOB_NAME,
+            PROMPT_FILE,
+            settings.draft.advice_candidates,
+            settings.draft.advice_note_limit,
+        ),
+        (RETRY_JOB_NAME, RETRY_PROMPT_FILE, settings.draft.advice_retry_candidates, 0),
     ):
         attempts += 1
         advice = _ask(
@@ -131,6 +190,7 @@ def advise(
             runner,
             league,
             state,
+            job=job,
             prompt_file=prompt_file,
             candidate_count=candidate_count,
             note_limit=note_limit,
@@ -143,7 +203,7 @@ def advise(
         source = "fallback"
         advice = _fallback(state)
 
-    payload = {
+    return {
         **advice,
         "source": source,
         "attempts": attempts,
@@ -152,9 +212,6 @@ def advise(
         "my_next_picks": state["my_next_picks"],
         "board_built_at": state["built_at"],
     }
-    payload["advice_id"] = _persist(conn, payload)
-    _publish(bus, payload)
-    return payload
 
 
 # --- one attempt -------------------------------------------------------------
@@ -167,6 +224,7 @@ def _ask(
     league: LeagueContext,
     state: dict[str, Any],
     *,
+    job: str,
     prompt_file: str,
     candidate_count: int,
     note_limit: int,
@@ -192,7 +250,7 @@ def _ask(
         # Live state travels as extra_context, never glued onto the prompt: the
         # runner owns how the two are assembled, and a prompt built by string
         # concatenation is one that cannot be cached or diffed.
-        result = runner.run(JOB_NAME, prompt, schema=ADVICE_SCHEMA, extra_context=context)
+        result = runner.run(job, prompt, schema=ADVICE_SCHEMA, extra_context=context)
     except Exception:
         log.exception("draft advice call failed before it returned")
         return None
@@ -260,6 +318,7 @@ def _backups(raw: Any) -> list[dict[str, str]]:
 
 def _draft_state(
     conn: sqlite3.Connection,
+    settings: Settings,
     league: LeagueContext,
     board: list[dict[str, Any]],
     next_overall_pick: int,
@@ -280,7 +339,7 @@ def _draft_state(
         "open_positions": _open_positions(needs),
         "candidates": available(board, limit=max(len(board), 1)),
         "scarcity": scarcity(board),
-        "recent": store.recent_picks(conn, limit=8),
+        "recent": store.recent_picks(conn, limit=settings.draft.advice_recent_picks),
         "built_at": board[0].get("built_at") if board else None,
     }
 
@@ -502,20 +561,7 @@ def _fallback(state: dict[str, Any]) -> dict[str, Any]:
     pool = ranked or state["candidates"]
 
     if not pool:
-        slot = needed[0] if needed else "any position"
-        return {
-            "pick": f"the best available {slot}",
-            "reason": (
-                "hal-mary could not reach its advisor and has no researched board to fall "
-                f"back on, so it cannot name a player. Take the best {slot} in ESPN's own "
-                "list — ESPN sorts it best-first — and check back next pick."
-            ),
-            "backups": [],
-            "watch_out": (
-                "This is not a recommendation, it is a stand-in. Trust your own eyes on "
-                "this one pick."
-            ),
-        }
+        return _blind_fallback(needed)
 
     best = pool[0]
     # "RB" is a word Caroline has no reason to know, and this string is not
@@ -554,6 +600,51 @@ def _fallback(state: dict[str, Any]) -> dict[str, Any]:
             "against what you can see in ESPN."
         ),
     }
+
+
+def _blind_fallback(needed: list[str] | None = None) -> dict[str, Any]:
+    """The card for when there is no board to reason over at all.
+
+    The worst case there is, and the one most likely to be read literally,
+    because there is nothing else on the screen to weigh it against. So it names
+    a position in words and picks one she would plausibly draft: sorting the open
+    positions alphabetically put ``D/ST`` first, and "take the best available
+    D/ST" is two terms she does not know attached to the one category nobody
+    takes early.
+    """
+    position = _best_open_position(needed or [])
+    return {
+        "pick": f"the best available {position}",
+        "reason": (
+            "hal-mary could not reach its advisor and has no researched list to fall back "
+            f"on, so it cannot name a player. Take the best {position} that ESPN itself "
+            "suggests — its list is already sorted best-first — and check back next pick."
+        ),
+        "backups": [],
+        "watch_out": (
+            "This is not a recommendation, it is a stand-in. Trust your own eyes on this "
+            "one pick."
+        ),
+    }
+
+
+def _best_open_position(needed: list[str]) -> str:
+    """The position worth naming, in words, out of the slots still open.
+
+    Ordered by :data:`_FALLBACK_POSITION_PRIORITY` rather than alphabetically,
+    which is the whole point: alphabetical order recommends a defence.
+    """
+    ranked = sorted(
+        (position.upper() for position in needed),
+        key=lambda position: (
+            _FALLBACK_POSITION_PRIORITY.index(position)
+            if position in _FALLBACK_POSITION_PRIORITY
+            else len(_FALLBACK_POSITION_PRIORITY)
+        ),
+    )
+    if not ranked:
+        return "player at any position"
+    return _POSITION_WORDS.get(ranked[0], ranked[0].lower())
 
 
 # --- persistence -------------------------------------------------------------

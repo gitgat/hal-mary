@@ -13,6 +13,12 @@
 -- resolved_at is set when a human has dealt with it (marked the player gone by
 -- hand, or decided the pick was a player the board never carried). Nothing in
 -- Task 6b sets it; the column exists so the page can.
+--
+-- Note for whoever wires the page: setting it dismisses the warning and nothing
+-- more. `loop.pending_picks` skips every filed row, resolved or not, so a
+-- resolved pick is never re-applied to the board. That is the intended meaning
+-- of "resolved" here — "I have dealt with this" rather than "try again" — but a
+-- retry button would need that filter narrowed to unresolved rows.
 CREATE TABLE unmatched_picks (
     id           INTEGER PRIMARY KEY,
     overall_pick INT,

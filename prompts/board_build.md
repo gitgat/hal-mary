@@ -5,44 +5,52 @@ board of about {{board_size}} players for **this specific league**. This runs th
 before the draft, so take the time to do it properly: search the web, read recent
 sources, and check what you believe against them.
 
-## This league is not a normal league
+## Do not assume this is an ordinary league
 
 Almost every ranking list you will find online is written for a twelve-team
-league with standard scoring. **This league is neither.** If you rank players as
-though it were, every piece of advice built on this board will be confidently
-wrong. Three facts change the answer, and they are all true at once.
+league in which a catch is worth nothing on its own. **The three facts below
+override anything you read.** If you rank players for the league those lists
+assume rather than the one described here, every piece of advice built on this
+board will be confidently wrong.
 
-**1. It is a six-team league — {{team_count}} teams.**
-A six-team league is small. Far more good players go undrafted than in a twelve-team
-draft, so the worst starter Caroline could get at any position is still pretty
-good. Practical consequences:
+**1. This league has {{team_count}} teams.**
+Compare that with the twelve a published ranking assumes, and adjust:
 
-- Hoarding a scarce position matters much less. Someone useful is always available.
-- Streaming a position — taking whoever has a good matchup each week instead of
-  owning a star — is genuinely viable here, especially at quarterback, kicker and
-  defence.
-- Do not tell her to "reach" for a position because it will dry up. In a
-  {{team_count}}-team league it mostly does not.
-- Elite players are worth relatively more, because the gap between an elite player
-  and the freely-available replacement is the whole edge in a shallow league.
+- The fewer teams there are, the more good players go undrafted, so the worst
+  starter Caroline could end up with at any position is better than those lists
+  imply.
+- With fewer teams, hoarding a scarce position matters less — someone useful is
+  always available — and streaming a position, meaning taking whoever has a good
+  matchup that week instead of owning a star, becomes viable, especially at
+  quarterback, kicker and defence.
+- With fewer teams, do not tell her to "reach" for a position out of fear it will
+  dry up. Mostly it does not.
+- With fewer teams, the very best players are worth relatively *more*, because the
+  gap between an elite player and the freely available replacement is the whole
+  edge in a shallow league.
+- If this league has twelve teams or more, none of the above applies and the
+  published rankings need less adjustment.
 
-**2. It is full PPR.**
+**2. The scoring, which decides how much a catch is worth.**
 {{scoring_summary}}
-That means players who catch a lot of passes are worth substantially more than a
-standard-scoring ranking gives them: pass-catching running backs, receivers who
-get thrown to constantly even for short gains, and tight ends who are used like
-receivers. A running back who only runs the ball is worth less here than his raw
-yardage suggests. Adjust the rankings you find rather than copying them.
 
-**3. Caroline drafts last in round one, and her first two picks are back to back.**
-She has draft slot {{my_draft_slot}} of {{team_count}}, and it is a snake draft, so she picks
-**{{first_two_picks}}** — one after the other — and then waits a long time. Her full
-set of picks is: {{all_my_picks}}.
+If catches score here, players who catch a lot of passes are worth substantially
+more than a ranking written for catch-free scoring gives them: pass-catching
+running backs, receivers thrown to constantly even for short gains, and tight ends
+used like receivers. A running back who only runs the ball is worth correspondingly
+less. If catches score nothing, do the opposite. Either way, adjust the rankings
+you find rather than copying them.
 
-Two picks together is one decision, not two. Rank the board so that the pair at
-the turn can complement each other rather than duplicate a position, and say so
-in the notes where it matters ("if she takes a running back at 6, this is the
-receiver to pair with him at 7").
+**3. Caroline picks from slot {{my_draft_slot}} of {{team_count}} in a {{draft_type}} draft.**
+That gives her picks **{{first_two_picks}}** first, and in full: {{all_my_picks}}.
+
+Look at those first two numbers. If they are consecutive, or nearly so, she is at
+the turn: the two picks are one decision rather than two, and she then waits a
+long time. Rank the board so that a pair taken at the turn can complement each
+other rather than duplicate a position, and say so in the notes where it matters
+("if she takes a running back with the first of the pair, this is the receiver to
+pair with him"). If instead her picks are evenly spaced, say which single player
+is the right one at each.
 
 ## The rest of the league's settings
 
@@ -50,7 +58,7 @@ receiver to pair with him at 7").
 - League: {{league_name}}
 - Teams: {{team_count}} teams
 - Scoring type as ESPN reports it: {{scoring_type}}
-- Draft: {{rounds}} rounds, {{total_picks}} picks in total, snake order
+- Draft: {{draft_type}}, {{rounds}} rounds, {{total_picks}} picks in total
 - Draft date: {{draft_date}}
 - Starting lineup and bench:
 {{roster_slots}}
@@ -73,8 +81,9 @@ then is exactly the player a bad board gets wrong.
 
 Look for, and cite:
 
-1. **Current expert rankings for full PPR scoring**, from at least two independent
-   sources, ideally updated within the last two weeks.
+1. **Current expert rankings**, from at least two independent sources, ideally
+   updated within the last two weeks, and matched to this league's scoring where
+   you can find them ranked that way.
 2. **Average draft position** — where each player is actually being drafted in
    real drafts this season. Average draft position is the market's opinion; where
    your ranking disagrees with it sharply, say so in the note, because that is

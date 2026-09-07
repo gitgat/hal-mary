@@ -135,7 +135,7 @@ def mark_drafted(conn: sqlite3.Connection, board: list[dict[str, Any]]) -> int:
             "drafted_at": entry.get("drafted_at") or now,
         }
         for entry in board
-        if entry.get("drafted") or entry.get("drafted_by_team_id") is not None
+        if entry.get("drafted") or (entry.get("drafted_by_team_id") is not None)
     ]
     if not updates:
         return 0

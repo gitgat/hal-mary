@@ -422,13 +422,16 @@ loop skips them when reconciling. Research-built board rows carry synthetic ids 
 **-1001**, never near `-1`.
 
 **Why:** the entry above filters ESPN's pre-populated board at the one place that knows ESPN's
-vocabulary, and that is the right place. This is a second lock on the same door, and it is worth its
-few lines because the failure is total and silent rather than partial and loud: one placeholder row
-that reaches the `draft_picks` table — from a hand-entered pick that went wrong, a fixture, a future
-code path, or a restore of an older database — puts the next pick at 97 in a 96-pick draft, and every
-end-of-draft check then reads "the draft is over" before it has begun. hal-mary would sit there
-advising nothing, all night, with no error anywhere. The synthetic-id floor is the same argument: the
-board deliberately allows negative ids, so `-1` colliding with a researched player is a real
-collision, not a theoretical one.
+vocabulary, and that is the right place. This is a second lock on the same door, and it earns its few
+lines because **the failure it prevents is total and silent rather than partial and loud.** One
+placeholder row reaching the `draft_picks` table by any route at all — a hand-entered pick that went
+wrong, a fixture, a future code path, a restore of an older database — puts the next overall pick at
+**97 in a 96-pick draft**. Every end-of-draft check in the system then reads "the draft is over"
+before the draft has started: `my_upcoming_picks` returns empty, the loop reports `draft_over`, the
+advisor is never called. hal-mary sits there advising nothing, all night, with no error anywhere and
+nothing on the page to say why. There is no partial version of this failure and nothing to notice it
+by. The synthetic-id floor of -1001 is the same argument from the other side: the board deliberately
+allows negative ids, so `-1` colliding with a researched player is a real collision, not a
+theoretical one.
 
 **Would revisit if:** never, really. It costs one SQL predicate.

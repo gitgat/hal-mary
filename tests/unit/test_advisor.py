@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import sqlite3
 
 from draft_fixtures import (
     REPO,
@@ -50,8 +52,8 @@ ADVICE = {
 }
 
 
-def advisor_ready(tmp_path, results, board=None, extra=""):
-    settings = make_settings(tmp_path, extra)
+def advisor_ready(tmp_path, results, board=None, extra="", replace=None):
+    settings = make_settings(tmp_path, extra, replace)
     conn = open_db(tmp_path)
     seed_synced_league(conn)
     seed_board(conn, SAMPLE_BOARD if board is None else board)
@@ -236,7 +238,13 @@ def test_the_fallback_respects_the_positions_she_still_needs(tmp_path):
 
 
 def test_an_empty_board_still_produces_a_card(tmp_path):
-    """No board at all is the worst case, and it still must not show nothing."""
+    """No board at all is the worst case, and it still must not show nothing.
+
+    What it says matters as much as that it says something. Sorting the open
+    positions alphabetically puts `D/ST` first, so the worst-case card used to
+    read "take the best available D/ST" — two terms Caroline does not know,
+    recommending the one category nobody takes in the first round.
+    """
     conn, settings, runner, bus = advisor_ready(
         tmp_path, [failed_result(error="timeout"), failed_result(error="timeout")], board=[]
     )
@@ -244,8 +252,107 @@ def test_an_empty_board_still_produces_a_card(tmp_path):
     result = advise(conn, settings, runner, bus, next_overall_pick=6)
 
     assert result["source"] == "fallback"
-    assert result["reason"]
     assert conn.execute("SELECT COUNT(*) FROM advice").fetchone()[0] == 1
+
+    card = f"{result['pick']} {result['reason']} {result['watch_out']}"
+    assert "running back" in card or "receiver" in card, (
+        "the worst-case card names a position she would actually draft here"
+    )
+    for jargon in ("D/ST", "RB", "WR", "TE", "QB", " K "):
+        assert jargon not in card, f"{jargon!r} means nothing to someone who has never played"
+
+
+def test_the_empty_board_card_never_leads_with_a_kicker_or_a_defence(tmp_path):
+    """Even when they are the only slots open, they are not the first-round
+    answer — and they are the two that win an alphabetical sort."""
+    _, _, _, _ = advisor_ready(
+        tmp_path, [failed_result(error="timeout"), failed_result(error="timeout")], board=[]
+    )
+
+    from hal_mary.draft.advisor import _fallback
+
+    card = _fallback({"open_positions": ["D/ST", "K", "QB", "RB", "TE", "WR"], "candidates": []})
+
+    assert "running back" in card["pick"]
+
+
+def test_advice_survives_a_failure_outside_the_model_call(tmp_path, monkeypatch):
+    """The fallback exists so Caroline never sees an empty card. It only delivers
+    on that if everything *around* the model call is covered too — a SQLite error
+    while reading the board would otherwise escape, and the draft loop would
+    swallow it and show her nothing at all for that pick."""
+    conn, settings, runner, bus = advisor_ready(tmp_path, [ok_result(ADVICE)])
+
+    def explode(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("hal_mary.draft.advisor.store.load_board", explode)
+
+    result = advise(conn, settings, runner, bus, next_overall_pick=6)
+
+    assert result["source"] == "fallback"
+    assert result["pick"]
+    assert result["reason"]
+    assert [event for event, _ in bus.published] == ["advice"]
+    assert conn.execute("SELECT COUNT(*) FROM advice").fetchone()[0] == 1
+
+
+def test_a_card_is_still_returned_when_it_cannot_even_be_saved(tmp_path, monkeypatch):
+    """Persisting is bookkeeping. Losing the row is bad; losing the card while a
+    clock runs is worse, so the publish and the return do not depend on it."""
+    conn, settings, runner, bus = advisor_ready(tmp_path, [ok_result(ADVICE)])
+
+    def explode(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("hal_mary.draft.advisor._persist", explode)
+
+    result = advise(conn, settings, runner, bus, next_overall_pick=6)
+
+    assert result["pick"] == "Saquon Barkley"
+    assert result["advice_id"] is None
+    assert [event for event, _ in bus.published] == ["advice"]
+
+
+def test_the_retry_has_a_shorter_deadline_than_the_first_attempt(tmp_path):
+    """One 45-second budget served both attempts, so two timeouts ate the whole
+    90-second pick clock before the deterministic card could render."""
+    conn, settings, runner, bus = advisor_ready(
+        tmp_path, [failed_result(error="timeout"), failed_result(error="timeout")]
+    )
+
+    advise(conn, settings, runner, bus, next_overall_pick=6)
+
+    first, second = (settings.job(call["job"]) for call in runner.calls)
+    assert second.timeout_s < first.timeout_s
+    assert second.tools == [], "the retry runs on the pick clock too"
+    assert first.timeout_s + second.timeout_s <= 60, (
+        "both attempts must time out with real time left on a 90-second clock"
+    )
+
+
+def test_the_number_of_recent_picks_shown_comes_from_config(tmp_path):
+    """`advice_recent_picks` was a config key nothing read, which is exactly the
+    kind of dead knob CLAUDE.md rule 5 exists to prevent."""
+    conn, settings, runner, bus = advisor_ready(
+        tmp_path,
+        [ok_result(ADVICE)],
+        replace={"advice_recent_picks = 8": "advice_recent_picks = 3"},
+    )
+    assert settings.draft.advice_recent_picks == 3
+    for overall in range(1, 9):
+        conn.execute(
+            "INSERT INTO draft_picks (overall_pick, team_id, player_name, seen_at) "
+            "VALUES (?, 1, ?, '2026-09-07T00:00:00+00:00')",
+            (overall, f"Filler {overall}"),
+        )
+    conn.commit()
+
+    advise(conn, settings, runner, bus, next_overall_pick=9)
+    context = runner.calls[0]["extra_context"]
+
+    shown = len(re.findall(r"^- Pick \d+: ", context, re.MULTILINE))
+    assert shown == settings.draft.advice_recent_picks
 
 
 def test_a_runner_that_raises_is_treated_as_a_failed_call(tmp_path):

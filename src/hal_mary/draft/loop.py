@@ -93,7 +93,7 @@ def _pick_keys(pick: dict[str, Any]) -> set[tuple[str, Any]]:
 def _claimed_keys(board: list[dict[str, Any]]) -> set[tuple[str, Any]]:
     keys: set[tuple[str, Any]] = set()
     for entry in board:
-        if entry.get("drafted") or entry.get("drafted_by_team_id") is not None:
+        if entry.get("drafted") or (entry.get("drafted_by_team_id") is not None):
             keys |= _pick_keys(entry)
     return keys
 
@@ -149,6 +149,20 @@ def apply_new_picks(
     updated, unmatched = apply_picks(board, kept)
     store.mark_drafted(conn, updated)
 
+    # With no board at all, nothing can match and every pick is "unmatched" — up
+    # to 95 warnings, none of which mean what the warning means. An unmatched
+    # pick is meant to say "the board and reality disagree about this player";
+    # here the board simply does not exist, which is one problem, not ninety-five.
+    # The page is told that instead.
+    board_missing = not board
+    if board_missing and unmatched:
+        log.warning(
+            "the board is empty, so none of the %d pick(s) so far could be placed; "
+            "run the board_build job",
+            len(unmatched),
+        )
+        unmatched = []
+
     if unmatched:
         # The board and reality disagree about who is gone. That is the one
         # thing that makes a recommendation actively wrong, so it goes where the
@@ -176,6 +190,7 @@ def apply_new_picks(
             {
                 "picks": labelled,
                 "unmatched": [describe_pick(pick) for pick in unmatched],
+                "board_missing": board_missing,
                 "next_overall_pick": store.next_overall_pick(conn),
             },
         )
@@ -184,6 +199,7 @@ def apply_new_picks(
         "unmatched": unmatched,
         "duplicates": len(repeats),
         "picks": labelled,
+        "board_missing": board_missing,
     }
 
 
@@ -207,12 +223,19 @@ def pending_picks(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     poll either, and re-applying them would republish the same warning every five
     seconds. The pass converges: once a divergence is applied, it is no longer
     pending.
+
+    **Known limit, for Task 7.** That skip covers *resolved* unmatched picks too,
+    so ``unmatched_picks.resolved_at`` can only dismiss a warning from the page —
+    it can never send the pick back through here to be re-applied. Marking one
+    resolved says "I have dealt with this", not "try again". If the page ever
+    needs a retry button, this filter is the thing to narrow to unresolved rows,
+    and the pick will then be re-applied on the next poll.
     """
     board = store.load_board(conn)
     claimed = _claimed_keys(board)
     unattributed: set[tuple[str, Any]] = set()
     for entry in board:
-        drafted = entry.get("drafted") or entry.get("drafted_by_team_id") is not None
+        drafted = entry.get("drafted") or (entry.get("drafted_by_team_id") is not None)
         if drafted and entry.get("drafted_by_team_id") is None:
             unattributed |= _pick_keys(entry)
 

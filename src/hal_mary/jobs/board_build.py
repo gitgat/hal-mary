@@ -203,6 +203,7 @@ def _prompt_values(league: LeagueContext, draft_config: Any) -> dict[str, Any]:
         "team_count": league.team_count,
         "scoring_summary": league.scoring_summary,
         "scoring_type": league.scoring_type or "unknown",
+        "draft_type": (league.draft_type or "snake").lower(),
         "roster_slots": _slot_lines(league),
         "rounds": league.rounds,
         "total_picks": league.total_picks,
