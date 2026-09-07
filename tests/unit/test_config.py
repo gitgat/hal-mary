@@ -274,3 +274,26 @@ def test_the_shipped_config_declares_the_espn_timeouts():
 
     assert settings.espn.connect_timeout_s == 10.0
     assert settings.espn.read_timeout_s == 15.0
+
+
+def test_web_section_carries_the_session_and_stream_tunables(minimal_config):
+    """Session lifetime, heartbeat and auth-check cadence are config, not code.
+
+    They have defaults so a config.toml written before the web app existed still
+    loads — the systemd unit ships one, and a deploy that could not read its own
+    config would be a worse failure than a stale default.
+    """
+    defaults = load_settings(config_path=minimal_config, env={}).web
+    assert defaults.session_max_age_days > 0
+    assert defaults.sse_heartbeat_s > 0
+    assert defaults.auth_check_seconds > 0
+    # A config that never heard of a login limit still gets one: it is the only
+    # thing between a device on the LAN and guessing the shared password.
+    assert defaults.login_max_attempts > 0
+    assert defaults.login_lockout_seconds > 0
+
+    repo = load_settings(env={}).web
+    assert repo.sse_heartbeat_s == 15.0
+    assert repo.auth_check_seconds == 3600
+    assert repo.login_max_attempts == 5
+    assert repo.login_lockout_seconds == 60.0
