@@ -21,6 +21,7 @@ entirely.
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -36,10 +37,9 @@ from espn_api.requests.espn_requests import (
 from hal_mary.config import Settings
 
 __all__ = [
-    "CONNECT_TIMEOUT_S",
     "DRAFT_VIEW",
     "LEAGUE_ENDPOINT_TEMPLATE",
-    "READ_TIMEOUT_S",
+    "NAME_MAP_RETRY_COOLDOWN_S",
     "EspnAuthError",
     "EspnClient",
     "EspnError",
@@ -59,17 +59,16 @@ DRAFT_VIEW = "mDraftDetail"
 #: The cheapest authenticated view; used by :meth:`EspnClient.check_auth`.
 SETTINGS_VIEW = "mSettings"
 
-# A hung request during a draft is worse than a failed one: the pick clock is 60
-# to 90 seconds and the poll interval is 5, so a request that never returns
-# silently stops the loop. These are transport limits, not tunables — they are
-# bounded by the draft clock, not by taste — so they live here rather than in
-# config.toml, and the constructor takes an override for the one caller (a test)
-# that needs a different value.
-CONNECT_TIMEOUT_S = 10.0
-READ_TIMEOUT_S = 15.0
-
 #: Free-agent pull size. Big enough to cover a full waiver wire mid-season.
 DEFAULT_FREE_AGENT_SIZE = 200
+
+# How long to leave a failed player-name-map build alone. Rebuilding it is a
+# full league fetch, so retrying on every five-second draft poll would hammer an
+# ESPN that is already failing; never retrying would let one transient 500 cost
+# us every player name for the rest of the draft. This is a backoff, not a
+# tunable, and it is bounded below by the poll interval and above by how long a
+# draft can tolerate unnamed picks.
+NAME_MAP_RETRY_COOLDOWN_S = 30.0
 
 
 class EspnError(RuntimeError):
@@ -161,15 +160,28 @@ class EspnClient:
     ) -> None:
         self.settings = settings
         self._transport = transport
+        # A hung request during a draft is worse than a failed one: the pick
+        # clock is 60 to 90 seconds and the poll interval is 5, so a request
+        # that never returns silently stops the loop. The bounds come from
+        # config.toml's [espn] section, next door to draft.poll_seconds.
         self._timeout = timeout or httpx.Timeout(
-            READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S, read=READ_TIMEOUT_S
+            settings.espn.read_timeout_s,
+            connect=settings.espn.connect_timeout_s,
+            read=settings.espn.read_timeout_s,
         )
         self._league: Any | None = None
         self._request_layer: Any | None = None
         self._raw_settings: dict[str, Any] | None = None
         self._name_map: dict[int, str] | None = None
+        # monotonic deadline before which a failed name-map build is not retried
+        self._name_map_retry_after = 0.0
 
     # -- plumbing ----------------------------------------------------------
+
+    @property
+    def timeout(self) -> httpx.Timeout:
+        """The transport limits in force, for whoever needs to report them."""
+        return self._timeout
 
     @property
     def endpoint(self) -> str:
@@ -426,14 +438,24 @@ class EspnClient:
 
         A pick whose player we cannot name is shown as "player 12345" and the
         draft carries on; a draft loop that died because the player list was
-        briefly unavailable would be a much worse failure. The empty result is
-        cached so a broken league read is not retried on every five-second poll.
+        briefly unavailable would be a much worse failure.
+
+        A failure is **not** cached. The draft loop holds one client for the
+        whole draft, so caching an empty map after one transient 500 would mean
+        every pick from then on rendering as "player 12345" — the failure
+        outliving its cause by three hours. Instead the failure is held off for
+        :data:`NAME_MAP_RETRY_COOLDOWN_S`, which is long enough that a five-
+        second poll does not hammer an ESPN that is already struggling, and
+        short enough that names come back within a pick or two of ESPN
+        recovering.
         """
+        if self._name_map is None and time.monotonic() < self._name_map_retry_after:
+            return {}
         try:
             return self.player_name_map()
         except EspnError:
-            self._name_map = {}
-            return self._name_map
+            self._name_map_retry_after = time.monotonic() + NAME_MAP_RETRY_COOLDOWN_S
+            return {}
 
     # -- draft -------------------------------------------------------------
 

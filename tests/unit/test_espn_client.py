@@ -26,7 +26,8 @@ from conftest import (
     draft_transport,
     load_espn_fixture,
 )
-from hal_mary.config import load_settings
+from hal_mary.config import EspnConfig, load_settings
+from hal_mary.espn import client as client_module
 from hal_mary.espn.client import (
     DRAFT_VIEW,
     EspnAuthError,
@@ -62,6 +63,23 @@ def test_constructing_without_cookies_does_not_raise(anonymous_settings, no_netw
 
 def test_construction_touches_no_network(settings, no_network):
     client_for(settings)
+
+
+def test_the_http_timeouts_come_from_config(settings):
+    """Rule 5: timeouts live in config.toml, not in the code that uses them."""
+    tuned = settings.model_copy(
+        update={"espn": EspnConfig(connect_timeout_s=1.5, read_timeout_s=2.5)}
+    )
+
+    timeout = client_for(tuned).timeout
+
+    assert timeout.connect == 1.5
+    assert timeout.read == 2.5
+
+
+def test_the_shipped_config_bounds_the_draft_poll(settings):
+    """The read timeout is only sane relative to the pick clock next door."""
+    assert settings.espn.read_timeout_s > settings.draft.poll_seconds
 
 
 # --- league_settings -------------------------------------------------------
@@ -333,8 +351,6 @@ def test_draft_picks_without_cookies_is_an_auth_error(anonymous_settings, no_net
     ],
 )
 def test_library_exceptions_are_wrapped(settings, monkeypatch, library_error, expected):
-    from hal_mary.espn import client as client_module
-
     def explode(*args, **kwargs):
         raise library_error
 
@@ -413,6 +429,44 @@ def test_player_name_map_labels_players_from_the_pro_player_list(settings, fake_
     assert names[4426515] == "Sam LaPorta"
     assert 9999999 not in names
     assert all(isinstance(key, int) for key in names)
+
+
+def test_a_failed_name_lookup_is_retried_rather_than_cached(settings, fake_espn, monkeypatch):
+    """The finding that would have bitten on draft night.
+
+    The draft loop holds one client for the whole draft. If a transient ESPN 500
+    while fetching the player list cached an empty map, every pick for the rest
+    of the evening would render as "player 12345" — the failure outliving its
+    cause by three hours. With the retry cooldown elapsed, the same client
+    recovers real names.
+    """
+    monkeypatch.setattr(client_module, "NAME_MAP_RETRY_COOLDOWN_S", 0.0)
+    payload = load_espn_fixture("draft_detail_partial.json")
+    client = client_for(settings, transport=draft_transport(payload))
+
+    fake_espn.status = 500
+    assert [pick["player_name"] for pick in client.draft_picks()] == [None, None, None]
+
+    fake_espn.status = 200
+    assert client.draft_picks()[0]["player_name"] == "Bijan Robinson"
+
+
+def test_a_failed_name_lookup_is_not_retried_on_every_poll(settings, fake_espn):
+    """...but it is not retried on every five-second tick either.
+
+    Rebuilding the map is a full league fetch. Hammering an ESPN that is already
+    failing, once every five seconds for an evening, is how a transient outage
+    becomes a blocked cookie.
+    """
+    payload = load_espn_fixture("draft_detail_partial.json")
+    client = client_for(settings, transport=draft_transport(payload))
+    fake_espn.status = 500
+
+    client.draft_picks()
+    after_first = len(fake_espn.calls)
+    client.draft_picks()
+
+    assert len(fake_espn.calls) == after_first
 
 
 def test_player_name_map_is_built_once_and_reused(settings, fake_espn):

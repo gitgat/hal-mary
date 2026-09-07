@@ -73,6 +73,81 @@ def test_swid_like_values_are_pseudonymised_consistently(recorder):
     assert scrubbed["teams"][1]["owners"] == [second]
 
 
+def test_real_peoples_names_never_survive_the_scrub(recorder):
+    """Irreversible once pushed, so it must be impossible to get wrong.
+
+    A real ESPN payload names every member of the league. Recording it verbatim
+    would put Caroline's leaguemates into a public git history for good.
+    """
+    payload = {
+        "members": [
+            {"id": REAL_SWID, "firstName": "Caroline", "lastName": "Reed",
+             "displayName": "creed88"},
+        ]
+    }
+
+    scrubbed = recorder.scrub(payload)
+    member = scrubbed["members"][0]
+
+    assert "Caroline" not in json.dumps(scrubbed)
+    assert "Reed" not in json.dumps(scrubbed)
+    assert "creed88" not in json.dumps(scrubbed)
+    assert member["firstName"] and member["lastName"] and member["displayName"]
+
+
+def test_people_are_pseudonymised_consistently(recorder):
+    """The same person must read as the same person across every fixture field."""
+    payload = {
+        "a": {"firstName": "Caroline"},
+        "b": {"displayName": "Caroline"},
+        "c": {"firstName": "Dana"},
+    }
+
+    scrubbed = recorder.scrub(payload)
+
+    assert scrubbed["a"]["firstName"] == scrubbed["b"]["displayName"]
+    assert scrubbed["a"]["firstName"] != scrubbed["c"]["firstName"]
+
+
+def test_team_names_are_pseudonymised(recorder):
+    """League members name their teams after themselves more often than not."""
+    payload = {
+        "teams": [
+            {
+                "id": 1,
+                "abbrev": "HAL",
+                "owners": [REAL_SWID],
+                "location": "Caroline's",
+                "nickname": "Chaos",
+                "name": "Caroline's Chaos",
+            }
+        ]
+    }
+
+    scrubbed = json.dumps(recorder.scrub(payload))
+
+    assert "Caroline" not in scrubbed
+    assert "Chaos" not in scrubbed
+
+
+def test_the_league_and_division_names_are_kept(recorder):
+    """Only team-shaped objects lose their `name`; the league keeps its own."""
+    payload = {
+        "settings": {
+            "name": "The Gridiron Gauntlet",
+            "scheduleSettings": {"divisions": [{"id": 0, "name": "East"}]},
+        }
+    }
+
+    assert recorder.scrub(payload) == payload
+
+
+def test_email_shaped_keys_are_redacted(recorder):
+    payload = {"email": "caroline@example.com", "mailingAddress": "1 Main St"}
+
+    assert set(recorder.scrub(payload).values()) == {recorder.REDACTED}
+
+
 def test_cookie_like_keys_are_redacted_whatever_they_hold(recorder):
     payload = {
         "espn_s2": "anything",

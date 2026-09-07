@@ -88,8 +88,12 @@ def _cmd_sync(_args: argparse.Namespace) -> int:
     try:
         summary = run_league_sync(conn, client)
         picks = run_draft_sync(conn, client)
-    except EspnError as exc:
-        print(f"sync failed: {exc}", file=sys.stderr)
+    except (EspnError, sqlite3.Error, OSError) as exc:
+        # Not just EspnError: a surprising payload can raise IntegrityError out
+        # of the sync, and the operator running this from a terminal deserves
+        # the same sentence for that as for an ESPN outage rather than a
+        # traceback.
+        print(f"sync failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return EXIT_ESPN_FAILED
 
     print(f"Synced {summary.get('league') or 'league'} ({settings.season}):")

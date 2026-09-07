@@ -31,6 +31,7 @@ from hal_mary.config import Settings
 __all__ = [
     "LEAGUE_MEMORY_FILENAME",
     "LEAGUE_PRESERVE_SENTINEL",
+    "SYNC_RUN_KEEP",
     "last_sync",
     "league_memory_path",
     "sync_draft",
@@ -45,6 +46,17 @@ __all__ = [
 LEAGUE_PRESERVE_SENTINEL = "<!-- hal-mary:preserve-below -->"
 
 LEAGUE_MEMORY_FILENAME = "league.md"
+
+#: How many ``sync_runs`` rows to keep per kind.
+#:
+#: The draft loop polls every five seconds and every poll writes a row — about
+#: 720 an hour. Dropping the row for an uneventful poll is not an option: the
+#: staleness banner reads the newest row, and without one per poll it could no
+#: longer tell a quiet draft from a dead loop. So every run is still recorded and
+#: the table is bounded instead. 200 rows is the last ~17 minutes of a live
+#: draft, which is the window anyone actually looks at, and months of history
+#: outside one.
+SYNC_RUN_KEEP = 200
 
 #: ``roster_slots.week`` for the current-roster snapshot. ESPN's "who is on this
 #: team right now" is not a week, and NULL says so honestly; historical weeks get
@@ -70,12 +82,46 @@ def _sync_run_started(conn: sqlite3.Connection, kind: str) -> int:
 
 
 def _sync_run_finished(
-    conn: sqlite3.Connection, run_id: int, status: str, error: str | None = None
+    conn: sqlite3.Connection, run_id: int, kind: str, status: str, error: str | None = None
 ) -> None:
     conn.execute(
         "UPDATE sync_runs SET finished_at = ?, status = ?, error = ? WHERE id = ?",
         (db.utc_now(), status, error, run_id),
     )
+    _prune_sync_runs(conn, kind)
+
+
+def _prune_sync_runs(conn: sqlite3.Connection, kind: str) -> None:
+    """Keep this kind's newest :data:`SYNC_RUN_KEEP` rows and drop the rest.
+
+    One indexed delete per sync, usually removing a single row. Only this kind is
+    touched, so a draft poll cannot evict the league sync that the staleness
+    banner is reporting on.
+    """
+    conn.execute(
+        """
+        DELETE FROM sync_runs
+        WHERE kind = ?
+          AND id NOT IN (SELECT id FROM sync_runs WHERE kind = ? ORDER BY id DESC LIMIT ?)
+        """,
+        (kind, kind, SYNC_RUN_KEEP),
+    )
+
+
+def _require_no_open_transaction(conn: sqlite3.Connection, name: str) -> None:
+    """Refuse to run inside a caller's transaction.
+
+    Two reasons, and the second is the dangerous one. SQLite has no nested
+    transactions, so the ``BEGIN`` below would raise anyway — but the
+    ``sync_runs`` error row is written *outside* the data transaction precisely
+    so it survives a rollback. Nested inside a caller's transaction it would be
+    rolled back too, and a failed sync would leave no record that it ever ran.
+    """
+    if conn.in_transaction:
+        raise RuntimeError(
+            f"{name}() manages its own transaction and must not be called inside one; "
+            "a sync nested in a caller's transaction loses its sync_runs record on failure"
+        )
 
 
 def last_sync(conn: sqlite3.Connection, kind: str) -> sqlite3.Row | None:
@@ -231,6 +277,7 @@ def sync_league(conn: sqlite3.Connection, client: Any) -> dict[str, Any]:
     Every read happens before the transaction opens, so an ESPN failure never
     touches the database at all.
     """
+    _require_no_open_transaction(conn, "sync_league")
     run_id = _sync_run_started(conn, "league")
     try:
         league_settings = client.league_settings()
@@ -244,15 +291,20 @@ def sync_league(conn: sqlite3.Connection, client: Any) -> dict[str, Any]:
             # Teams and players before roster slots: the foreign keys are real.
             player_count = _upsert_players(conn, [*rosters, *free_agents])
             slot_count = _write_roster_slots(conn, rosters)
+
+        # Inside the try, and after the commit because it reads what was just
+        # written. A sync whose memory file did not update is a partial failure:
+        # memory/league.md is standing context on every Claude call, so an
+        # OSError here must mark the run as failed rather than escape past a row
+        # already recorded as successful.
+        app_settings = getattr(client, "settings", None)
+        if app_settings is not None:
+            write_league_memory(conn, app_settings)
     except Exception as exc:
-        _sync_run_finished(conn, run_id, "error", str(exc))
+        _sync_run_finished(conn, run_id, "league", "error", str(exc))
         raise
 
-    _sync_run_finished(conn, run_id, "ok")
-
-    app_settings = getattr(client, "settings", None)
-    if app_settings is not None:
-        write_league_memory(conn, app_settings)
+    _sync_run_finished(conn, run_id, "league", "ok")
 
     return {
         "league": league_settings.get("name"),
@@ -283,6 +335,7 @@ def sync_draft(conn: sqlite3.Connection, client: Any) -> list[dict[str, Any]]:
     Picks already stored keep their original ``seen_at``, so "when did we first
     see this pick" survives a correction to the pick itself.
     """
+    _require_no_open_transaction(conn, "sync_draft")
     run_id = _sync_run_started(conn, "draft")
     try:
         picks = client.draft_picks()
@@ -327,10 +380,10 @@ def sync_draft(conn: sqlite3.Connection, client: Any) -> list[dict[str, Any]]:
                 ],
             )
     except Exception as exc:
-        _sync_run_finished(conn, run_id, "error", str(exc))
+        _sync_run_finished(conn, run_id, "draft", "error", str(exc))
         raise
 
-    _sync_run_finished(conn, run_id, "ok")
+    _sync_run_finished(conn, run_id, "draft", "ok")
     return new
 
 

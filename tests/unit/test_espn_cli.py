@@ -6,6 +6,8 @@ part of its contract, not decoration.
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from conftest import FIXTURE_ENV
@@ -130,3 +132,17 @@ def test_espn_check_does_not_need_the_database(monkeypatch, capsys):
     monkeypatch.setattr(cli, "open_db", unreachable)
 
     assert cli.main(["espn-check"]) == 0
+
+
+def test_sync_reports_a_database_failure_readably(wired, monkeypatch, capsys):
+    """An unexpected payload should not greet the operator with a traceback."""
+
+    def explode(_conn, _client):
+        raise sqlite3.IntegrityError("FOREIGN KEY constraint failed")
+
+    monkeypatch.setattr(cli, "run_league_sync", explode)
+
+    assert cli.main(["sync"]) == 1
+    err = capsys.readouterr().err
+    assert "FOREIGN KEY constraint failed" in err
+    assert "Traceback" not in err

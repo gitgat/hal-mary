@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -26,6 +27,7 @@ from test_project_files import LEAGUE_PRESERVE_SENTINEL as PINNED_SENTINEL
 from conftest import FIXTURE_ENV, draft_transport, load_espn_fixture
 from hal_mary import db
 from hal_mary.config import PathsConfig, load_settings
+from hal_mary.espn import sync as espn_sync
 from hal_mary.espn.client import EspnClient, EspnUnavailable
 from hal_mary.espn.sync import (
     LEAGUE_PRESERVE_SENTINEL,
@@ -475,3 +477,102 @@ def test_write_league_memory_says_so_when_nothing_has_synced(conn, settings):
 
     text = (league_memory_path(settings)).read_text(encoding="utf-8")
     assert "not synced" in text.lower()
+
+
+# --- transaction guards ----------------------------------------------------
+
+
+def test_sync_league_refuses_to_run_inside_a_caller_transaction(conn, settings):
+    """SQLite has no nested transactions, and the error row must survive a failure.
+
+    A caller wrapping a sync in its own transaction would not only get "cannot
+    start a transaction within a transaction" — the sync_runs error row would be
+    rolled back with everything else, silently losing the record of the failure.
+    """
+    conn.execute("BEGIN")
+    try:
+        with pytest.raises(RuntimeError, match="transaction"):
+            sync_league(conn, StubClient(settings))
+    finally:
+        conn.execute("ROLLBACK")
+
+
+def test_sync_draft_refuses_to_run_inside_a_caller_transaction(conn):
+    conn.execute("BEGIN")
+    try:
+        with pytest.raises(RuntimeError, match="transaction"):
+            sync_draft(conn, StubClient())
+    finally:
+        conn.execute("ROLLBACK")
+
+
+# --- memory write failures -------------------------------------------------
+
+
+def test_a_memory_write_failure_is_recorded_rather_than_reported_as_success(conn, settings):
+    """memory/league.md is standing context on every Claude call; losing it matters."""
+    # A regular file where a directory has to be: mkdir raises NotADirectoryError.
+    blocker = Path(settings.paths.memory_dir).parent / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    unwritable = settings.model_copy(
+        update={
+            "paths": PathsConfig(
+                prompts_dir=settings.paths.prompts_dir,
+                memory_dir=str(blocker / "memory"),
+            )
+        }
+    )
+
+    with pytest.raises(OSError):
+        sync_league(conn, StubClient(unwritable))
+
+    run = rows(conn, "SELECT * FROM sync_runs WHERE kind = 'league'")[0]
+    assert run["status"] == "error"
+    assert run["error"]
+
+
+# --- sync_runs growth ------------------------------------------------------
+
+
+@pytest.fixture
+def small_retention(monkeypatch):
+    """Shrink the retention so the pruning tests are about pruning, not patience."""
+    monkeypatch.setattr(espn_sync, "SYNC_RUN_KEEP", 5)
+    return 5
+
+
+def test_sync_runs_are_pruned_so_a_draft_poll_cannot_grow_them_without_bound(
+    conn, small_retention
+):
+    """A five-second poll writes ~720 rows an hour; the table has to be bounded."""
+    for _ in range(small_retention + 4):
+        sync_draft(conn, StubClient())
+
+    assert count(conn, "sync_runs") == small_retention
+
+
+def test_pruning_never_touches_another_kind(conn, settings, small_retention):
+    sync_league(conn, StubClient(settings))
+    for _ in range(small_retention + 4):
+        sync_draft(conn, StubClient())
+
+    assert count(conn, "sync_runs WHERE kind = 'league'") == 1
+
+
+def test_pruning_keeps_the_newest_run_so_the_staleness_banner_still_works(
+    conn, small_retention
+):
+    """A quiet draft and a dead loop must stay distinguishable."""
+    for _ in range(small_retention + 4):
+        sync_draft(conn, StubClient())
+
+    latest = last_sync(conn, "draft")
+    assert latest is not None
+    assert latest["status"] == "ok"
+    assert latest["finished_at"]
+
+
+def test_the_shipped_retention_covers_a_live_draft(settings):
+    """At a five-second poll, the window kept has to be worth looking at."""
+    minutes = espn_sync.SYNC_RUN_KEEP * settings.draft.poll_seconds / 60
+    assert minutes >= 15

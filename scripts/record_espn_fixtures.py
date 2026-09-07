@@ -12,8 +12,12 @@ first time cookies exist, read the diff, and commit it.
 Credentials come from the environment (or ``.env``) via ``hal_mary.config`` and
 are **never written to a file**. Every payload goes through :func:`scrub` first,
 which removes the live cookie values, redacts anything under a credential-shaped
-key, and replaces SWIDs with stable pseudonyms so the team-to-owner links in the
-fixtures still line up.
+key, and replaces SWIDs, member names and team names with stable pseudonyms — so
+the fixtures still hang together without carrying a single real person's name.
+
+One thing it deliberately keeps is the **league's own name**, which is far more
+useful in a fixture than `Team 1` and is not personal data in the way a member's
+name is. Read the diff; if the league is named after somebody, change it by hand.
 
 The script is deliberately not a package module: it is an operator tool, run by
 hand, and nothing in ``src/`` imports it. Its scrubber is covered by
@@ -40,9 +44,26 @@ REDACTED = "<scrubbed>"
 
 #: A value under a key matching any of these is redacted whatever it looks like.
 SECRET_KEY_RE = re.compile(
-    r"espn_?s2|swid|cookie|token|auth|secret|password|passwd|session|credential",
+    r"espn_?s2|swid|cookie|token|auth|secret|password|passwd|session|credential|e?mail",
     re.IGNORECASE,
 )
+
+#: Keys holding a real person's name. ESPN names every member of the league, and
+#: a fixture recorded verbatim would put Caroline's leaguemates into a public git
+#: history permanently. Pseudonymised rather than redacted so the same person
+#: still reads as the same person across fields.
+PERSON_NAME_KEYS = frozenset({"firstName", "lastName", "displayName", "nickName"})
+
+#: Keys holding a team's name. People name fantasy teams after themselves more
+#: often than not, so these are personal data too. ``location`` and ``nickname``
+#: are pseudonymised wherever they appear — over-scrubbing an NFL team's city
+#: costs nothing, because the library resolves pro teams by id.
+TEAM_NAME_KEYS = frozenset({"location", "nickname"})
+
+#: A bare ``name`` is only a team name when it sits on a team-shaped object. The
+#: league's own name and the division names are not personal data and are much
+#: more useful in a fixture kept intact.
+TEAM_MARKER_KEYS = frozenset({"owners", "playoffSeed", "roster"})
 
 #: ESPN member ids are SWIDs: a UUID in braces. They are personal identifiers,
 #: so they are pseudonymised rather than dropped — the fixtures need the teams
@@ -60,15 +81,21 @@ OPAQUE_TOKEN_RE = re.compile(r"^[A-Za-z0-9%+/=_.\-]{64,}$")
 
 
 class _Pseudonyms:
-    """Stable fake SWIDs, assigned in first-seen order."""
+    """Stable fakes, assigned in first-seen order.
 
-    def __init__(self) -> None:
+    Stability is the point. Blanking every SWID would collapse the team-to-owner
+    links and the fixture would stop meaning anything; blanking every name would
+    make four teams indistinguishable. Each distinct real value gets its own fake
+    and keeps it everywhere it appears.
+    """
+
+    def __init__(self, template: str) -> None:
+        self._template = template
         self._seen: dict[str, str] = {}
 
     def for_value(self, value: str) -> str:
         if value not in self._seen:
-            index = len(self._seen) + 1
-            self._seen[value] = f"{{00000000-0000-0000-0000-{index:012d}}}"
+            self._seen[value] = self._template.format(n=len(self._seen) + 1)
         return self._seen[value]
 
 
@@ -80,7 +107,9 @@ def scrub(payload: Any, secrets: list[str] | None = None) -> Any:
     the only check that cannot be fooled by ESPN inventing a new field name.
     """
     live = [value for value in (secrets or []) if value]
-    pseudonyms = _Pseudonyms()
+    swids = _Pseudonyms("{{00000000-0000-0000-0000-{n:012d}}}")
+    people = _Pseudonyms("Person {n}")
+    team_names = _Pseudonyms("Team {n}")
 
     def scrub_string(value: str, key: str | None) -> str:
         if key and SECRET_KEY_RE.search(key):
@@ -88,16 +117,26 @@ def scrub(payload: Any, secrets: list[str] | None = None) -> Any:
         if any(secret and secret in value for secret in live):
             return REDACTED
         if SWID_RE.match(value):
-            return pseudonyms.for_value(value)
+            return swids.for_value(value)
         if OPAQUE_TOKEN_RE.match(value):
             return REDACTED
         return value
 
+    def scrub_field(name: str, value: Any, is_team: bool) -> Any:
+        if SECRET_KEY_RE.search(name):
+            return REDACTED
+        if isinstance(value, str) and value:
+            if name in PERSON_NAME_KEYS:
+                return people.for_value(value)
+            if name in TEAM_NAME_KEYS or (name == "name" and is_team):
+                return team_names.for_value(value)
+        return walk(value, name)
+
     def walk(node: Any, key: str | None = None) -> Any:
         if isinstance(node, dict):
+            is_team = bool(TEAM_MARKER_KEYS & node.keys())
             return {
-                name: (REDACTED if SECRET_KEY_RE.search(str(name)) else walk(value, str(name)))
-                for name, value in node.items()
+                name: scrub_field(str(name), value, is_team) for name, value in node.items()
             }
         if isinstance(node, list):
             return [walk(item, key) for item in node]
@@ -200,8 +239,6 @@ def build_fetcher(settings: Any) -> Callable[[FixtureSpec], Any]:
     """A fetcher that talks to ESPN with the configured cookies."""
     import httpx
 
-    from hal_mary.espn.client import CONNECT_TIMEOUT_S, READ_TIMEOUT_S
-
     league_base = (
         "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl"
         f"/seasons/{settings.season}/segments/0/leagues/{settings.league_id}"
@@ -210,7 +247,11 @@ def build_fetcher(settings: Any) -> Callable[[FixtureSpec], Any]:
         f"https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{settings.season}"
     )
     cookies = {"espn_s2": settings.espn_s2, "SWID": settings.swid}
-    timeout = httpx.Timeout(READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S, read=READ_TIMEOUT_S)
+    timeout = httpx.Timeout(
+        settings.espn.read_timeout_s,
+        connect=settings.espn.connect_timeout_s,
+        read=settings.espn.read_timeout_s,
+    )
 
     def fetch(spec: FixtureSpec) -> Any:
         base = league_base if spec.base == "league" else season_base
@@ -353,7 +394,9 @@ def main() -> int:
         print(f"wrote {path.relative_to(REPO_ROOT)}")
     print(
         "\nRead the diff before committing. Only one of the three draft_detail_*.json "
-        "files is refreshed per run — the one matching the draft's current state."
+        "files is refreshed per run — the one matching the draft's current state.\n"
+        "Member and team names are pseudonymised; the league's own name is not, so "
+        "check it is not somebody's."
     )
     return 0
 
