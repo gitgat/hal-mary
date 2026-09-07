@@ -240,3 +240,9 @@ agents, and box scores, where its parsing earns its place.
 This narrows the remaining open question to one thing: **does ESPN populate `draftDetail.picks` while
 a draft is in progress?** It is answerable with a single request against a mock draft, and the manual
 pick-entry path is built regardless, since it also covers ESPN being unreachable at the worst moment.
+
+**Answered in part, 2026-09-07, by the first real sync.** ESPN populates `draftDetail.picks` *before*
+the draft — the whole board, one row per slot, `playerId: -1` throughout. So the endpoint is
+certainly live before the draft; whether ESPN fills those rows in as picks land, or only at
+completion, is still open and still needs a mock draft to settle. The consequence for the code is
+recorded in `docs/DECISIONS.md` under "A pick is not a pick until a player is attached to it".
