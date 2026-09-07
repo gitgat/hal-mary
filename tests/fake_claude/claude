@@ -14,6 +14,11 @@ script and drive it entirely through the environment:
 ``HAL_MARY_FAKE_SLEEP``
     Seconds to sleep before writing anything, default ``0``. Lets the timeout
     path be tested in a second instead of in fifteen minutes.
+``HAL_MARY_FAKE_HANG``
+    Seconds to sleep *after* writing the fixture, default ``0``. ``SLEEP`` tests
+    a call that produces nothing before its deadline; this tests one that
+    produces output and then stops responding, which is what leaves lines
+    buffered in the runner's queue when the timeout fires.
 ``HAL_MARY_FAKE_STDERR``
     Text to write to stderr, so the "nonzero exit captures stderr" path is
     exercisable.
@@ -56,6 +61,10 @@ def main() -> int:
             for line in handle:
                 sys.stdout.write(line.rstrip("\n") + "\n")
                 sys.stdout.flush()
+
+    hang_s = float(os.environ.get("HAL_MARY_FAKE_HANG", "0"))
+    if hang_s:
+        time.sleep(hang_s)
 
     stderr_text = os.environ.get("HAL_MARY_FAKE_STDERR")
     if stderr_text:

@@ -37,9 +37,13 @@ Other CLI facts this module encodes, measured rather than assumed:
 
 Threading
 ---------
-A :class:`ClaudeRunner` holds one ``sqlite3.Connection``, and a connection must
-not cross threads. Build a runner where you use it — one per job worker, one per
-request — rather than sharing a module-level singleton.
+A :class:`ClaudeRunner` holds one ``sqlite3.Connection``, and ``db.connect``
+leaves ``check_same_thread`` on, so the connection must not cross threads. Build
+the connection and the runner together, in the thread that will use them — one
+per job worker, one per request — rather than sharing a module-level singleton.
+This bites hardest around :meth:`ClaudeRunner.stream`, whose final chunk writes
+the ``claude_calls`` row; see that method's docstring for the pattern that works
+under FastAPI.
 """
 
 from __future__ import annotations
@@ -92,6 +96,20 @@ CONTEXT_SEPARATOR = "\n\n--- END CONTEXT ---\n\n"
 
 #: Grace period for a killed process group to actually die.
 _REAP_TIMEOUT_S = 5.0
+
+#: How long to wait for the stderr reader to reach EOF before giving up on it.
+#: ``proc.wait()`` returns the moment the child exits, which can be before the
+#: reader thread has drained the pipe; reading its buffer without joining first
+#: throws away the diagnostic exactly when there is one.
+_STDERR_JOIN_TIMEOUT_S = 2.0
+
+#: Exit code recorded for a call that never reached the binary at all.
+_NEVER_RAN = -1
+
+#: First line of every transcript: the call itself, so the file is a complete
+#: record. ``claude`` never emits this type, and a reader that does not know it
+#: skips it like any other unknown event.
+_HEADER_EVENT_TYPE = "hal_mary_call"
 
 
 @dataclass(frozen=True)
@@ -294,6 +312,36 @@ class ClaudeRunner:
 
         Abandoning the iterator (the browser closed the connection) kills the
         process group and still writes the ``claude_calls`` row.
+
+        **Driving this from FastAPI.** It is a blocking generator, so it cannot
+        run on the event loop. It also finishes by writing a ``claude_calls``
+        row, and ``db.connect`` leaves ``check_same_thread`` on, so the thread
+        that consumes the final chunk must be the thread that opened the
+        connection. ``iterate_in_threadpool`` does **not** satisfy that: it hops
+        threads per ``next()``, and the ``done`` chunk then raises
+        ``sqlite3.ProgrammingError`` on a worker that did not create the
+        connection — intermittently, because anyio often reuses the same worker,
+        which is the worst way for it to fail. Build the connection *and* the
+        runner inside one ``run_in_threadpool`` call::
+
+            def _consume(prompt: str, out: queue.Queue) -> None:
+                conn = db.connect(settings.db_path)      # this thread owns it
+                try:
+                    for chunk in ClaudeRunner(settings, conn).stream("chat", prompt):
+                        out.put(chunk)
+                finally:
+                    out.put(None)
+                    conn.close()
+
+            # in the SSE endpoint
+            out: queue.Queue = queue.Queue()
+            task = asyncio.create_task(run_in_threadpool(_consume, prompt, out))
+            while (chunk := await run_in_threadpool(out.get)) is not None:
+                yield sse(chunk)
+            await task
+
+        One thread runs the whole call, owns the connection for its lifetime,
+        and hands chunks across a queue.
         """
         # Look the job up before building the generator: a typo'd job name
         # should raise here, not on the caller's first ``next()`` halfway
@@ -424,12 +472,11 @@ class ClaudeRunner:
         payload = prompt if not extra_context else f"{extra_context}{CONTEXT_SEPARATOR}{prompt}"
         prompt_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-        scratch = self.scratch_dir()
-        transcript = self._transcript_path(scratch, job.name)
+        resolved_system_prompt = self.resolve_system_prompt(system_prompt)
         argv = self.build_argv(
             job,
             streaming=streaming,
-            system_prompt=self.resolve_system_prompt(system_prompt),
+            system_prompt=resolved_system_prompt,
             schema=schema,
             resume=resume,
         )
@@ -437,6 +484,7 @@ class ClaudeRunner:
         started_at = db.utc_now()
         began = time.monotonic()
         sink = _EventSink()
+        transcript: Path | None = None
         proc: subprocess.Popen[str] | None = None
         recorded = False
         result: ClaudeResult | None = None
@@ -456,7 +504,26 @@ class ClaudeRunner:
             return built
 
         try:
-            with transcript.open("w", encoding="utf-8") as handle:
+            # Opening the transcript is the first thing that can touch the disk,
+            # and a full or read-only scratch volume must not escape as an
+            # OSError: this runs inside an APScheduler job and an SSE handler,
+            # both of which expect a result object, not an exception.
+            try:
+                scratch = self.scratch_dir()
+                transcript = self._transcript_path(scratch, job.name)
+                handle = transcript.open("w", encoding="utf-8")
+            except OSError as exc:
+                transcript = None
+                result = finish(
+                    f"scratch directory {self.settings.claude.scratch_dir!r} is unusable: {exc}",
+                    _NEVER_RAN,
+                )
+                yield StreamChunk("done", "", result)
+                return
+
+            with handle:
+                self._write_header(handle, job, argv, prompt_hash, started_at,
+                                   resolved_system_prompt)
                 try:
                     proc = subprocess.Popen(
                         argv,
@@ -479,12 +546,17 @@ class ClaudeRunner:
 
                 stderr_box: list[str] = []
                 lines: queue.Queue[str | None] = queue.Queue()
-                for target, args in (
-                    (self._pump_stdout, (proc, lines)),
-                    (self._drain_stderr, (proc, stderr_box)),
-                    (self._write_stdin, (proc, payload)),
-                ):
-                    threading.Thread(target=target, args=args, daemon=True).start()
+                stdout_thread = threading.Thread(
+                    target=self._pump_stdout, args=(proc, lines), daemon=True
+                )
+                stderr_thread = threading.Thread(
+                    target=self._drain_stderr, args=(proc, stderr_box), daemon=True
+                )
+                stdin_thread = threading.Thread(
+                    target=self._write_stdin, args=(proc, payload), daemon=True
+                )
+                for thread in (stdout_thread, stderr_thread, stdin_thread):
+                    thread.start()
 
                 deadline = began + job.timeout_s
                 timed_out = False
@@ -513,6 +585,11 @@ class ClaudeRunner:
 
                 if timed_out:
                     _kill_group(proc)
+                    # Whatever was already in the queue is the last thing the
+                    # model said before it stopped responding — the most useful
+                    # part of the transcript for working out why a job hung.
+                    stdout_thread.join(timeout=_STDERR_JOIN_TIMEOUT_S)
+                    self._drain_pending(lines, handle, sink)
                     elapsed = time.monotonic() - began
                     result = finish(
                         f"timed out after {elapsed:.1f}s (limit {job.timeout_s}s)",
@@ -522,6 +599,10 @@ class ClaudeRunner:
                     return
 
                 exit_code = proc.returncode if proc.returncode is not None else 0
+                # Join before reading: the child has exited but the reader may
+                # not have reached EOF, and losing this loses the only
+                # explanation a failed call ever gets.
+                stderr_thread.join(timeout=_STDERR_JOIN_TIMEOUT_S)
                 stderr_text = "".join(stderr_box).strip()
                 error = None
                 if exit_code != 0:
@@ -536,7 +617,55 @@ class ClaudeRunner:
                 # The consumer abandoned the iterator mid-stream (the SSE client
                 # went away). The call still happened and still cost money, so
                 # it still gets a row.
-                finish("stream abandoned by caller", -1)
+                finish("stream abandoned by caller", _NEVER_RAN)
+
+    @staticmethod
+    def _write_header(
+        handle: Any,
+        job: JobConfig,
+        argv: list[str],
+        prompt_hash: str,
+        started_at: str,
+        system_prompt: str | None,
+    ) -> None:
+        """Open the transcript with the call itself.
+
+        ``claude_calls.argv_json`` reduces the system prompt to a digest to keep
+        the row readable, which is fine when it came from a file in git. A
+        system prompt built dynamically — per pick, say — exists nowhere else,
+        and without it a bad recommendation cannot be reconstructed. The
+        transcript already has a retained path in ``output_path``, so it is the
+        natural home for the full text and the unredacted argv.
+        """
+        header = {
+            "type": _HEADER_EVENT_TYPE,
+            "job": job.name,
+            "model": job.model,
+            "started_at": started_at,
+            "prompt_hash": prompt_hash,
+            "argv": argv,
+            "system_prompt": system_prompt,
+        }
+        handle.write(json.dumps(header) + "\n")
+
+    def _drain_pending(
+        self, lines: queue.Queue[str | None], handle: Any, sink: _EventSink
+    ) -> None:
+        """Write and parse whatever the reader queued but the loop never took.
+
+        Feeding the sink matters as much as writing the file: a call that
+        produced a result event and then hung still spent the money, and the
+        cost and session id belong on its row.
+        """
+        while True:
+            try:
+                line = lines.get_nowait()
+            except queue.Empty:
+                return
+            if line is None:
+                return
+            handle.write(line if line.endswith("\n") else line + "\n")
+            self._parse(line, sink)
 
     @staticmethod
     def _parse(line: str, sink: _EventSink) -> list[str]:
@@ -599,7 +728,7 @@ class ClaudeRunner:
         error: str | None,
         exit_code: int,
         elapsed_ms: int,
-        transcript: Path,
+        transcript: Path | None,
     ) -> ClaudeResult:
         text = sink.text
         structured: dict | None = None

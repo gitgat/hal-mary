@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -523,3 +524,160 @@ def test_argv_json_redacts_the_system_prompt(harness: Harness):
     assert len(harness.calls()[0]["argv_json"]) < 1000
     # ...and the real text still reached the binary.
     assert flag_value(harness.argv, "--system-prompt") == long_prompt
+
+
+# --------------------------------------------------------------------------
+# review follow-ups
+# --------------------------------------------------------------------------
+
+
+def assert_isolated(argv: list[str]) -> None:
+    """The three flags worth 165x. Asserted on every argv shape there is."""
+    assert "--strict-mcp-config" in argv
+    assert flag_value(argv, "--mcp-config") == '{"mcpServers":{}}'
+    assert flag_values(argv, "--setting-sources") == [""]
+
+
+@pytest.mark.parametrize("job", ["tools_on", "tools_off"])
+@pytest.mark.parametrize("streaming", [False, True], ids=["run", "stream"])
+@pytest.mark.parametrize("resume", [None, "sess-abc"], ids=["fresh", "resumed"])
+@pytest.mark.parametrize("schema", [None, {"type": "object"}], ids=["no-schema", "schema"])
+def test_build_argv_is_isolated_in_every_combination(
+    harness: Harness, job: str, streaming: bool, resume: str | None, schema: dict | None
+):
+    """Cover the option matrix, not just the one shape run() happens to take.
+
+    build_argv is the only argv producer, so if the flags survive every
+    combination of its options they cannot be dropped by a caller.
+    """
+    argv = harness.runner.build_argv(
+        harness.settings.job(job),
+        streaming=streaming,
+        system_prompt="hi",
+        schema=schema,
+        resume=resume,
+    )
+    assert_isolated(argv)
+
+
+def test_isolation_flags_survive_a_streaming_resumed_call(harness: Harness):
+    """End to end, not just through build_argv: what the binary really received."""
+    harness.use("streaming.jsonl")
+    list(harness.runner.stream("tools_on", "hello", resume="sess-abc"))
+    assert_isolated(harness.argv)
+
+
+def test_stderr_is_waited_for_not_raced(harness: Harness, monkeypatch):
+    """A slow stderr reader must not cost us the only diagnostic there was.
+
+    proc.wait() returns the moment the child exits, which can be before the
+    reader thread has drained the pipe. Reading the box without joining first
+    records "exited 1 with no stderr" and throws away the reason — exactly when
+    it matters most, because exit 1 with a stderr message is what expired auth
+    looks like.
+    """
+    real_drain = ClaudeRunner._drain_stderr
+
+    def slow_drain(proc, box):
+        time.sleep(0.3)
+        real_drain(proc, box)
+
+    monkeypatch.setattr(ClaudeRunner, "_drain_stderr", staticmethod(slow_drain))
+    harness.use(
+        "simple_text.jsonl", HAL_MARY_FAKE_EXIT="1", HAL_MARY_FAKE_STDERR="auth expired"
+    )
+    result = harness.runner.run("tools_off", "hello")
+    assert not result.ok
+    assert "auth expired" in (result.error or "")
+    assert harness.calls()[0]["error"] and "auth expired" in harness.calls()[0]["error"]
+
+
+def test_unusable_scratch_dir_is_reported_not_raised(harness: Harness, tmp_path: Path):
+    """The only escape from "nothing raises" was a full or read-only scratch volume.
+
+    It would surface as an OSError out of run() inside an APScheduler job or an
+    SSE handler, mid-draft, with no claude_calls row to show for it.
+    """
+    a_file = tmp_path / "not-a-directory"
+    a_file.write_text("", encoding="utf-8")
+    broken = harness.settings.model_copy(
+        update={
+            "claude": harness.settings.claude.model_copy(
+                update={"scratch_dir": str(a_file / "scratch")}
+            )
+        }
+    )
+    result = ClaudeRunner(broken, harness.conn).run("tools_off", "hello")
+    assert not result.ok
+    assert result.error is not None and "scratch" in result.error.lower()
+    assert result.exit_code != 0
+    rows = harness.calls()
+    assert len(rows) == 1
+    assert rows[0]["error"] == result.error
+
+
+def test_transcript_opens_with_a_header_naming_the_system_prompt(harness: Harness):
+    """The transcript is the only place a dynamic system prompt survives.
+
+    claude_calls.argv_json keeps a digest to stay small, which is fine for the
+    file-sourced prompt because that file is in git. A system prompt built per
+    pick exists nowhere else, so it goes in the transcript, whose path is on the
+    row.
+    """
+    built_per_call = "You are advising on pick 14. Zero RBs rostered."
+    result = harness.runner.run("tools_off", "hello", system_prompt=built_per_call)
+    lines = result.raw_path.read_text(encoding="utf-8").splitlines()
+    header = json.loads(lines[0])
+    assert header["type"] == "hal_mary_call"
+    assert header["job"] == "tools_off"
+    assert header["system_prompt"] == built_per_call
+    assert "--strict-mcp-config" in header["argv"]
+    # The stream itself still follows, untouched.
+    assert json.loads(lines[-1])["type"] == "result"
+
+
+def test_transcript_header_records_no_system_prompt_when_there_is_none(harness: Harness):
+    Path(harness.settings.claude.system_prompt_file).unlink()
+    result = harness.runner.run("tools_off", "hello")
+    header = json.loads(result.raw_path.read_text(encoding="utf-8").splitlines()[0])
+    assert header["system_prompt"] is None
+
+
+def test_abandoned_stream_kills_and_still_records_a_row(harness: Harness):
+    """The SSE client went away. The call still happened and still cost money."""
+    harness.use("streaming.jsonl", HAL_MARY_FAKE_HANG="30")
+    chunks = harness.runner.stream("tools_off", "hello")
+    first = next(chunks)
+    assert first.kind == "text"
+    chunks.close()
+
+    rows = harness.calls()
+    assert len(rows) == 1
+    assert "abandoned" in rows[0]["error"]
+    assert rows[0]["prompt_hash"]
+
+
+def test_lines_buffered_at_the_deadline_still_reach_the_transcript(harness: Harness, monkeypatch):
+    """A timeout must not throw away output that already arrived.
+
+    Lines sitting in the reader queue when the deadline fires are the last thing
+    the model said before it stopped responding — the most useful part of the
+    transcript for working out why a job hung.
+    """
+    real_parse = ClaudeRunner._parse
+
+    def slow_parse(line, sink):
+        time.sleep(0.4)
+        return real_parse(line, sink)
+
+    monkeypatch.setattr(ClaudeRunner, "_parse", staticmethod(slow_parse))
+    harness.use("streaming.jsonl", HAL_MARY_FAKE_HANG="30")
+    result = harness.runner.run("impatient", "hello")  # timeout_s = 1
+
+    assert not result.ok
+    assert "timed out" in (result.error or "").lower()
+    lines = result.raw_path.read_text(encoding="utf-8").splitlines()
+    # One header plus every one of the fixture's five events: parsing at 0.4s a
+    # line means only three were consumed before the deadline.
+    assert len(lines) == 6, lines
+    assert json.loads(lines[-1])["type"] == "result"
