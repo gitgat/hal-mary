@@ -304,12 +304,47 @@ class FakeEspnClient:
     "an ESPN exception must not kill the loop" test is driven.
     """
 
-    def __init__(self, picks: list[dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        picks: list[dict[str, Any]] | None = None,
+        schedule: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.picks = list(picks or [])
+        self.schedule = list(schedule) if schedule is not None else None
         self.fail_next: Exception | None = None
+        self.fail_schedule: Exception | None = None
         self.name_map_calls = 0
         self.draft_picks_calls = 0
+        self.draft_schedule_calls = 0
         self.call_order: list[str] = []
+
+    def draft_schedule(self) -> list[dict[str, Any]]:
+        """Task 12's contract: every slot on the board, filled or not."""
+        self.draft_schedule_calls += 1
+        self.call_order.append("draft_schedule")
+        if self.fail_schedule is not None:
+            error, self.fail_schedule = self.fail_schedule, None
+            raise error
+        if self.schedule is not None:
+            return [dict(slot) for slot in self.schedule]
+        made = {pick["overall_pick"] for pick in self.picks}
+        # A default 6-team snake board, which is what ESPN pre-populates.
+        order = [1, 2, 3, 4, 5, 6]
+        slots = []
+        for overall in range(1, 97):
+            index = (overall - 1) % 6
+            if ((overall - 1) // 6) % 2 == 1:
+                index = 5 - index
+            slots.append(
+                {
+                    "overall_pick": overall,
+                    "round_num": (overall - 1) // 6 + 1,
+                    "round_pick": index + 1,
+                    "team_id": order[index],
+                    "made": overall in made,
+                }
+            )
+        return slots
 
     def player_name_map(self, refresh: bool = False) -> dict[int, str]:
         self.name_map_calls += 1

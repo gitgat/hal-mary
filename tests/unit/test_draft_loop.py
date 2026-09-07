@@ -280,6 +280,7 @@ async def test_no_advice_once_the_draft_is_over(tmp_path):
         tmp_path, roster_slots_json=json.dumps({"QB": 1, "RB": 1})
     )
     # Two rounds, six teams: twelve picks and the draft is done.
+    client.schedule = snake_schedule([1, 2, 3, 4, 5, 6], rounds=2)
     client.picks = [
         espn_pick(index, (index - 1) % 6 + 1, -3000 - index, f"Filler {index}")
         for index in range(1, 13)
@@ -425,3 +426,67 @@ async def test_espns_pre_populated_placeholder_picks_are_ignored(tmp_path):
     assert result["draft_over"] is False
     assert advice_count(conn) == 0
     assert bus.published == []
+
+
+# --- the pick schedule -------------------------------------------------------
+
+
+def snake_schedule(order: list[int], rounds: int = 16) -> list[dict]:
+    """ESPN's own draft board for ``order``, in the shape Task 12 returns."""
+    slots = []
+    for overall in range(1, rounds * len(order) + 1):
+        index = (overall - 1) % len(order)
+        if ((overall - 1) // len(order)) % 2 == 1:
+            index = len(order) - 1 - index
+        slots.append(
+            {
+                "overall_pick": overall,
+                "round_num": (overall - 1) // len(order) + 1,
+                "round_pick": index + 1,
+                "team_id": order[index],
+                "made": False,
+            }
+        )
+    return slots
+
+
+async def test_the_schedule_is_read_when_the_draft_opens_and_not_before(tmp_path):
+    """`draftSettings.orderType` is DRAFT_START: ESPN assigns the real order when
+    the draft begins, so the board it pre-populates is a provisional lie. Reading
+    it early and caching it would be worse than not reading it at all."""
+    _, loop, client, _, _ = loop_ready(tmp_path)
+
+    await loop.run_once()
+    assert client.draft_schedule_calls == 0, "nothing has been drafted; the order is not final"
+
+    client.picks = picks_through(1)
+    await loop.run_once()
+    assert client.draft_schedule_calls == 1, "the draft opened; read the real order now"
+
+    client.picks = picks_through(2)
+    await loop.run_once()
+    assert client.draft_schedule_calls == 1, "and only once: it does not change again"
+
+
+async def test_the_schedule_beats_the_pick_order_the_sync_cached(tmp_path):
+    """ESPN's own board says who owns which pick. Deriving it from a provisional
+    pick order and a snake rule is how the countdown ends up off by five."""
+    conn, loop, client, _, _ = loop_ready(tmp_path, picks=picks_through(1))
+    # ESPN shuffled at DRAFT_START: Caroline is second now, not last.
+    client.schedule = snake_schedule([1, 6, 5, 4, 3, 2])
+
+    await loop.run_once()
+
+    # By the cached pick order she owns pick 6 and is four away, which is outside
+    # the trigger. By ESPN's real board pick 2 is hers and she is on the clock.
+    assert advice_count(conn) == 1
+
+
+async def test_a_schedule_that_cannot_be_read_falls_back_to_the_arithmetic(tmp_path):
+    conn, loop, client, _, _ = loop_ready(tmp_path, picks=picks_through(3))
+    client.fail_schedule = EspnUnavailable("ESPN returned 503")
+
+    result = await loop.run_once()
+
+    assert result["error"] is None
+    assert advice_count(conn) == 1, "the snake arithmetic still says she is two away"

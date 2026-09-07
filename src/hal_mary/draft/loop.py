@@ -314,6 +314,9 @@ class DraftLoop:
         self.runner = runner
         self.bus = bus
         self._warmed = False
+        #: ESPN's own slot-to-team board, read once the draft opens. ``None``
+        #: until then, because before the draft it is a provisional lie.
+        self._schedule: list[dict[str, Any]] | None = None
         #: Which of *her* picks the advisor last ran for. The whole defence
         #: against advising a dozen times per turn.
         self._last_advised_pick: int | None = None
@@ -380,6 +383,51 @@ class DraftLoop:
             result["error"] = str(exc)
         return result
 
+    def _read_schedule(self, next_pick: int) -> None:
+        """Read ESPN's own slot-to-team board, once, when the draft opens.
+
+        ``draftSettings.orderType`` on this league is ``DRAFT_START``: ESPN
+        assigns the real draft order at the moment the draft begins. The board it
+        pre-populates before then is built from a provisional order, so reading
+        it early and caching it would be a plausible-looking lie about who picks
+        when — which is why this waits for the first real pick, and why it never
+        reads it twice: once the draft is running, the order does not change.
+
+        A failure is not fatal. The snake arithmetic over the synced pick order
+        is the fallback, and it is right whenever ESPN did not shuffle.
+        """
+        if self._schedule is not None or next_pick <= 1:
+            return
+        reader = getattr(self.client, "draft_schedule", None)
+        if reader is None:  # pragma: no cover - every real client has one
+            return
+        try:
+            schedule = reader()
+        except Exception as exc:  # noqa: BLE001 - ESPN is unofficial and flaky
+            log.warning("could not read the draft schedule (%s); using the snake order", exc)
+            return
+        rows = [slot for slot in schedule or [] if slot.get("overall_pick") is not None]
+        if not rows:
+            return
+        self._schedule = sorted(rows, key=lambda slot: slot["overall_pick"])
+        log.info("read ESPN's draft board: %d slots, order now final", len(self._schedule))
+
+    def _upcoming_from_schedule(self, my_team_id: int, next_pick: int) -> list[int] | None:
+        """Her remaining pick numbers, straight from ESPN's board.
+
+        ``None`` when there is no schedule to read them from, which is the
+        caller's signal to fall back to the arithmetic.
+        """
+        if self._schedule is None:
+            return None
+        mine = [
+            slot["overall_pick"]
+            for slot in self._schedule
+            if slot.get("team_id") == my_team_id and slot["overall_pick"] >= next_pick
+        ]
+        # A board that knows nothing about her team is not a board to trust.
+        return mine or None
+
     def _maybe_advise(self) -> dict[str, Any]:
         try:
             league = load_league_context(self.conn, self.settings)
@@ -388,13 +436,18 @@ class DraftLoop:
             return {"advised": False}
 
         next_pick = store.next_overall_pick(self.conn)
-        upcoming = league.upcoming_picks(next_pick)
+        self._read_schedule(next_pick)
+        upcoming = self._upcoming_from_schedule(league.my_team_id, next_pick)
+        if upcoming is None:
+            upcoming = league.upcoming_picks(next_pick)
         if not upcoming:
             # The only end-of-draft signal the board arithmetic gives.
             # ``picks_until_mine`` would count down forever past pick 96.
             return {"advised": False, "draft_over": True}
 
-        if league.picks_until_mine(next_pick) > self.settings.draft.advise_within_picks:
+        # From the schedule this is a subtraction; from the arithmetic it is a
+        # snake walk. Both answer "how many teams pick before she does".
+        if upcoming[0] - next_pick > self.settings.draft.advise_within_picks:
             return {"advised": False}
 
         target = upcoming[0]
