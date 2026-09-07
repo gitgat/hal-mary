@@ -9,7 +9,7 @@ import textwrap
 import pytest
 from pydantic import ValidationError
 
-from hal_mary.config import ConfigError, Settings, load_settings
+from hal_mary.config import ENV_KEYS, ConfigError, Settings, load_settings
 
 MINIMAL_TOML = """
 [claude]
@@ -181,3 +181,68 @@ def test_settings_are_frozen(minimal_config):
 
 def test_settings_is_exported_as_a_type(minimal_config):
     assert isinstance(load_settings(config_path=minimal_config, env={}), Settings)
+
+
+# --- path overrides for deployments whose cwd is not the source tree ----------
+
+
+def test_hal_mary_config_env_var_selects_the_config_file(minimal_config):
+    settings = load_settings(env={"HAL_MARY_CONFIG": str(minimal_config)})
+    assert settings.claude.default_model == "sonnet-test"
+
+
+def test_explicit_config_path_wins_over_the_env_var(minimal_config, tmp_path):
+    other = tmp_path / "other.toml"
+    other.write_text(textwrap.dedent(MINIMAL_TOML).replace("sonnet-test", "other-model"))
+    settings = load_settings(config_path=minimal_config, env={"HAL_MARY_CONFIG": str(other)})
+    assert settings.claude.default_model == "sonnet-test"
+
+
+def test_hal_mary_config_pointing_at_nothing_raises_naming_the_variable(tmp_path):
+    with pytest.raises(ConfigError) as excinfo:
+        load_settings(env={"HAL_MARY_CONFIG": str(tmp_path / "absent.toml")})
+    assert "HAL_MARY_CONFIG" in str(excinfo.value)
+
+
+def test_hal_mary_env_var_selects_the_dotenv_file(minimal_config, tmp_path, monkeypatch):
+    dotenv = tmp_path / "prod.env"
+    dotenv.write_text("ESPN_S2=from-the-file\nLEAGUE_ID=99\n")
+    for key in ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("HAL_MARY_CONFIG", str(minimal_config))
+    monkeypatch.setenv("HAL_MARY_ENV", str(dotenv))
+    settings = load_settings()
+    assert settings.espn_s2 == "from-the-file"
+    assert settings.league_id == 99
+
+
+def test_real_environment_wins_over_the_dotenv_file(minimal_config, tmp_path, monkeypatch):
+    dotenv = tmp_path / "prod.env"
+    dotenv.write_text("ESPN_S2=from-the-file\n")
+    for key in ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("HAL_MARY_CONFIG", str(minimal_config))
+    monkeypatch.setenv("HAL_MARY_ENV", str(dotenv))
+    monkeypatch.setenv("ESPN_S2", "from-the-environment")
+    settings = load_settings()
+    assert settings.espn_s2 == "from-the-environment"
+
+
+def test_hal_mary_env_pointing_at_nothing_raises_naming_the_variable(
+    minimal_config, tmp_path, monkeypatch
+):
+    """A typo'd path must be loud. Silently loading no secrets is the failure
+    this override exists to prevent."""
+    monkeypatch.setenv("HAL_MARY_CONFIG", str(minimal_config))
+    monkeypatch.setenv("HAL_MARY_ENV", str(tmp_path / "absent.env"))
+    with pytest.raises(ConfigError) as excinfo:
+        load_settings()
+    assert "HAL_MARY_ENV" in str(excinfo.value)
+
+
+def test_an_explicit_env_mapping_ignores_the_dotenv_overrides(minimal_config, monkeypatch):
+    """A mapping is used verbatim: no file is read, so tests stay hermetic."""
+    monkeypatch.setenv("HAL_MARY_ENV", "/does/not/exist.env")
+    settings = load_settings(config_path=minimal_config, env={"ESPN_S2": "explicit"})
+    assert settings.espn_s2 == "explicit"
+    assert settings.swid is None

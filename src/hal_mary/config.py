@@ -8,6 +8,15 @@ may hardcode any of those values.
 Missing secrets are deliberately *not* an error at load time: ``hal-mary --help``
 and the test suite have to work on a box with no ``.env``, and the status page
 wants to report exactly which keys are unset rather than crash.
+
+Two environment variables override where those files are found, for deployments
+whose working directory is not the source tree (the systemd unit, for one):
+
+* ``HAL_MARY_CONFIG`` — path to ``config.toml``
+* ``HAL_MARY_ENV`` — path to the ``.env`` file
+
+Both are loud when they point at nothing: a typo'd path that silently loaded no
+secrets is exactly the failure they exist to prevent.
 """
 
 from __future__ import annotations
@@ -41,6 +50,13 @@ REQUIRED_ENV_KEYS = ("ESPN_S2", "SWID", "LEAGUE_ID", "TEAM_ID", "SEASON", "WEB_P
 
 #: Env keys whose values are integers.
 INT_ENV_KEYS = ("LEAGUE_ID", "TEAM_ID", "SEASON")
+
+#: Deployment overrides. These are paths, not secrets, and are read from the
+#: process environment before anything else. The systemd unit sets them because
+#: its WorkingDirectory is not the source tree, so neither the repo-root nor the
+#: cwd guess below finds the right files.
+CONFIG_PATH_ENV = "HAL_MARY_CONFIG"
+DOTENV_PATH_ENV = "HAL_MARY_ENV"
 
 DEFAULT_DB_PATH = "./hal.db"
 
@@ -140,12 +156,27 @@ class Settings(_Frozen):
         return [key for key in REQUIRED_ENV_KEYS if values[key] in (None, "")]
 
 
-def _default_config_path() -> Path:
+def _override_path(source: Mapping[str, str], key: str) -> Path | None:
+    """Read a path override, insisting that it exists."""
+    raw = source.get(key)
+    if raw in (None, ""):
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_file():
+        raise ConfigError(f"{key} points at {path}, which is not a file")
+    return path
+
+
+def _resolve_config_path(source: Mapping[str, str]) -> Path:
+    override = _override_path(source, CONFIG_PATH_ENV)
+    if override is not None:
+        return override
     for candidate in (_REPO_ROOT / "config.toml", Path.cwd() / "config.toml"):
         if candidate.is_file():
             return candidate
     raise ConfigError(
-        f"config.toml not found (looked in {_REPO_ROOT} and {Path.cwd()})"
+        f"config.toml not found (looked in {_REPO_ROOT} and {Path.cwd()}); "
+        f"set {CONFIG_PATH_ENV} to point at it"
     )
 
 
@@ -160,7 +191,8 @@ def _resolve_env(env: Mapping[str, str] | None) -> dict[str, str]:
     if env is not None:
         source: Mapping[str, str] = env
     else:
-        merged = {k: v for k, v in dotenv_values(_REPO_ROOT / ".env").items() if v is not None}
+        dotenv_path = _override_path(os.environ, DOTENV_PATH_ENV) or (_REPO_ROOT / ".env")
+        merged = {k: v for k, v in dotenv_values(dotenv_path).items() if v is not None}
         merged.update(os.environ)
         source = merged
     return {key: source[key] for key in ENV_KEYS if source.get(key) not in (None, "")}
@@ -193,10 +225,15 @@ def load_settings(
 ) -> Settings:
     """Read ``config.toml`` and overlay the environment into a frozen Settings.
 
-    ``config_path`` defaults to ``config.toml`` at the repo root. ``env``
-    defaults to ``.env`` overlaid by ``os.environ``.
+    ``config_path`` defaults to ``$HAL_MARY_CONFIG``, then ``config.toml`` at the
+    repo root, then the working directory. ``env`` defaults to
+    ``$HAL_MARY_ENV`` (or the repo-root ``.env``) overlaid by ``os.environ``;
+    when a mapping is passed it is used verbatim and no file is read.
     """
-    path = Path(config_path) if config_path is not None else _default_config_path()
+    override_source: Mapping[str, str] = env if env is not None else os.environ
+    path = (
+        Path(config_path) if config_path is not None else _resolve_config_path(override_source)
+    )
     try:
         with path.open("rb") as handle:
             raw = tomllib.load(handle)
