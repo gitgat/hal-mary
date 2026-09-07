@@ -367,3 +367,68 @@ table to maintain and a lockout that outlives the fix for it.
 
 **Why the password is never logged:** a log full of near-miss guesses is its own disclosure, and it
 is the file most likely to be pasted into a chat window while debugging.
+
+---
+
+---
+
+## 2026-09-07 — The league's own settings have a manual fallback in `config.toml`
+
+**Decision:** `hal_mary.league.load_league_context` is the single accessor for the league's size,
+scoring, roster slots, draft order and Caroline's slot. A synced `league_settings` row wins field by
+field; a `[league]` section in `config.toml` fills in whatever it does not supply. Neither source
+available raises `LeagueUnknown` naming both fixes. `board_build` and the advisor read the league
+only through it and never touch `EspnClient`.
+
+**Why:** hal-mary has to be able to run a whole draft with **no ESPN access at all** — the draft is
+close and the cookies may not hold. Only two things genuinely need ESPN on draft night: discovering
+picks, which already had `record_manual_pick`, and the league settings, which had nothing. Without
+this, a box with no working cookies cannot compute a single pick number or roster need, and a model
+handed no league context assumes a twelve-team standard-scoring draft — this league is six-team full
+PPR, so every recommendation would be confidently wrong.
+
+**Why field-by-field rather than whole-source:** a sync that landed without the roster slots is a
+real outcome, and "we know the team count but not the roster" is more useful than falling back
+wholesale to a section someone may have filled in months ago.
+
+**Would revisit if:** ESPN ever becomes a dependency hal-mary can assume, which it will not.
+
+---
+
+## 2026-09-07 — The draft loop reconciles the board against every recorded pick
+
+**Decision:** Each poll applies `loop.pending_picks(conn)` — every recorded pick the board does not
+yet agree with — rather than only the list `sync_draft` calls new. Picks already filed as unmatched
+are skipped, so the pass converges and publishes nothing on an idle poll.
+
+**Why:** `sync_draft` returns a pick as new exactly once. Anything that goes wrong on that one pass —
+a duplicate that came back unmatched, a hand-entered pick that ESPN later attributes to a team, a
+board rebuilt after a pick was applied — stays wrong for the rest of the draft, and the failure is
+silent: the board thinks a player is available who is not, and recommends him. Reconciling against
+the whole pick list means divergence heals itself on the next five-second poll.
+
+**Cost:** one board load and one 96-row read per poll, which is nothing.
+
+**Would revisit if:** the pick list ever became large enough for the read to matter, which at 96 rows
+it is not.
+
+---
+
+## 2026-09-07 — Downstream keeps its own guard against a pick that names nobody
+
+**Decision:** On top of `pick_is_made` at the client boundary, `draft/store.py` excludes rows with no
+`player_name` and no positive `player_id` from `next_overall_pick` and `recent_picks`, and the draft
+loop skips them when reconciling. Research-built board rows carry synthetic ids starting at
+**-1001**, never near `-1`.
+
+**Why:** the entry above filters ESPN's pre-populated board at the one place that knows ESPN's
+vocabulary, and that is the right place. This is a second lock on the same door, and it is worth its
+few lines because the failure is total and silent rather than partial and loud: one placeholder row
+that reaches the `draft_picks` table — from a hand-entered pick that went wrong, a fixture, a future
+code path, or a restore of an older database — puts the next pick at 97 in a 96-pick draft, and every
+end-of-draft check then reads "the draft is over" before it has begun. hal-mary would sit there
+advising nothing, all night, with no error anywhere. The synthetic-id floor is the same argument: the
+board deliberately allows negative ids, so `-1` colliding with a researched player is a real
+collision, not a theoretical one.
+
+**Would revisit if:** never, really. It costs one SQL predicate.

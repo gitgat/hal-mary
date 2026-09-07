@@ -70,10 +70,12 @@ FTS5-indexed `notes` table that every job writes to and every prompt retrieves f
 
 ## The timing constraint that shapes everything
 
-A `claude -p` call with web search takes 30 to 120 seconds. The ESPN draft pick clock is 60 to 90
-seconds. **Therefore research happens before the draft and on-the-clock advice runs with web tools
-off, against a board that is already built.** Any change that puts a web-enabled Claude call on the
-pick-clock path is wrong.
+A `claude -p` call with web search takes 30 to 120 seconds. This league's pick clock is **90
+seconds**, confirmed from the live ESPN payload. **Therefore research happens before the draft
+(`jobs/board_build.py`) and on-the-clock advice (`draft/advisor.py`) runs with web tools off,
+against a board that is already built.** Any change that puts a web-enabled Claude call on the
+pick-clock path is wrong; `tests/unit/test_advisor.py` asserts the `draft_advice` job's tool list is
+empty for exactly that reason.
 
 ## Gotchas
 
@@ -102,6 +104,18 @@ pick-clock path is wrong.
   re-track it, and never paste its contents into a commit, an issue, or a test fixture. Names in
   git history cannot be removed by a later commit. `tests/unit/test_project_files.py` pins both the
   ignore rule and the template's shape.
+- **hal-mary must be able to run a draft with no ESPN at all.** Picks have a manual path
+  (`draft.loop.record_manual_pick`); the league's own settings have the commented-out `[league]`
+  section of `config.toml`. `hal_mary.league.load_league_context` applies the precedence — a synced
+  row wins field by field — and is the *only* way `board_build` and the advisor read league
+  settings. Do not add a second path.
+- **A pick that names nobody is ignored downstream too.** `EspnClient` already filters ESPN's
+  pre-populated slots, and `draft/store.py` and the draft loop ignore any recorded pick with no name
+  and no positive player id — counting one puts the next pick at 97, which reads as "the draft is
+  over" before it has begun. Research-built board ids start at **-1001** so a `-1` can never collide
+  with a real board row.
+- **This league's flex slot is spelled `RB/WR/TE`, not `FLEX`.** Prose that explains "a FLEX slot"
+  defines a term that appears nowhere on Caroline's screen.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export
   mounted on every node, and SQLite on NFS corrupts. The production VM keeps `hal.db` on its own
   disk.
