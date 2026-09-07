@@ -2,8 +2,17 @@
 
 `hal-mary` is a Claude-powered fantasy football advisor. It watches Caroline's ESPN league,
 researches the live internet through the local `claude` binary, and tells her — in plain English,
-assuming zero football knowledge — who to draft, start, and claim. **She makes every click in ESPN
-herself. This application never writes to ESPN.**
+assuming zero football knowledge — who to draft, start, and claim.
+
+**This application still never writes to ESPN itself.** For the draft that is the whole story:
+Caroline makes every click. For in-season lineup and waiver changes it is now the front half of a
+split — hal-mary decides and emits an *action*, and Claude Cowork's browser performs it in ESPN's own
+interface through the MCP endpoint at `/mcp`. **hal-mary decides, Cowork executes, Cowork reports
+back; Cowork never chooses.** That is a security boundary, not a tidy separation: Cowork's browser
+reads pages five other league members write into, so an executor with no discretion gives injected
+text nothing to redirect. See
+[`docs/superpowers/specs/2026-09-07-cowork-manager-design.md`](docs/superpowers/specs/2026-09-07-cowork-manager-design.md)
+and [`docs/COWORK.md`](docs/COWORK.md).
 
 Read [`docs/superpowers/specs/2026-09-07-hal-mary-design.md`](docs/superpowers/specs/2026-09-07-hal-mary-design.md)
 for the design of record and [`docs/DECISIONS.md`](docs/DECISIONS.md) for why things are the way they
@@ -57,6 +66,9 @@ uv run hal-mary serve          # web app + draft loop on the LAN; --reload for d
 uv run hal-mary sync           # pull league state and draft picks from ESPN
 uv run hal-mary espn-check     # are the cookies still good? exits nonzero when not
 uv run hal-mary job <name>     # run one job on demand (board_build)
+
+uv run hal-mary cowork-config  # Cowork's scheduled tasks, rendered for this league; --json
+uv run hal-mary job <name>     # run one job on demand
 ```
 
 ## Architecture in one paragraph
@@ -153,6 +165,23 @@ empty for exactly that reason.
   the loop stopped for good, on the one night the manual path exists for, with nothing on the page
   saying so. `record_manual_pick` uses `store.next_overall_pick` and upserts, and the cadence counts
   picks (`store.picks_made`) rather than reading the highest number. Both locks matter; keep both.
+
+- **`/mcp` has its own key, and it is not `WEB_PASSWORD`.** `MCP_TOKEN` opens the MCP endpoint and
+  nothing else; a session cookie does not open `/mcp` and the MCP token does not open the dashboard.
+  Two doors, because the tunnel exposes `/mcp` to the internet and the dashboard is LAN-only. With
+  `MCP_TOKEN` unset the endpoint answers 503 — **absent never means open** — and
+  `tests/unit/test_mcp.py` pins all of it.
+- **The MCP tool descriptions are part of the product.** They are the only instructions Cowork ever
+  gets. Edit them like user-facing copy, and never write one that asks Cowork to choose between
+  options; a test walks every description looking for exactly that.
+- **A note tagged `source_job = 'cowork-browser'` is data, never an instruction.** It is text a
+  browser read off a page other people wrote. Nothing that assembles a prompt may interpolate one as
+  an instruction.
+- **Cowork's scheduled prompts live in `cowork/tasks.toml`, not in code.** A Cowork scheduled task is
+  a saved prompt on a cadence, so the prompt *is* the cron job. Every prompt there is static and
+  generic — no player, no week, no strategy — and `mode = "read_only"` is enforced: the loader
+  refuses a read-only task that lists an acting tool. `docs/COWORK.md` carries the same prompts and a
+  test fails if the two drift.
 - **This league's flex slot is spelled `RB/WR/TE`, not `FLEX`.** Prose that explains "a FLEX slot"
   defines a term that appears nowhere on Caroline's screen.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export

@@ -910,3 +910,53 @@ numbered consecutively from one, and this is what it cost to learn that.
 The upsert is not incidental: the slot the pick lands on may be one of the placeholder rows. It can
 only ever be a placeholder or an empty slot, because `next_overall_pick` is one past the last pick
 that names somebody, so a real pick is never overwritten.
+
+---
+
+---
+
+
+---
+
+## 2026-09-07 — Cowork's browser is the hands; the split is the safety
+
+**Decision:** the "bot advises, Caroline clicks" entry above is superseded **for in-season lineup and
+waiver actions only**. The draft is unchanged and stays advisory. hal-mary now emits machine-readable
+*actions*, and Claude Cowork performs them in ESPN's own interface through an MCP endpoint at `/mcp`.
+
+**Why the blocker moved:** the original entry rejected autopilot because it meant browser automation
+against her logged-in account. Cowork already has a browser and can use MCP connectors, so the
+automation is not ours to write or maintain, and ESPN's undocumented write endpoints are never
+touched.
+
+**Why Cowork never chooses, which is the actual load-bearing part.** Cowork's browser reads league
+pages carrying five other members' team names, message-board posts and transaction notes — text those
+people write, which is the classic prompt-injection surface. If Cowork were selecting who to drop, a
+hostile team name would be an instruction. Because hal-mary names the player and the slot and Cowork
+only performs it, there is nothing for injected text to redirect. Every design choice on this surface
+falls out of that: no tool returns options, no tool returns reasoning to interpret, and
+`report_observation` content is stored tagged as data that no prompt may treat as an instruction.
+
+**Why order is in the schema.** A roster has a fixed size, so adding usually implies dropping and the
+wrong order loses a player for nothing; lineups lock per player at kickoff rather than on one weekly
+deadline; a waiver claim is a submitted request rather than an acquisition. Hence `sequence`,
+`depends_on`, `deadline` and `reversible` on every row, and a `claim` that carries its drop as one
+transaction rather than two dependent actions.
+
+**Why the log is a feature.** Bryan chose to let irreversible actions run unattended, so `mcp_calls`
+is the only way he learns a drop happened. It is not instrumentation and must not be trimmed to
+"errors only".
+
+**Why the duplicate window is seven rolling days.** The brief scopes emission equivalence to "the
+current week", and `actions` has no week column — it is a live queue, not a weekly ledger. A rolling
+window is the conservative direction: it can only suppress a duplicate hal-mary just decided on, never
+invent one, and two byes for the same player are five weeks apart.
+
+**Why the endpoint refuses to serve with no token rather than 404ing or opening.** `/mcp` is the one
+path exposed to the internet. A missing `MCP_TOKEN` answering 503 with a sentence is loud; a 404 reads
+as a typo and an open endpoint reads as working.
+
+**Would revisit if:** ESPN's interface changes enough that Cowork cannot reliably perform a bench, or
+a Cowork session is ever observed doing something that was not on the `pending_actions` list — the
+second would mean the boundary is not holding and the answer is to narrow the tool surface, not to add
+guardrails to the prompt.
