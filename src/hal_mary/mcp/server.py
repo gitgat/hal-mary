@@ -63,10 +63,15 @@ log = logging.getLogger(__name__)
 #: The path the endpoint is mounted at, and the only path the tunnel exposes.
 MCP_PATH = "/mcp"
 
-#: Every note Cowork's browser produces carries this. Nothing that assembles a
-#: prompt may interpolate a note with this tag as an instruction: it is a report
-#: of what a page said, and those pages are written by other people.
-BROWSER_SOURCE_JOB = "cowork-browser"
+#: Every note Cowork's browser produces carries this.
+#:
+#: Re-exported from :mod:`hal_mary.memory`, which owns it, because that is where
+#: the tag is *enforced*: ``memory.build_context`` renders a note carrying it
+#: into its own quarantined section and never beside hal-mary's own research.
+#: The tag on its own is worth nothing — storing one and trusting the label to
+#: propagate is how the first version of this leaked browser text into the
+#: advisor's prompt as an established fact.
+BROWSER_SOURCE_JOB = memory.BROWSER_SOURCE_JOB
 
 #: Slots that are neither the lineup nor the bench — a stashed player.
 RESERVE_SLOTS = frozenset({"IR", "RES", "TAXI", "IR/RES"})
