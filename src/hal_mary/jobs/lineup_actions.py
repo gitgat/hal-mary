@@ -33,7 +33,7 @@ import sqlite3
 from typing import Any
 
 from hal_mary import actions, db, memory
-from hal_mary.config import Settings
+from hal_mary.config import ConfigError, Settings
 from hal_mary.league import LeagueUnknown, load_league_context
 
 __all__ = ["JOB_NAME", "SLOT_ELIGIBILITY", "emit_bye_week_benchings", "refresh_after_sync"]
@@ -171,6 +171,17 @@ def _plan(conn: sqlite3.Connection, settings: Settings, *, now: Any = None) -> d
             "Run `hal-mary sync`.",
         )
 
+    # Resolved before the roster is even read, so a misconfigured boundary is an
+    # error on every run rather than only on the weeks that had work to do. Every
+    # action emitted below expires when this NFL week does. It is a coarse
+    # deadline — the exact one is that player's own kickoff, which needs a pro
+    # schedule hal-mary does not sync yet — but coarse is the difference between
+    # an instruction that goes stale and one that does not. Without it, an
+    # executor that was offline for a fortnight comes back in week 7 and benches
+    # a healthy starter for a bye that ended three weeks ago, and nothing
+    # anywhere would have revoked it.
+    deadline = actions.end_of_nfl_week(now, settings)
+
     starting_slots = {slot.upper() for slot in league.starting_slots}
     roster = _roster(conn, league.my_team_id)
     if not roster:
@@ -196,15 +207,6 @@ def _plan(conn: sqlite3.Connection, settings: Settings, *, now: Any = None) -> d
     unreplaceable: list[str] = []
     taken: set[int] = set()
     sequence = 0
-
-    # Every action emitted by this run expires when this NFL week does. It is a
-    # coarse deadline — the exact one is that player's own kickoff, which needs a
-    # pro schedule hal-mary does not sync yet — but coarse is the difference
-    # between an instruction that goes stale and one that does not. Without it,
-    # an executor that was offline for a fortnight comes back in week 7 and
-    # benches a healthy starter for a bye that ended three weeks ago, and nothing
-    # anywhere would have revoked it.
-    deadline = actions.end_of_nfl_week(now, settings)
 
     for player in started_on_bye:
         slot = player["slot"] or ""
@@ -307,13 +309,22 @@ def refresh_after_sync(conn: sqlite3.Connection, settings: Settings) -> dict[str
     when a bye-week bench becomes true or stops being true — so this is the
     trigger, rather than a scheduler this application does not have yet.
 
-    Never raises. The sync's real payload is the roster and the memory file, and
-    a producer that failed must not turn a good sync into a failed one; the
-    exception is logged and the plan is simply not refreshed.
+    A producer failure is swallowed: the sync's real payload is the roster, the
+    free agents and the memory file, and a plan that could not be built must not
+    turn a good sync into a failed one. It is logged and ``None`` comes back.
+
+    **A configuration error is not swallowed.** A ``ConfigError`` means the
+    deployment cannot work at all, and hiding it produces "the plan silently
+    stops refreshing" — a symptom with no message, on a box where nobody is
+    watching. The league data is already committed by the time this runs, so
+    letting it through costs a red sync row that names the wrong config key and
+    nothing else.
     """
     try:
         actions.expire_stale(conn)
         return emit_bye_week_benchings(conn, settings)
-    except Exception:  # deliberately everything; see the docstring
+    except ConfigError:
+        raise
+    except Exception:  # deliberately everything else; see the docstring
         log.exception("refreshing the action plan after a sync failed")
         return None

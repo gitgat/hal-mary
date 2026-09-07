@@ -342,12 +342,7 @@ def test_every_enabled_prompt_appears_verbatim_in_the_document(settings):
                 assert line.strip() in doc, f"{task.name}: {line.strip()!r} is not in COWORK.md"
 
 
-def test_the_document_is_regenerated_from_the_task_file(settings):
-    """Stronger than containment: re-rendering an up-to-date doc changes nothing.
-
-    The prompts are the shipped artifact and they exist in two places. This is
-    the check that makes the second copy generated rather than remembered.
-    """
+def _renderer():
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
@@ -355,6 +350,16 @@ def test_the_document_is_regenerated_from_the_task_file(settings):
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def test_the_document_is_regenerated_from_the_task_file(settings):
+    """Stronger than containment: re-rendering an up-to-date doc changes nothing.
+
+    The prompts are the shipped artifact and they exist in two places. This is
+    the check that makes the second copy generated rather than remembered.
+    """
+    module = _renderer()
 
     assert module.main(["--check"]) == 0, (
         "docs/COWORK.md is out of date with cowork/tasks.toml; "
@@ -446,3 +451,23 @@ def test_a_malformed_waiver_hour_is_refused_too(conn, settings):
 def test_the_task_file_path_comes_from_settings_already_anchored(settings):
     """`Path(a_path)` is the bug CLAUDE.md names, not a safety net."""
     assert cowork.tasks_path(settings) is settings.paths.cowork_tasks
+
+
+def test_the_renderer_requires_a_block_for_every_task(settings, tmp_path):
+    """A task with no block in the document is drift the check would not see.
+
+    `--check` only compared the blocks that existed, so three shipped jobs had no
+    entry in COWORK.md at all and it passed. "Every prompt is in the document" is
+    the property; "every block that is there is current" is not.
+    """
+    module = _renderer()
+    doc = (REPO_ROOT / "docs" / "COWORK.md").read_text(encoding="utf-8")
+    with pytest.raises(SystemExit) as excinfo:
+        module.render(doc, {**module.prompts(), "a-task-nobody-documented": "Do a thing."})
+    assert "a-task-nobody-documented" in str(excinfo.value)
+
+
+def test_every_shipped_task_has_a_block_in_the_document(settings):
+    doc = (REPO_ROOT / "docs" / "COWORK.md").read_text(encoding="utf-8")
+    for task in cowork.load_tasks(settings):
+        assert f"<!-- prompt:{task.name} -->" in doc, f"{task.name} has no block in COWORK.md"

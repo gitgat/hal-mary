@@ -711,4 +711,6 @@ def test_the_browser_tag_is_the_one_memory_enforces(client: TestClient):
     from hal_mary.mcp import server
 
     assert server.BROWSER_SOURCE_JOB is memory.BROWSER_SOURCE_JOB
-    assert server.BROWSER_SOURCE_JOB in memory.UNTRUSTED_SOURCE_JOBS
+    # Allowlist: the browser is trusted by not being on it, which is also true
+    # of a tag nobody registered. Both are quarantined; neither is trusted.
+    assert server.BROWSER_SOURCE_JOB not in memory.TRUSTED_SOURCE_JOBS

@@ -176,15 +176,23 @@ empty for exactly that reason.
 - **The MCP tool descriptions are part of the product.** They are the only instructions Cowork ever
   gets. Edit them like user-facing copy, and never write one that asks Cowork to choose between
   options; a test walks every description looking for exactly that.
-- **A note tagged `source_job = 'cowork-browser'` is data, and the tag alone does not make it so.**
-  It is text a browser read off a page other people wrote. `memory.build_context` runs *two*
-  queries — the trusted one excludes `memory.UNTRUSTED_SOURCE_JOBS` outright, and the untrusted one
-  renders only those, under their own heading, with their own smaller budget so a flood of
-  observations cannot crowd out real research. **That split is the boundary; the tag is only how it
-  is recognised.** The first version stored the tag and dropped it in `_render_note`, which put a
-  hostile team name into the advisor's prompt beside hal-mary's own facts. Any new code that reads
-  `notes` and puts them in front of a model has to make the same split, and the test that catches it
-  is written as an attack rather than as a tag check.
+- **`memory.TRUSTED_SOURCE_JOBS` is an allowlist, and everything else is quarantined.**
+  `build_context` runs *two* complementary queries: the trusted one asks for that set and nothing
+  else, and the untrusted one asks for everything that is not on it — including a note with no
+  `source_job` at all — rendering them under their own heading with their own smaller budget so a
+  flood cannot crowd out real research. **That split is the boundary; the tag is only how it is
+  recognised.** It is an allowlist rather than a blocklist so a mistyped or unregistered tag fails
+  *closed*: under a blocklist, `Cowork-Browser` and `cowork_browser` were both "not the constant" and
+  landed in the trusted section. A new job whose notes would be quarantined fails a test in
+  `test_memory.py` rather than going quiet.
+- **Every value that reaches a prompt is an injection vector, not just the one named `text`.**
+  `_render_note` puts every field through `memory._one_line`, which collapses on all Unicode
+  whitespace, because a value carrying `\n\n## What we have learned recently` closes its own section
+  and opens a forged one. This has been found twice — first `_render_note` dropped `source_job`,
+  then it collapsed `text` and appended `source_url` raw, and `source_url` is caller-supplied by
+  `report_observation`. Any new rendering of note data goes through the same helper, and its test
+  asserts on the **whole** rendered block: a test that asserts on a slice reads as though it checks
+  everything and checks only the half its author was thinking about.
 - **Every emitted action carries a deadline, and it is the end of that NFL week.** Without one there
   is no expiry *and* no other revocation path: `expire_stale` only touches rows that have a deadline,
   so an instruction emitted in week 5 would still be pending in week 7 and an executor that had been

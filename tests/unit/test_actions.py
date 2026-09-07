@@ -19,7 +19,7 @@ import pytest
 
 from conftest import FIXTURE_ENV
 from hal_mary import actions, db
-from hal_mary.config import load_settings
+from hal_mary.config import ConfigError, load_settings
 
 
 @pytest.fixture
@@ -401,3 +401,49 @@ def test_a_caller_can_tell_already_queued_from_newly_decided(conn: sqlite3.Conne
 
     first = actions.emit(conn, bench())
     assert actions.find_equivalent(conn, bench()) == first
+
+
+def test_a_string_clock_is_normalised_to_utc_like_a_datetime_one(settings):
+    """Latent, because every live caller passes db.utc_now() — normalise anyway.
+
+    A local-time string sailed through unconverted and put the week boundary
+    four hours out, which would expire a live instruction or keep a dead one.
+    """
+    assert (
+        actions.end_of_nfl_week("2026-10-05T23:00:00-04:00", settings)
+        == actions.end_of_nfl_week(datetime(2026, 10, 6, 3, 0, tzinfo=UTC), settings)
+        == "2026-10-06T11:00:00+00:00"
+    )
+
+
+def test_a_naive_string_clock_is_read_as_utc(conn: sqlite3.Connection, settings):
+    action_id = actions.emit(conn, bench(), now="2026-10-04T10:30:00")
+    row = conn.execute("SELECT created_at FROM actions WHERE id = ?", (action_id,)).fetchone()
+    assert row["created_at"] == "2026-10-04T10:30:00+00:00"
+
+
+def test_a_misconfigured_week_boundary_is_an_error_not_a_shrug(settings):
+    """"Nothing happens" is the failure mode this project keeps rediscovering."""
+    broken = settings.model_copy(
+        update={"actions": settings.actions.model_copy(update={"week_boundary_weekday": "sunsday"})}
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        actions.end_of_nfl_week(datetime(2026, 10, 4, tzinfo=UTC), broken)
+    assert "sunsday" in str(excinfo.value)
+    assert "week_boundary_weekday" in str(excinfo.value)
+
+
+def test_an_action_emitted_exactly_on_the_boundary_is_born_expired(
+    conn: sqlite3.Connection, settings
+):
+    """Documented rather than fixed: it fails closed, which is the safe side.
+
+    An action decided in the same second the week rolls over gets that instant as
+    its deadline and `pending` never returns it. It is a one-second window, the
+    move belongs to a week that has just ended, and the alternative — rounding
+    the deadline up — would issue an instruction for a week nobody reasoned about.
+    """
+    boundary = datetime(2026, 10, 6, 11, 0, tzinfo=UTC)
+    actions.emit(conn, bench(deadline=actions.end_of_nfl_week(boundary, settings)), now=boundary)
+
+    assert actions.pending(conn, now=boundary) == []

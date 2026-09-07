@@ -22,7 +22,7 @@ import pytest
 
 from conftest import FIXTURE_ENV
 from hal_mary import actions, db
-from hal_mary.config import load_settings
+from hal_mary.config import ConfigError, load_settings
 from hal_mary.jobs import lineup_actions
 
 HER_TEAM_ID = 6
@@ -422,3 +422,28 @@ def test_running_twice_in_one_week_reports_the_second_as_already_queued(conn, se
     assert not second["emitted"]
     assert second["already_queued"] == first["emitted"]
     assert len(emitted(conn)) == 1
+
+
+def test_a_misconfigured_boundary_surfaces_instead_of_stopping_the_plan_quietly(conn, settings):
+    """`refresh_after_sync` swallows a producer failure. Not a deployment one.
+
+    A producer that could not plan this week should not fail a sync — the roster
+    and the memory file are worth having. A config key that is simply wrong is a
+    different animal: swallowed, it turns into "the plan silently stops
+    refreshing", which is the failure mode this project keeps rediscovering.
+    """
+    make_league(conn)
+    broken = settings.model_copy(
+        update={"actions": settings.actions.model_copy(update={"week_boundary_weekday": "sunsday"})}
+    )
+    with pytest.raises(ConfigError):
+        lineup_actions.refresh_after_sync(conn, broken)
+
+
+def test_an_ordinary_producer_failure_still_leaves_the_sync_alone(conn, settings, monkeypatch):
+    monkeypatch.setattr(
+        lineup_actions,
+        "emit_bye_week_benchings",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("the board is missing")),
+    )
+    assert lineup_actions.refresh_after_sync(conn, settings) is None

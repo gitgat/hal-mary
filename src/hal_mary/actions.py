@@ -43,6 +43,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from . import db
+from .config import ConfigError
 from .draft.board import normalize_name
 
 __all__ = [
@@ -130,13 +131,26 @@ class Action:
 
 
 def _moment(value: datetime | str | None) -> str:
-    """Normalise a caller's clock to the one timestamp format the table holds."""
+    """Normalise a caller's clock to the one timestamp format the table holds.
+
+    A string is parsed and converted like a ``datetime``, not passed through.
+    Passing it through was latent — every live caller hands over
+    ``db.utc_now()`` — but ``"2026-10-05T23:00:00-04:00"`` then put the week
+    boundary four hours out, which either expires a live instruction or keeps a
+    dead one alive. Everything in this table is compared as a *string*, so one
+    row in another offset silently reorders the comparison.
+
+    A naive value is read as UTC, which matches ``db.utc_now``'s own contract.
+    """
     if value is None:
         return db.utc_now()
-    if isinstance(value, datetime):
-        moment = value if value.tzinfo else value.replace(tzinfo=UTC)
-        return moment.astimezone(UTC).isoformat(timespec="seconds")
-    return value
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            raise ValueError(f"expected an ISO-8601 timestamp, got {value!r}") from None
+    moment = value if value.tzinfo else value.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).isoformat(timespec="seconds")
 
 
 def end_of_nfl_week(now: datetime | str | None, settings: Any) -> str:
@@ -158,16 +172,32 @@ def end_of_nfl_week(now: datetime | str | None, settings: Any) -> str:
     Boundaries are exclusive at the start and inclusive at the end: a moment
     exactly on the rollover still belongs to the week that is closing, so an
     action emitted at 10:59 gets 11:00 rather than a week and a minute.
+
+    **An action emitted in the same second as the rollover is therefore born
+    expired**, because :func:`pending` wants ``deadline > now``. That is left as
+    it is rather than rounded up: it is a one-second window, the move was
+    reasoned about in a week that has just ended, and the alternative would issue
+    an instruction for a week nobody has looked at yet. It fails closed, which is
+    the side to fail on.
     """
     moment = datetime.fromisoformat(_moment(now))
     weekday = getattr(settings.actions, "week_boundary_weekday", "tuesday").strip().lower()
     try:
         target = WEEKDAYS.index(weekday)
     except ValueError:
-        raise ValueError(
-            f"[actions].week_boundary_weekday is {weekday!r}; expected a weekday name"
+        # ConfigError, not ValueError, so the callers that swallow a producer
+        # failure can let a *deployment* failure through. A misconfigured
+        # boundary that manifests as "the plan silently stops refreshing" is the
+        # shape of bug this project keeps rediscovering.
+        raise ConfigError(
+            f"[actions].week_boundary_weekday is {weekday!r}; expected one of "
+            f"{', '.join(WEEKDAYS)}"
         ) from None
     hour = int(getattr(settings.actions, "week_boundary_hour_utc", 11))
+    if not 0 <= hour < 24:
+        raise ConfigError(
+            f"[actions].week_boundary_hour_utc is {hour}; expected an hour of the day"
+        )
 
     candidate = moment.replace(hour=hour, minute=0, second=0, microsecond=0)
     candidate += timedelta(days=(target - moment.weekday()) % 7)

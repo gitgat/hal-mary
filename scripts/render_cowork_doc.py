@@ -50,6 +50,18 @@ def render(doc: str, by_name: dict[str, str]) -> str:
     rendered, count = _BLOCK.subn(swap, doc)
     if not count:
         raise SystemExit(f"{DOC_FILE.name} has no <!-- prompt:NAME --> blocks to fill in")
+
+    # Every task needs a block, not merely "at least one block exists". Checking
+    # only the blocks that are present means a task nobody documented passes
+    # silently — which is the drift this script was written to make impossible,
+    # arriving through the door it left open.
+    documented = {match.group("name") for match in _BLOCK.finditer(rendered)}
+    undocumented = sorted(set(by_name) - documented)
+    if undocumented:
+        raise SystemExit(
+            f"{DOC_FILE.name} has no <!-- prompt:NAME --> block for: "
+            f"{', '.join(undocumented)}. Every task in {TASKS_FILE.name} needs one."
+        )
     return rendered
 
 

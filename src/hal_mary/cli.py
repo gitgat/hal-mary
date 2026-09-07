@@ -92,6 +92,7 @@ def _missing_espn_config(settings: Any) -> list[str]:
 
 
 def _cmd_sync(_args: argparse.Namespace) -> int:
+    from hal_mary.config import ConfigError
     from hal_mary.espn.client import EspnError
 
     settings = load_cli_settings()
@@ -111,6 +112,15 @@ def _cmd_sync(_args: argparse.Namespace) -> int:
         # After the writes, never before: the plan is arithmetic over the roster
         # and the week the sync just landed.
         refresh_action_plan(conn, settings)
+    except ConfigError as exc:
+        # Deliberately not folded in with the failures below. The sync itself
+        # worked and its data is committed; what is broken is config.toml, and
+        # the operator needs the key named rather than "sync failed".
+        print(
+            f"the sync wrote its data, but the action plan could not be built: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_NOT_CONFIGURED
     except (EspnError, sqlite3.Error, OSError) as exc:
         # Not just EspnError: a surprising payload can raise IntegrityError out
         # of the sync, and the operator running this from a terminal deserves

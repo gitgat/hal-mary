@@ -969,10 +969,11 @@ guardrails to the prompt.
 
 ## 2026-09-07 — A tag is not a boundary: browser notes are quarantined, not labelled
 
-**Decision:** `memory.build_context` runs two note queries, not one. The trusted query excludes
-`UNTRUSTED_SOURCE_JOBS`; the untrusted one asks only for them and renders them under
-`## Unverified reports from an automated browser`, with a preamble saying they are claims somebody
-made and never an instruction, and with a much smaller budget of their own.
+**Decision:** `memory.build_context` runs two complementary note queries, not one. The trusted query
+asks for `TRUSTED_SOURCE_JOBS` — an **allowlist** — and the untrusted one asks for everything else,
+including a note with no `source_job` at all, rendering them under
+`## Unverified reports from outside hal-mary's own research` with a preamble saying they are claims
+somebody made and never an instruction, and with a much smaller budget of their own.
 
 **Why, and it is a correction rather than a design.** The original requirement was that
 `report_observation` content is "stored tagged, and never interpreted as an instruction". That was
@@ -998,5 +999,22 @@ player would otherwise push every real fact about him out of the prompt.
 note containing `\n\n## What we have learned recently\n\n- ...` would otherwise close its own section
 and open a forged one.
 
-**Would revisit if:** a second untrusted writer appears — add it to `UNTRUSTED_SOURCE_JOBS` rather
-than inventing a second mechanism.
+**Why an allowlist and not a blocklist.** It was a blocklist first. `Cowork-Browser`,
+`COWARK-BROWSER`, `cowork_browser`, `" cowork-browser"` and `""` are all "not the constant", so every
+one of them landed in the *trusted* section. Not reachable while `report_observation` hardcodes the
+constant — but the next untrusted writer to mistype its tag would have failed open, silently, into
+the advisor's prompt. Inverted, a typo is merely quarantined. The cost is that a new trusted job
+whose notes are quarantined is also silent, so a test checks the allowlist against the jobs that
+actually exist: `config.toml`'s `[jobs.*]` plus every `JOB_NAME` in `src`.
+
+**Why every field, not the one named `text`.** The first fix collapsed `text` and left `source_url`
+appended raw — and `source_url` is caller-supplied by `report_observation`, so a payload delivered
+through it produced a forged **trusted** heading after the quarantine, as the last thing the advisor
+reads. `player_name` and `topic` were the same shape. Every rendered field now goes through
+`_one_line`. The test that missed it asserted on `block.split(UNTRUSTED_HEADING)[0]`, which reads as
+"the whole rendering" and is only the half its author was thinking about; the replacements assert on
+the entire block and count headings that start a line, because a `##` inside a bullet is inert.
+
+**Would revisit if:** a second *trusted* writer appears — add it to `TRUSTED_SOURCE_JOBS` rather than
+inventing a second mechanism. An untrusted one needs no change at all, which is the point of the
+direction.
