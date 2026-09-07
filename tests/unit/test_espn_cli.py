@@ -146,3 +146,37 @@ def test_sync_reports_a_database_failure_readably(wired, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "FOREIGN KEY constraint failed" in err
     assert "Traceback" not in err
+
+
+def test_sync_refreshes_the_action_plan(wired, monkeypatch, capsys):
+    """A sync is the moment the roster and the week both change.
+
+    That is exactly when a bye-week bench becomes true or stops being true, so
+    it is where the deterministic producer runs — this application has no
+    scheduler yet, and an action nobody ever produces is a loop that is not
+    closed.
+    """
+    seen = []
+    monkeypatch.setattr(
+        cli, "refresh_action_plan", lambda conn, settings: seen.append((conn, settings))
+    )
+
+    assert cli.main(["sync"]) == 0
+    assert len(seen) == 1
+    assert seen[0][0] is wired["conn"]
+
+
+def test_a_failing_action_plan_does_not_fail_the_sync(wired, capsys):
+    """The roster, the free agents and the memory file are worth having alone."""
+
+    def explode(_conn, _settings):
+        raise RuntimeError("the board is missing")
+
+    import hal_mary.jobs.lineup_actions as producer
+
+    original = producer.emit_bye_week_benchings
+    producer.emit_bye_week_benchings = explode
+    try:
+        assert cli.main(["sync"]) == 0
+    finally:
+        producer.emit_bye_week_benchings = original

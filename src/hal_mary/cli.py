@@ -76,6 +76,16 @@ def build_runner(settings: Any, conn: sqlite3.Connection) -> Any:
 
     return ClaudeRunner(settings, conn)
 
+def refresh_action_plan(conn: sqlite3.Connection, settings: Any) -> None:
+    """Recompute the Cowork action plan from what the sync just wrote.
+
+    Named at module level so tests can replace it, and separate from the sync
+    itself because it reads the database rather than ESPN.
+    """
+    from hal_mary.jobs.lineup_actions import refresh_after_sync
+
+    refresh_after_sync(conn, settings)
+
 
 def _missing_espn_config(settings: Any) -> list[str]:
     return [key for key in settings.missing_secrets() if key in ESPN_ENV_KEYS]
@@ -98,6 +108,9 @@ def _cmd_sync(_args: argparse.Namespace) -> int:
     try:
         summary = run_league_sync(conn, client)
         picks = run_draft_sync(conn, client)
+        # After the writes, never before: the plan is arithmetic over the roster
+        # and the week the sync just landed.
+        refresh_action_plan(conn, settings)
     except (EspnError, sqlite3.Error, OSError) as exc:
         # Not just EspnError: a surprising payload can raise IntegrityError out
         # of the sync, and the operator running this from a terminal deserves

@@ -200,8 +200,8 @@ def _write_league_settings(conn: sqlite3.Connection, settings: dict[str, Any]) -
         """
         INSERT OR REPLACE INTO league_settings
             (id, season, league_id, name, team_count, scoring_type, draft_type,
-             draft_date, roster_slots_json, raw_json, updated_at)
-        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             draft_date, roster_slots_json, raw_json, updated_at, current_week)
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             settings.get("season"),
@@ -214,6 +214,7 @@ def _write_league_settings(conn: sqlite3.Connection, settings: dict[str, Any]) -
             json.dumps(settings.get("roster_slots") or {}),
             settings.get("raw_json"),
             db.utc_now(),
+            settings.get("current_week"),
         ),
     )
 
@@ -277,6 +278,21 @@ def _write_roster_slots(conn: sqlite3.Connection, rosters: Sequence[dict[str, An
     return len(rows)
 
 
+def _current_week(client: Any) -> int | None:
+    """Which NFL week ESPN thinks it is, or None if this client cannot say.
+
+    Kept tolerant on purpose. The week is one small extra read on a sync whose
+    real payload is the roster, the free agents and the memory file; losing it
+    should make the lineup jobs do nothing rather than make the whole sync fail.
+    An unknown week is a safe answer, and a wrong one is not.
+    """
+    reader = getattr(client, "current_week", None)
+    if reader is None:
+        return None
+    value = reader() if callable(reader) else reader
+    return int(value) if value is not None else None
+
+
 def sync_league(conn: sqlite3.Connection, client: Any) -> dict[str, Any]:
     """Pull settings, teams, rosters and free agents; write them; return counts.
 
@@ -286,7 +302,7 @@ def sync_league(conn: sqlite3.Connection, client: Any) -> dict[str, Any]:
     _require_no_open_transaction(conn, "sync_league")
     run_id = _sync_run_started(conn, "league")
     try:
-        league_settings = client.league_settings()
+        league_settings = {**client.league_settings(), "current_week": _current_week(client)}
         teams = client.teams()
         rosters = client.rosters()
         free_agents = client.free_agents()

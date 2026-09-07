@@ -100,6 +100,7 @@ class StubClient:
             "rosters": ROSTERS,
             "free_agents": FREE_AGENTS,
             "draft_picks": PICKS,
+            "current_week": 4,
         }
         self.data.update(overrides)
         self.fail_on: str | None = None
@@ -125,6 +126,9 @@ class StubClient:
 
     def draft_picks(self):
         return self._answer("draft_picks")
+
+    def current_week(self):
+        return self._answer("current_week")
 
 
 @pytest.fixture
@@ -606,3 +610,26 @@ def test_the_shipped_retention_covers_a_live_draft(settings):
     """At a five-second poll, the window kept has to be worth looking at."""
     minutes = espn_sync.SYNC_RUN_KEEP * settings.draft.poll_seconds / 60
     assert minutes >= 15
+
+
+def test_sync_league_records_which_week_it_is(conn):
+    """The bye-week producer's only source for "right now"."""
+    client = StubClient()
+    sync_league(conn, client)
+
+    row = rows(conn, "SELECT current_week FROM league_settings")[0]
+    assert row["current_week"] == 4
+
+
+def test_sync_league_survives_a_client_that_cannot_say_which_week_it_is(conn):
+    """An older client, or one that failed the extra read, must not fail a sync.
+
+    The rest of the sync — the roster, the free agents, the memory file — is
+    worth having on its own, and an unknown week makes the lineup jobs do
+    nothing rather than do something wrong.
+    """
+    client = StubClient()
+    client.current_week = None
+    sync_league(conn, client)
+
+    assert rows(conn, "SELECT current_week FROM league_settings")[0]["current_week"] is None

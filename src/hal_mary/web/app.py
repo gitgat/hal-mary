@@ -1239,6 +1239,7 @@ def _default_run_sync(settings: Settings) -> Callable[[], dict[str, Any]]:
 
     def run() -> dict[str, Any]:
         from hal_mary.espn import EspnClient, sync_draft, sync_league
+        from hal_mary.jobs.lineup_actions import refresh_after_sync
 
         conn = db.connect(settings.db_path)
         try:
@@ -1246,6 +1247,10 @@ def _default_run_sync(settings: Settings) -> Callable[[], dict[str, Any]]:
             client = EspnClient(settings)
             summary = dict(sync_league(conn, client))
             summary["picks"] = len(sync_draft(conn, client))
+            # The roster and the week have just changed, which is exactly when a
+            # bye-week bench becomes true or stops being true. Never raises; see
+            # lineup_actions.refresh_after_sync.
+            refresh_after_sync(conn, settings)
             return summary
         finally:
             conn.close()

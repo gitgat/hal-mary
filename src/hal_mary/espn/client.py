@@ -401,6 +401,21 @@ class EspnClient:
             "raw_json": json.dumps(raw, sort_keys=True),
         }
 
+    def current_week(self) -> int:
+        """Which NFL week ESPN thinks it is.
+
+        Separate from :meth:`league_settings` on purpose. That method answers
+        from the small ``mSettings`` response; this one needs the League the
+        library builds, and the two are kept apart so a caller wanting only the
+        league's shape does not pay for the heavier read. During a sync the
+        League is built anyway, so this costs nothing there.
+
+        The library clamps its own ``current_week`` to the final scoring period,
+        which is what makes it right in January: the season is over, the roster
+        still exists, and "week 19" would put every player on a bye.
+        """
+        return int(self._library().current_week)
+
     def _draft_slots(self) -> dict[int, int]:
         """team_id -> 1-based draft slot, from ``draftSettings.pickOrder``."""
         order = (self._settings_payload().get("settings", {}) or {}).get(
