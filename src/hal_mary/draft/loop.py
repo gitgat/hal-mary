@@ -24,12 +24,17 @@ failure:
   claim a board row twice. That belongs here, upstream, not in the pure
   arithmetic.
 * **One tick has one time budget, and it starts before the ESPN read.** The pick
-  clock is 90 seconds. A slow sync (bounded at 25s by the ESPN timeouts) followed
-  by two Claude attempts that time out (each costing its ``timeout_s`` *plus* the
-  runner's kill-and-join teardown) would otherwise overrun the clock and the card
-  would arrive after the pick was made. ``draft.advice_budget_s`` bounds the
-  whole tick, and the advisor starts an attempt only if it can finish inside what
-  is left — so a slow sync costs an attempt, never the card.
+  clock is 90 seconds. A slow sync followed by two Claude attempts that time out
+  (each costing its ``timeout_s`` *plus* the runner's kill-and-join teardown)
+  would otherwise overrun it, and the card would arrive after the pick was made.
+  ``draft.advice_budget_s`` is fixed at the top of the tick, so a slow sync spends
+  it like anything else, and the advisor starts an attempt only if it can finish
+  inside what is left — a slow sync costs an attempt, never the card. What that
+  does *not* do is bound the ESPN reads themselves: a tick makes up to three
+  (:meth:`warm`, ``sync_draft``, :meth:`_read_schedule`), the budget cannot cancel
+  a request already in flight, and httpx times out per operation rather than per
+  request. So the honest bound on a tick is ``max(advice_budget_s, ESPN spend)``.
+  The lever for the second half is ``espn.read_timeout_s``.
 
 **Threading.** ``run_once`` does blocking SQLite and subprocess work on the
 calling event loop, deliberately: ``db.connect`` leaves ``check_same_thread`` on,

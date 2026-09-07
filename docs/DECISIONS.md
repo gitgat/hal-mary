@@ -464,6 +464,16 @@ nobody notices until draft night. The gate makes the bound true by construction:
 spent, the advisor spends only the remainder, and when nothing fits the board's own card renders
 immediately. The worked sum in `config.toml` is the explanation, not the guarantee.
 
+**What is not bounded, stated plainly because the next person will trust the comment.** The gate
+bounds the *Claude* spend. It cannot cancel an HTTP read already in flight, and a tick makes up to
+three of them — `warm()`'s `player_name_map`, `draft_picks()` (which fetches the name map itself when
+the warm failed), and `_read_schedule()` on the tick the draft opens — each nominally 25s and more in
+the pathological case, because httpx times out per operation and not per request. The true bound on a
+tick is therefore `max(advice_budget_s, whatever the ESPN reads took)`, roughly 50-75s worst case,
+not a flat 60. That is still the right shape: ESPN spending 50 seconds leaves 10, nothing fits, and
+Caroline gets the board's own card at once rather than nothing at all. The lever for the ESPN half is
+`espn.read_timeout_s`, not these two job timeouts.
+
 **What it costs:** a slow sync costs an attempt, not the card. That is the right trade — skipping the
 sync instead would risk recommending a player taken five seconds ago, which is the failure the whole
 unmatched-pick machinery exists to prevent, while losing an attempt only downgrades a researched

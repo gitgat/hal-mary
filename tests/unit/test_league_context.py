@@ -188,3 +188,23 @@ def test_config_toml_ships_the_fallback_section_commented_out():
     assert "fallback" in body.lower()
     for key in ("team_count", "scoring_type", "roster_slots", "draft_order", "my_draft_slot"):
         assert key in body, f"the commented [league] section does not mention {key}"
+
+
+def test_the_pick_clock_comes_from_espn(tmp_path):
+    """`draftSettings.timePerSelection`. Every timing decision in this project is
+    sized against it, so it is read rather than assumed — a league that shortens
+    its clock must move those budgets, not silently break them."""
+    settings = make_settings(tmp_path)
+    conn = open_db(tmp_path)
+    seed_synced_league(conn)
+
+    assert load_league_context(conn, settings).pick_clock_s == 90
+
+
+def test_the_pick_clock_falls_back_to_config_with_no_espn(tmp_path):
+    # Into the [league] table, not the [league.roster_slots] one below it.
+    toml = LEAGUE_TOML.replace("my_draft_slot = 6", "my_draft_slot = 6\npick_clock_s = 60")
+    settings = make_settings(tmp_path, toml)
+    conn = open_db(tmp_path)
+
+    assert load_league_context(conn, settings).pick_clock_s == 60

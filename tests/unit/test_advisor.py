@@ -40,6 +40,7 @@ from draft_fixtures import (
 from hal_mary import claude_runner, memory
 from hal_mary.draft.advisor import _fits, advise
 from hal_mary.events import EventBus
+from hal_mary.league import load_league_context
 
 ADVICE = {
     "pick": "Saquon Barkley",
@@ -510,10 +511,6 @@ def test_the_fallback_explains_its_own_jargon(tmp_path):
 
 # --- the time budget ---------------------------------------------------------
 
-#: Confirmed from the live ESPN payload: draftSettings.timePerSelection = 90.
-PICK_CLOCK_S = 90
-
-
 def test_the_configured_budget_fits_inside_one_pick_clock(tmp_path):
     """The worked sum, pinned so it cannot drift.
 
@@ -524,6 +521,13 @@ def test_the_configured_budget_fits_inside_one_pick_clock(tmp_path):
     in the same tick.
     """
     settings = make_settings(tmp_path)
+    conn = open_db(tmp_path)
+    seed_synced_league(conn)
+    # Read from the league, not written down here: a league that shortened its
+    # clock has to fail this test rather than quietly overrun the new one.
+    pick_clock = load_league_context(conn, settings).pick_clock_s
+    assert pick_clock, "the pick clock is what every budget below is sized against"
+
     teardown = claude_runner.TIMEOUT_TEARDOWN_S
     first = settings.job("draft_advice").timeout_s
     retry = settings.job("draft_advice_retry").timeout_s
@@ -535,7 +539,7 @@ def test_the_configured_budget_fits_inside_one_pick_clock(tmp_path):
     # And the budget bounds the whole tick, sync included, with room left on the
     # clock for the card to render and be read.
     assert espn_worst <= settings.draft.advice_budget_s
-    assert settings.draft.advice_budget_s <= PICK_CLOCK_S - 25
+    assert settings.draft.advice_budget_s <= pick_clock - 25
 
 
 def test_an_attempt_costs_its_timeout_plus_the_runners_teardown(tmp_path):
@@ -650,3 +654,32 @@ def test_no_deadline_means_no_budget_gate(tmp_path):
 
     assert len(runner.calls) == 2
     assert result["source"] == "claude"
+
+
+def test_a_budget_too_small_for_the_first_attempt_still_runs_the_retry(tmp_path, monkeypatch):
+    """The retry is a cheaper call, so a budget that cannot afford the full
+    attempt can still afford it.
+
+    With 25 + 7 for the first attempt and 15 + 7 for the retry, any remaining
+    budget in [22, 32) fits the retry and not the first. Giving up there hands
+    Caroline a ranked-list card with twenty-odd seconds unspent — the fallback
+    firing while its own budget sat unused. That window is reachable on any tick
+    whose pre-advisor spend lands between 28 and 38 seconds: a slow sync plus the
+    one-off schedule read, or a tick that also warms the client.
+    """
+    clock = FakeClock()
+    conn, settings, runner, bus = advisor_ready(tmp_path, [ok_result(ADVICE)], clock=clock)
+    monkeypatch.setattr("hal_mary.draft.advisor.time", clock)
+
+    first = settings.job("draft_advice").timeout_s + claude_runner.TIMEOUT_TEARDOWN_S
+    retry = settings.job("draft_advice_retry").timeout_s + claude_runner.TIMEOUT_TEARDOWN_S
+    assert retry < first, "the window this test lives in has to exist"
+    deadline = clock.monotonic() + (first + retry) / 2  # inside [retry, first)
+
+    result = advise(conn, settings, runner, bus, next_overall_pick=6, deadline=deadline)
+
+    assert [call["job"] for call in runner.calls] == ["draft_advice_retry"], (
+        "the attempt that did not fit is skipped; the one that fits is not"
+    )
+    assert result["source"] == "claude"
+    assert result["attempts"] == 1

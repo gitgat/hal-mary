@@ -157,6 +157,9 @@ class LeagueConfig(_Frozen):
     draft_date: str | None = None
     name: str | None = None
     rounds: int | None = None
+    #: Seconds on the clock per pick. Every draft-night budget is sized against
+    #: it, so it is worth being able to state by hand when ESPN is unavailable.
+    pick_clock_s: int | None = None
     my_draft_slot: int | None = None
     draft_order: list[int | str] = []
     roster_slots: dict[str, int] = {}

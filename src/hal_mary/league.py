@@ -83,6 +83,12 @@ class LeagueContext:
     draft_type: str | None
     snake: bool
     draft_date: str | None
+    #: Seconds per pick, from ``draftSettings.timePerSelection``. The number the
+    #: whole application is timed against: the board is researched before the
+    #: draft and the advisor budgets one tick because this is 90 and a searching
+    #: Claude call is not. Read, never assumed — a league that shortens its clock
+    #: has to move those budgets rather than silently overrun them.
+    pick_clock_s: int | None
     rounds: int
     my_team_id: int
     my_draft_slot: int
@@ -164,6 +170,16 @@ def _points_per_reception(raw: dict[str, Any]) -> float | None:
             except (TypeError, ValueError):
                 return None
     return None
+
+
+def _pick_clock(raw: dict[str, Any]) -> int | None:
+    """Seconds per pick, from ``draftSettings.timePerSelection``."""
+    value = (raw.get("draftSettings", {}) or {}).get("timePerSelection")
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
 
 
 def _scoring_summary(points: float | None) -> str:
@@ -321,6 +337,7 @@ def load_league_context(conn: sqlite3.Connection, settings: Settings) -> LeagueC
         # ESPN league is one and the arithmetic differs only in even rounds.
         snake=draft_type is None or draft_type.upper() in _SNAKE_TYPES,
         draft_date=(row["draft_date"] if row is not None else None) or config.draft_date,
+        pick_clock_s=_pick_clock(raw) or config.pick_clock_s,
         rounds=rounds,
         my_team_id=my_team_id,
         my_draft_slot=my_slot,

@@ -218,7 +218,11 @@ def _reason(
         (RETRY_JOB_NAME, RETRY_PROMPT_FILE, settings.draft.advice_retry_candidates, 0),
     ):
         if not _fits(settings, job, deadline):
-            break
+            # ``continue``, not ``break``. The retry is the cheaper call, so a
+            # budget too small for the full attempt can still afford it — and
+            # giving up on the first miss hands Caroline the deterministic card
+            # with twenty-odd seconds of her own budget unspent.
+            continue
         attempts += 1
         advice = _ask(
             conn,
