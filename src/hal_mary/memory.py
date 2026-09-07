@@ -20,9 +20,11 @@ nouns, which is exactly where keyword search is strongest.
 
 from __future__ import annotations
 
+import itertools
 import re
 import sqlite3
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -41,6 +43,11 @@ __all__ = [
 ]
 
 
+#: Savepoint names must be unique within a connection's stack, and a bare
+#: counter is enough: connections are never shared across threads.
+_SAVEPOINT_SEQUENCE = itertools.count()
+
+
 @dataclass(frozen=True)
 class Note:
     """One thing hal-mary learned.
@@ -49,9 +56,11 @@ class Note:
     every note carries the moment it entered the database and no caller can
     backdate one by accident.
 
-    ``expires_at`` is an ISO-8601 UTC timestamp for facts with a known shelf
-    life — "out for Week 6" is worthless in Week 7. ``None`` means the fact does
-    not go stale on a schedule; age filtering still applies to it.
+    ``expires_at`` is an ISO-8601 timestamp for facts with a known shelf life —
+    "out for Week 6" is worthless in Week 7. ``None`` means the fact does not go
+    stale on a schedule; age filtering still applies to it. Whatever shape it
+    arrives in, it is converted to UTC before storage (see
+    :func:`_normalize_expiry`), because the read path compares it as a string.
     """
 
     text: str
@@ -61,6 +70,66 @@ class Note:
     team_abbr: str | None = None
     source_url: str | None = None
     expires_at: str | None = None
+
+
+@contextmanager
+def _atomic(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Make a block atomic whether or not the caller is already in a transaction.
+
+    ``db.transaction`` issues a bare ``BEGIN``, which SQLite refuses inside an
+    open transaction. That is right for a top-level unit of work and wrong here:
+    the normal shape for a job is "record the run and write its findings as one
+    atomic unit", and a memory helper that cannot be called from inside that
+    would force every job to choose between atomicity and using this module.
+
+    A SAVEPOINT composes. Outside a transaction it starts one and ``RELEASE``
+    commits it; inside one it is a nested checkpoint, so a failed batch unwinds
+    to the savepoint and leaves the caller's transaction open and usable rather
+    than poisoned.
+    """
+    name = f"hal_mary_memory_{next(_SAVEPOINT_SEQUENCE)}"
+    conn.execute(f"SAVEPOINT {name}")
+    try:
+        yield conn
+        conn.execute(f"RELEASE {name}")
+    except BaseException:
+        try:
+            conn.execute(f"ROLLBACK TO {name}")
+            conn.execute(f"RELEASE {name}")
+        except sqlite3.Error:  # pragma: no cover - the savepoint is always live here
+            pass
+        raise
+
+
+def _normalize_expiry(raw: str | None, source_job: str) -> str | None:
+    """Validate ``expires_at`` and re-emit it in exactly ``db.utc_now``'s format.
+
+    Expiry is compared as a *string* on the read path, which is only correct if
+    every value in the column has the same shape. A job that wrote
+    ``2026-09-07T09:00:00-05:00`` — 14:00Z, five hours in the future — would
+    sort below a 12:00Z "now" and its note would be dropped as expired while it
+    was still true. Silently losing live information is worse than raising, and
+    worse than the note simply lingering.
+
+    So the format is enforced here rather than trusted: anything
+    ``datetime.fromisoformat`` accepts is converted to UTC (a naive timestamp is
+    read as UTC, a bare date as midnight UTC), and anything else is a
+    ``ValueError`` naming the job that produced it.
+    """
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        raise ValueError(
+            f"expires_at must be an ISO-8601 timestamp, got {raw!r} (source_job={source_job!r})"
+        ) from None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).isoformat(timespec="seconds")
 
 
 def _clean_text(note: Note) -> str:
@@ -84,6 +153,7 @@ def write_note(conn: sqlite3.Connection, note: Note) -> int:
     ``notes``. Never insert into ``notes_fts`` directly.
     """
     text = _clean_text(note)
+    expires_at = _normalize_expiry(note.expires_at, note.source_job)
     cur = conn.execute(
         """
         INSERT INTO notes
@@ -98,7 +168,7 @@ def write_note(conn: sqlite3.Connection, note: Note) -> int:
             note.team_abbr,
             text,
             note.source_url,
-            note.expires_at,
+            expires_at,
         ),
     )
     note_id = cur.lastrowid
@@ -113,11 +183,15 @@ def write_notes(conn: sqlite3.Connection, notes: Iterable[Note]) -> list[int]:
     All or nothing. A job that produced ten notes, one of them malformed, has
     produced a bad batch: half of it in the database would be read later as
     complete, and there is nothing in the row to say the rest went missing.
+
+    Uses a SAVEPOINT rather than ``db.transaction``, so this composes: a caller
+    already inside ``with db.transaction(conn):`` can write its notes as part of
+    that larger unit, and a rejected batch unwinds only itself.
     """
     batch = list(notes)
     if not batch:
         return []
-    with db.transaction(conn):
+    with _atomic(conn):
         return [write_note(conn, note) for note in batch]
 
 
@@ -163,6 +237,54 @@ def _fts_query(raw: str) -> str | None:
     return " OR ".join('"' + token.replace('"', '""') + '"' for token in tokens)
 
 
+#: Everything that is not a word character, for name comparison. Names arrive
+#: from two directions that do not agree on punctuation.
+_NON_WORD_RE = re.compile(r"\W+", re.UNICODE)
+
+#: The SQL name of :func:`_normalize_key`, registered per connection.
+_NORM_FN = "hal_mary_norm"
+
+
+def _normalize_key(value: Any) -> str | None:
+    """Casefold and drop punctuation, so two spellings of a name compare equal.
+
+    ``Ja'Marr Chase``, ``JaMarr Chase``, ``ja'marr chase`` and ``A.J. Brown``
+    versus ``AJ Brown`` all collapse to the same key. This is not cosmetic: the
+    writer is a Claude job transcribing a name off a web page and the reader
+    filters with ESPN's spelling, so an exact match quietly returns nothing on
+    the highest-value path there is — "everything we know about her starters" —
+    and an empty notes section looks exactly like "we have learned nothing".
+    """
+    if not isinstance(value, str):
+        return None
+    return _NON_WORD_RE.sub("", value).casefold()
+
+
+def _register_normalizer(conn: sqlite3.Connection) -> None:
+    """Teach this connection the normaliser, so both sides use the same one.
+
+    Doing the comparison in SQL with nested ``replace()`` calls would mean two
+    implementations of "the same name" that could drift apart; registering the
+    Python function means the column and the parameter are normalised by one
+    piece of code. The cost is that the filter cannot use an index, which does
+    not matter for a table holding a season's notes.
+    """
+    conn.create_function(_NORM_FN, 1, _normalize_key, deterministic=True)
+
+
+def _normalized_terms(name: str, values: Sequence[str]) -> list[str]:
+    """Reject a bare string, then normalise each value.
+
+    A plain ``str`` is a perfectly good ``Sequence[str]``, so
+    ``players="Bijan Robinson"`` would bind eighteen single letters and return
+    nothing at all. That is a typo the type checker cannot see and the result
+    cannot be distinguished from "we know nothing about him".
+    """
+    if isinstance(values, str | bytes):
+        raise TypeError(f"{name} must be a list of strings, not a bare {type(values).__name__}")
+    return [term for term in (_normalize_key(value) for value in values) if term]
+
+
 def _age_cutoff(max_age_days: int | None) -> str | None:
     if max_age_days is None:
         return None
@@ -182,17 +304,31 @@ def _filter_sql(
     about these two backs, on the subject of injuries". An empty list is not a
     filter that matches nothing — it is no filter, because callers build these
     lists from a roster and an empty roster should not silently blank the
-    prompt.
+    prompt. Both sides of the comparison go through :func:`_normalize_key`, so
+    punctuation and case cannot silence a match.
     """
     clauses: list[str] = []
     params: list[Any] = []
 
-    if players:
-        clauses.append(f"n.player_name IN ({', '.join('?' * len(players))})")
-        params.extend(players)
-    if topics:
-        clauses.append(f"n.topic IN ({', '.join('?' * len(topics))})")
-        params.extend(topics)
+    for column, name, values in (
+        ("n.player_name", "players", players),
+        ("n.topic", "topics", topics),
+    ):
+        if values is None:
+            continue
+        # Type-check before the emptiness check, so players="" is a rejected
+        # bare string rather than an accidental "no filter".
+        terms = _normalized_terms(name, values)
+        if len(values) == 0:
+            continue
+        if not terms:
+            # Every term normalised away, but the caller did ask to filter.
+            # Matching nothing shows them the bug; matching everything would
+            # bury it in a prompt that looks fine.
+            clauses.append("0")
+            continue
+        clauses.append(f"{_NORM_FN}({column}) IN ({', '.join('?' * len(terms))})")
+        params.extend(terms)
 
     cutoff = _age_cutoff(max_age_days)
     if cutoff is not None:
@@ -229,6 +365,7 @@ def search_notes(
     has researched yet, and a query that matches nothing all return ``[]``, and
     every caller renders that as a prompt section that simply is not there.
     """
+    _register_normalizer(conn)
     match = _fts_query(query) if query else None
     clauses, params = _filter_sql(
         players=players,
@@ -276,9 +413,11 @@ def standing_memory(settings: Any) -> str:
     version of `caroline.md` because a process started before the edit is a bug
     that would take days to notice.
 
-    A missing directory yields ``""``. A deployment whose memory directory has
-    not been created yet should give slightly thinner advice, not a stack trace
-    on every page.
+    A missing directory yields ``""``, an unreadable file is skipped, and a file
+    that is not valid UTF-8 is decoded with replacement characters. Nothing
+    about the state of this directory may raise: a deployment whose memory
+    directory is missing, or one file of which was saved in the wrong encoding,
+    should give slightly thinner advice, not a stack trace on every page.
 
     ``league.md`` carries the ``hal-mary:preserve-below`` sentinel that the ESPN
     sync writes around. Nothing here interprets it: the file goes in whole,
@@ -292,7 +431,12 @@ def standing_memory(settings: Any) -> str:
     sections: list[str] = []
     for path in sorted(directory.glob("*.md"), key=lambda p: p.name):
         try:
-            content = path.read_text(encoding="utf-8").strip()
+            # errors="replace", not strict: one curly apostrophe pasted from a
+            # web page and saved as cp1252 is a byte that is not valid UTF-8,
+            # and a UnicodeDecodeError here would take down every Claude call
+            # in the process. A mojibake character in one line of standing
+            # context costs nothing; losing the file costs the advice.
+            content = path.read_text(encoding="utf-8", errors="replace").strip()
         except OSError:
             # A file being rewritten by hand, or one we cannot read, must not
             # take down every prompt in the process. Skip it.

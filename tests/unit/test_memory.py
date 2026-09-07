@@ -5,7 +5,7 @@ maintained by triggers, and an in-memory shortcut would not exercise the same
 migration path production runs.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -85,6 +85,86 @@ def test_write_notes_with_no_notes_is_a_no_op(conn):
     assert memory.write_notes(conn, []) == []
 
 
+def test_write_notes_composes_inside_a_callers_transaction(conn):
+    # A job that records its run and writes its findings as one atomic unit is
+    # the normal shape here, so write_notes must not demand the outermost BEGIN.
+    with db.transaction(conn):
+        run_id = db.job_run_started(conn, "news_sweep")
+        ids = memory.write_notes(conn, [note(text="first"), note(text="second")])
+
+    assert len(ids) == 2
+    assert conn.execute("SELECT count(*) AS n FROM notes").fetchone()["n"] == 2
+    assert (
+        conn.execute("SELECT status FROM job_runs WHERE id = ?", (run_id,)).fetchone()["status"]
+        == "running"
+    )
+
+
+def test_notes_roll_back_when_the_callers_transaction_fails(conn):
+    with pytest.raises(RuntimeError), db.transaction(conn):
+        memory.write_notes(conn, [note(text="doomed")])
+        raise RuntimeError("the job blew up after writing its notes")
+
+    assert conn.execute("SELECT count(*) AS n FROM notes").fetchone()["n"] == 0
+
+
+def test_a_bad_batch_rolls_back_without_poisoning_the_outer_transaction(conn):
+    with db.transaction(conn):
+        run_id = db.job_run_started(conn, "news_sweep")
+        with pytest.raises(ValueError):
+            memory.write_notes(conn, [note(text="good"), note(text="   ")])
+        # The savepoint unwound only the batch; the outer transaction is still
+        # usable, which is the whole point of not using a bare BEGIN.
+        db.job_run_finished(conn, run_id, "ok", summary="no notes today")
+
+    assert conn.execute("SELECT count(*) AS n FROM notes").fetchone()["n"] == 0
+    assert (
+        conn.execute("SELECT status FROM job_runs WHERE id = ?", (run_id,)).fetchone()["status"]
+        == "ok"
+    )
+
+
+def test_expires_at_with_an_offset_is_stored_as_utc(conn):
+    note_id = memory.write_note(conn, note(text="x", expires_at="2026-09-07T09:00:00-05:00"))
+
+    row = conn.execute("SELECT expires_at FROM notes WHERE id = ?", (note_id,)).fetchone()
+    assert row["expires_at"] == "2026-09-07T14:00:00+00:00"
+
+
+def test_expires_at_without_a_timezone_is_read_as_utc(conn):
+    note_id = memory.write_note(conn, note(text="x", expires_at="2026-09-07T09:00:00"))
+
+    row = conn.execute("SELECT expires_at FROM notes WHERE id = ?", (note_id,)).fetchone()
+    assert row["expires_at"] == "2026-09-07T09:00:00+00:00"
+
+
+def test_a_date_only_expiry_becomes_midnight_utc(conn):
+    note_id = memory.write_note(conn, note(text="x", expires_at="2026-09-14"))
+
+    row = conn.execute("SELECT expires_at FROM notes WHERE id = ?", (note_id,)).fetchone()
+    assert row["expires_at"] == "2026-09-14T00:00:00+00:00"
+
+
+def test_an_unparseable_expiry_is_rejected(conn):
+    with pytest.raises(ValueError):
+        memory.write_note(conn, note(text="x", expires_at="next Tuesday"))
+    assert conn.execute("SELECT count(*) AS n FROM notes").fetchone()["n"] == 0
+
+
+def test_a_note_expiring_later_today_in_another_offset_is_not_dropped(conn):
+    # 2 hours from now, written in US Central. Compared as raw strings this
+    # sorts below the current UTC time and the live note vanishes.
+    later = (
+        (datetime.now(UTC) + timedelta(hours=2))
+        .astimezone(timezone(timedelta(hours=-5)))
+        .isoformat(timespec="seconds")
+    )
+    assert later.endswith("-05:00")
+    note_id = memory.write_note(conn, note(text="still valid", expires_at=later))
+
+    assert [row["id"] for row in memory.search_notes(conn)] == [note_id]
+
+
 # --- retrieval ---------------------------------------------------------------
 
 
@@ -157,7 +237,11 @@ def test_search_never_raises_on_hostile_fts_syntax(conn, query):
 
     rows = memory.search_notes(conn, query)
 
+    # The call completing is the assertion. The rest guards against a future
+    # implementation "passing" by swallowing the error and returning nothing
+    # useful: whatever comes back must be real note rows.
     assert isinstance(rows, list)
+    assert all(row["text"] for row in rows)
 
 
 def test_search_matches_a_name_containing_an_apostrophe(conn):
@@ -203,6 +287,47 @@ def test_search_ors_within_players_and_ands_across_filters(conn):
     )
 
     assert [row["text"] for row in rows] == ["match"]
+
+
+def test_players_filter_tolerates_punctuation_and_case(conn):
+    # The writer is a Claude job transcribing a name off a web page; the reader
+    # filters with ESPN's spelling. They will not always agree on the apostrophe.
+    memory.write_note(conn, note(text="Full practice", player_name="Ja'Marr Chase"))
+
+    for spelling in ["JaMarr Chase", "ja'marr chase", "Ja Marr Chase", "JA'MARR CHASE"]:
+        rows = memory.search_notes(conn, players=[spelling])
+        assert [row["player_name"] for row in rows] == ["Ja'Marr Chase"], spelling
+
+
+def test_players_filter_still_excludes_a_different_player(conn):
+    memory.write_note(conn, note(text="Full practice", player_name="Ja'Marr Chase"))
+
+    assert memory.search_notes(conn, players=["Chris Olave"]) == []
+
+
+def test_topics_filter_tolerates_case(conn):
+    memory.write_note(conn, note(text="hurt", topic="injury"))
+
+    assert [row["text"] for row in memory.search_notes(conn, topics=["Injury"])] == ["hurt"]
+
+
+def test_a_filter_of_only_punctuation_matches_nothing_rather_than_everything(conn):
+    memory.write_note(conn, note(text="anything", player_name="Bijan Robinson"))
+
+    # The caller asked to filter and every term normalised away. Returning the
+    # whole table would hide their bug inside a plausible-looking prompt.
+    assert memory.search_notes(conn, players=["", "  "]) == []
+
+
+def test_a_bare_string_filter_is_rejected_rather_than_matching_letters(conn):
+    memory.write_note(conn, note(text="anything", player_name="Bijan Robinson"))
+
+    with pytest.raises(TypeError):
+        memory.search_notes(conn, players="Bijan Robinson")
+    with pytest.raises(TypeError):
+        memory.search_notes(conn, topics="injury")
+    with pytest.raises(TypeError):
+        memory.search_notes(conn, players="")
 
 
 def test_search_applies_filters_alongside_a_query(conn):
@@ -325,6 +450,18 @@ def test_standing_memory_skips_empty_files(memory_dir):
     assert text == "## From caroline.md\n\nreal content"
 
 
+def test_standing_memory_survives_a_file_that_is_not_utf8(memory_dir):
+    # A curly apostrophe pasted from a web page and saved as cp1252 is one byte
+    # that is not valid UTF-8. It must not take down every Claude call.
+    (memory_dir / "caroline.md").write_bytes("Caroline\u2019s preferences".encode("cp1252"))
+    (memory_dir / "league.md").write_text("Ten team PPR", encoding="utf-8")
+
+    text = memory.standing_memory(settings_for(memory_dir))
+
+    assert "Ten team PPR" in text
+    assert "preferences" in text
+
+
 def test_standing_memory_on_a_missing_directory_is_empty(tmp_path):
     settings = settings_for(tmp_path / "does-not-exist")
 
@@ -419,7 +556,6 @@ def test_build_context_omits_empty_sections_entirely(conn, memory_dir):
     )
 
     assert text == ""
-    assert "##" not in text
 
 
 def test_build_context_with_only_notes_has_no_standing_heading(conn, memory_dir):
@@ -449,7 +585,8 @@ def test_build_context_defaults_to_three_weeks_of_notes(conn, memory_dir):
     fresh = memory.write_note(conn, memory.Note(text="fresh fact", source_job="chat"))
     stale = memory.write_note(conn, memory.Note(text="stale fact", source_job="chat"))
     backdate(conn, stale, days=40)
-    assert fresh  # both were written
+    assert conn.execute("SELECT count(*) AS n FROM notes").fetchone()["n"] == 2
+    assert fresh != stale
 
     default_text = memory.build_context(conn, settings_for(memory_dir))
     history_text = memory.build_context(conn, settings_for(memory_dir), max_age_days=None)
