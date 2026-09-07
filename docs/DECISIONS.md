@@ -947,10 +947,13 @@ transaction rather than two dependent actions.
 is the only way he learns a drop happened. It is not instrumentation and must not be trimmed to
 "errors only".
 
-**Why the duplicate window is seven rolling days.** The brief scopes emission equivalence to "the
-current week", and `actions` has no week column — it is a live queue, not a weekly ledger. A rolling
-window is the conservative direction: it can only suppress a duplicate hal-mary just decided on, never
-invent one, and two byes for the same player are five weeks apart.
+**Why the duplicate window is the NFL week and not a rolling seven days.** It was rolling first, and
+that was wrong: a bench for a bye on the Monday and a bench for an injury five days later are two
+different decisions about two different situations, and a rolling window swallowed the second one
+silently. `actions` has no week column, but it does not need one — `[actions].week_boundary_*` gives
+one clock, and the window is "since this NFL week began". The same clock is every action's deadline,
+which is not a coincidence: an instruction that is still queued when its week ends is exactly the one
+that should no longer be performed.
 
 **Why the endpoint refuses to serve with no token rather than 404ing or opening.** `/mcp` is the one
 path exposed to the internet. A missing `MCP_TOKEN` answering 503 with a sentence is loud; a 404 reads
@@ -960,3 +963,40 @@ as a typo and an open endpoint reads as working.
 a Cowork session is ever observed doing something that was not on the `pending_actions` list — the
 second would mean the boundary is not holding and the answer is to narrow the tool surface, not to add
 guardrails to the prompt.
+
+
+---
+
+## 2026-09-07 — A tag is not a boundary: browser notes are quarantined, not labelled
+
+**Decision:** `memory.build_context` runs two note queries, not one. The trusted query excludes
+`UNTRUSTED_SOURCE_JOBS`; the untrusted one asks only for them and renders them under
+`## Unverified reports from an automated browser`, with a preamble saying they are claims somebody
+made and never an instruction, and with a much smaller budget of their own.
+
+**Why, and it is a correction rather than a design.** The original requirement was that
+`report_observation` content is "stored tagged, and never interpreted as an instruction". That was
+implemented as a tag on the row plus a test asserting the tag survived — which is the requirement's
+words and not the requirement. `_render_note` dropped `source_job` entirely, `search_notes` had no
+filter for it, and the advisor retrieves by FTS over note text, so a browser observation naming a
+player rendered as a bullet inside `## What we have learned recently`, beside hal-mary's own
+researched facts, with nothing to tell a reading model which was which. `board_build` escaped only
+because its `topics=` filter happened to exclude the tag.
+
+**The general lesson, which is why this is an entry and not a commit message:** the enforcement point
+for a trust boundary is wherever the data is *rendered*, not wherever it is written. A tag propagates
+only as far as somebody remembers to read it, and three modules away nobody did. If you add a reader
+of `notes` that puts them in front of a model, it has to make the same split.
+
+**Why a separate section and a separate budget rather than a marker on the bullet.** A marker on one
+bullet among forty is context a model averages away; a section it has to enter, with the framing at
+the top, is read first. The separate budget is the other half: retrieval budget is a resource, and
+the browser is the one writer whose volume an outsider can influence — forty observations naming a
+player would otherwise push every real fact about him out of the prompt.
+
+**Also:** `_render_note` collapsing text to a single line is a security property, not formatting. A
+note containing `\n\n## What we have learned recently\n\n- ...` would otherwise close its own section
+and open a forged one.
+
+**Would revisit if:** a second untrusted writer appears — add it to `UNTRUSTED_SOURCE_JOBS` rather
+than inventing a second mechanism.

@@ -342,7 +342,107 @@ def test_every_enabled_prompt_appears_verbatim_in_the_document(settings):
                 assert line.strip() in doc, f"{task.name}: {line.strip()!r} is not in COWORK.md"
 
 
+def test_the_document_is_regenerated_from_the_task_file(settings):
+    """Stronger than containment: re-rendering an up-to-date doc changes nothing.
+
+    The prompts are the shipped artifact and they exist in two places. This is
+    the check that makes the second copy generated rather than remembered.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "render_cowork_doc", REPO_ROOT / "scripts" / "render_cowork_doc.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.main(["--check"]) == 0, (
+        "docs/COWORK.md is out of date with cowork/tasks.toml; "
+        "run `uv run python scripts/render_cowork_doc.py`"
+    )
+
+
 def test_the_document_says_the_browsing_job_stays_separate(settings):
     doc = (REPO_ROOT / "docs" / "COWORK.md").read_text(encoding="utf-8").lower()
     assert "news-sweep" in doc
     assert "must not be merged" in doc or "never merge" in doc
+
+
+def test_pending_actions_is_an_acting_tool(settings):
+    """A read-only job that can fetch the plan but not report it is a trap.
+
+    It would receive the list of changes, have no way to say what it did with
+    them, and hal-mary would re-issue every one on the next run. Fetching the
+    instruction list is part of acting, so `read_only` may not have it either.
+    """
+    assert "pending_actions" in cowork.ACTING_TOOLS
+    assert "report_action" in cowork.ACTING_TOOLS
+
+
+def test_a_read_only_task_may_not_fetch_the_action_list(tmp_path, settings):
+    path = write_tasks(
+        tmp_path,
+        """
+[[task]]
+name = "news"
+purpose = "Look for news."
+enabled = true
+cadence = "daily"
+at = "07:00"
+model = "opus"
+mode = "read_only"
+tools = ["get_roster", "pending_actions", "report_observation"]
+prompt = "Look for news and call report_observation."
+""",
+    )
+    with pytest.raises(cowork.CoworkConfigError) as excinfo:
+        cowork.load_tasks(settings, path)
+    assert "pending_actions" in str(excinfo.value)
+
+
+def test_no_read_only_prompt_claims_cowork_itself_cannot_act(settings):
+    """It has a browser and is logged into ESPN. Claim what is true.
+
+    `ACTING_TOOLS` covers hal-mary's surface and says nothing about the browser
+    the same session is holding. A prompt that says "you have no tool that could"
+    is false, and a false reassurance is worse than none — it is exactly the
+    sentence an injected instruction would like the model to have believed.
+    """
+    for task in cowork.load_tasks(settings):
+        if task.mode != "read_only":
+            continue
+        lowered = task.prompt.lower()
+        assert "you have no tool that could" not in lowered, task.name
+        assert "hal-mary has given" in lowered or "hal-mary gives" in lowered, task.name
+
+
+def test_a_malformed_waiver_day_is_as_loud_as_an_absent_one(conn, settings):
+    """The absent case refuses to assume Wednesday. So must the unreadable one.
+
+    Falling back to an index default reinstated the exact guess the design
+    forbade, and did it silently — which is worse than the absence it was
+    covering for, because nothing on the page says a guess was made.
+    """
+    synced_league(conn, {"waiverProcessDays": ["EVERY_OTHER_TUESDAY"], "waiverHours": 10})
+
+    schedule = cowork.render(conn, settings)
+    waivers = next(entry for entry in schedule.tasks if entry.task.name == "waivers")
+
+    assert waivers.at is None
+    assert waivers.day is None
+    joined = " ".join([*schedule.warnings, *waivers.notes]).lower()
+    assert "wednesday" not in joined
+    assert "every_other_tuesday" in joined
+
+
+def test_a_malformed_waiver_hour_is_refused_too(conn, settings):
+    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverHours": 99})
+
+    waivers = cowork.waiver_settings(conn)
+    assert waivers["known"] is False
+    assert "99" in waivers["reason"]
+
+
+def test_the_task_file_path_comes_from_settings_already_anchored(settings):
+    """`Path(a_path)` is the bug CLAUDE.md names, not a safety net."""
+    assert cowork.tasks_path(settings) is settings.paths.cowork_tasks

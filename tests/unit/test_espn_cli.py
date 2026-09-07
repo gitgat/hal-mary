@@ -231,7 +231,10 @@ def test_cowork_config_reports_a_broken_task_file_rather_than_a_traceback(
         cli,
         "load_cli_settings",
         lambda: settings.model_copy(
-            update={"paths": settings.paths.model_copy(update={"cowork_tasks": str(broken)})}
+            # A Path, not a str: model_copy skips validation, and Settings hands
+            # every consumer an anchored Path. A str here would test a shape
+            # production never produces.
+            update={"paths": settings.paths.model_copy(update={"cowork_tasks": broken})}
         ),
     )
 

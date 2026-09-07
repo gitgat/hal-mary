@@ -20,3 +20,17 @@ def test_requests_cannot_reach_the_network():
     """espn_api uses requests, so blocking httpx alone would not be enough."""
     with pytest.raises(AssertionError, match="real network"):
         requests.get("https://lm-api-reads.fantasy.espn.com/")
+
+
+def test_httpx2_cannot_reach_the_network():
+    """The `mcp` SDK brings its own HTTP stack, and it is a third door.
+
+    Nothing in hal-mary makes an outbound call through it today, so this hole was
+    latent rather than open — but CLAUDE.md says the guard blocks every HTTP
+    stack in play, and a latent hole that the documentation denies is exactly the
+    kind that gets found the hard way.
+    """
+    import httpx2
+
+    with pytest.raises(AssertionError, match="real network"):
+        httpx2.get("https://lm-api-reads.fantasy.espn.com/")

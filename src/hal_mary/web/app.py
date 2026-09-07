@@ -1117,6 +1117,21 @@ def _status_context(
             "SELECT job, started_at, finished_at, status, summary, error"
             " FROM job_runs ORDER BY id DESC LIMIT 10",
         ),
+        # What Cowork has been doing. Bryan chose to let irreversible actions run
+        # unattended, so this is the product reporting back to him rather than
+        # instrumentation — and a log that needs an SSH session and a sqlite3
+        # prompt to read is one nobody reads.
+        "actions": _all(
+            conn,
+            "SELECT id, created_at, kind, player_name, slot, paired_player_name, reason,"
+            " reversible, status, outcome_detail, reported_at"
+            " FROM actions ORDER BY id DESC LIMIT 10",
+        ),
+        "mcp_calls": _all(
+            conn,
+            "SELECT created_at, tool, outcome, detail FROM mcp_calls ORDER BY id DESC LIMIT 10",
+        ),
+        "mcp_enabled": bool((settings.mcp_token or "").strip()),
         "db_path": str(settings.db_path),
         "paths": [
             {"label": label, "path": str(path), "ok": exists}

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import httpx2
 import pytest
 from espn_api.requests import espn_requests
 
@@ -104,8 +105,14 @@ def _block_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
     The suite has to pass on a box with no internet and no credentials, and a
     test that quietly talks to ESPN is worse than one that fails: it passes
-    until it does not. Both HTTP stacks in play are stopped at their real
+    until it does not. Every HTTP stack in play is stopped at its real
     transport, so an explicit ``httpx.MockTransport`` still works.
+
+    There are three, not two. ``httpx`` is hal-mary's own raw ESPN reads,
+    ``requests`` is what the ``espn_api`` library uses, and ``httpx2`` arrives
+    with the ``mcp`` SDK. Nothing calls out through the third today; it is
+    blocked anyway, because a stack that is unblocked only for as long as nobody
+    uses it is a hole with a timer on it.
     """
 
     def explode(*args: object, **kwargs: object) -> None:
@@ -116,6 +123,8 @@ def _block_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", explode)
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", explode)
+    monkeypatch.setattr(httpx2.HTTPTransport, "handle_request", explode)
+    monkeypatch.setattr(httpx2.AsyncHTTPTransport, "handle_async_request", explode)
     monkeypatch.setattr("requests.adapters.HTTPAdapter.send", explode)
 
 

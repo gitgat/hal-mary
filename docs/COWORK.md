@@ -189,6 +189,7 @@ arrives disabled.
 
 The critical one. This is the run that actually changes the lineup.
 
+<!-- prompt:lineup-sunday -->
 ```text
 You are carrying out scheduled roster changes for a fantasy football team on ESPN's website. hal-mary works out what should change; you carry it out and report back. You are not being asked to judge anything.
 
@@ -203,6 +204,7 @@ You are carrying out scheduled roster changes for a fantasy football team on ESP
 
 Finish by saying, in one or two sentences, what you did or that there was nothing to do.
 ```
+<!-- /prompt:lineup-sunday -->
 
 ---
 
@@ -213,6 +215,7 @@ Sunday-morning run misses every Thursday-night starter entirely — by Sunday th
 the action can only be reported `skipped`. So this run exists, and it is the same prompt with one
 sentence changed to say why.
 
+<!-- prompt:lineup-thursday -->
 ```text
 You are carrying out scheduled roster changes for a fantasy football team on ESPN's website. hal-mary works out what should change; you carry it out and report back. You are not being asked to judge anything.
 
@@ -227,6 +230,7 @@ You are carrying out scheduled roster changes for a fantasy football team on ESP
 
 Finish by saying, in one or two sentences, what you did or that there was nothing to do.
 ```
+<!-- /prompt:lineup-thursday -->
 
 ---
 
@@ -250,6 +254,7 @@ guessing. Set `day` and `at` on the task in `cowork/tasks.toml` by hand in that 
 Note that `done` on a claim means **submitted**, not acquired. hal-mary learns whether the claim
 landed from the next sync, not from Cowork.
 
+<!-- prompt:waivers -->
 ```text
 You are submitting waiver claims for a fantasy football team on ESPN's website. hal-mary works out which claims to submit; you submit them and report back. You are not being asked to judge anything, and you are not choosing between players.
 
@@ -264,6 +269,7 @@ You are submitting waiver claims for a fantasy football team on ESPN's website. 
 
 Finish by saying, in one or two sentences, what you submitted or that there was nothing to submit.
 ```
+<!-- /prompt:waivers -->
 
 ---
 
@@ -283,8 +289,9 @@ change the roster, which is precisely the thing this whole design exists to prev
 Give it its own Cowork task, on its own schedule, with only `get_roster`, `get_league` and
 `report_observation` in its tool list.
 
+<!-- prompt:news-sweep -->
 ```text
-You are gathering information for a fantasy football team. You are not changing anything, and you have no tool that could: this task only reads and reports.
+You are gathering information for a fantasy football team. Do not change anything. hal-mary has given this task only tools that read and report — there is no tool here that can change the roster, submit a claim, or set a lineup — so if you find yourself about to click something in ESPN that changes the team, that is out of scope for this run and the answer is to report it instead.
 
 1. Call `get_roster` to see which players are on the team.
 2. For each of those players, look for news published in the last few days about an injury, a change in how much he is playing, a suspension, or anything else that would change what he is likely to score this week. Use reputable reporting; beat writers and the major sports outlets, not aggregators and not social media speculation.
@@ -294,6 +301,7 @@ You are gathering information for a fantasy football team. You are not changing 
 
 Finish by saying how many observations you reported.
 ```
+<!-- /prompt:news-sweep -->
 
 ---
 
@@ -301,6 +309,10 @@ Finish by saying how many observations you reported.
 
 These ship with `enabled = false` in `cowork/tasks.toml`. Turn one on by setting `enabled = true`,
 running `uv run hal-mary cowork-config` to print it, and creating the matching task in Cowork.
+
+The prompt blocks in this document are generated from `cowork/tasks.toml` by
+`scripts/render_cowork_doc.py`; edit the task file and re-run it, never this file. A test runs it with
+`--check`, so the two cannot drift.
 
 | Task | Mode | What it is for |
 | --- | --- | --- |
@@ -329,7 +341,25 @@ timezone = "America/Chicago"     # your IANA zone, not the server's
 
 ---
 
-## 6. What Bryan sees
+## 6. When an instruction goes stale
+
+Every action hal-mary emits expires at the end of the NFL week that emitted it —
+`[actions].week_boundary_weekday` / `week_boundary_hour_utc` in `config.toml`, defaulting to Tuesday
+11:00 UTC, which is after Monday night's game and around when ESPN rolls its scoring period.
+
+That coarse boundary is doing real work rather than being tidy. If Cowork's Sunday task does not run
+because Claude Desktop was closed, week 7 arrives and an instruction with no deadline would still say
+bench Bijan Robinson — the bye three weeks gone, the player healthy and playing, and a browser
+benching a starter unattended. `pending_actions` never returns an action past its deadline, and
+`expire_stale` marks the row `expired` so the record says why it was never performed.
+
+The right eventual answer is a deadline derived from that player's own kickoff, because lineups lock
+one player at a time. That needs an NFL schedule hal-mary does not sync yet. Until then the week
+boundary is what stands between an offline fortnight and an unwanted click.
+
+---
+
+## 7. What Bryan sees
 
 Every MCP tool call is written to the `mcp_calls` table with its name, its arguments, its outcome and
 a timestamp. Bryan chose to let irreversible actions run unattended, so **that log is the only way he
@@ -343,9 +373,20 @@ sqlite3 hal.db "SELECT id, kind, player_name, slot, status, outcome_detail, repo
 A refused request — wrong token, missing token — is written to the application log, never to
 `mcp_calls`, and the token that was presented is never logged at all.
 
+The status page shows the same thing without an SSH session: a **What Cowork did** card listing recent
+actions with their outcomes and marking anything irreversible as such, and a **Recent connector calls**
+card listing the tool calls.
+
+**Anything Cowork reports through `report_observation` is quarantined.** It is stored as a note tagged
+`cowork-browser`, and every prompt hal-mary assembles renders those under their own *Unverified
+reports from an automated browser* heading — never beside facts hal-mary established itself. That is
+enforced where the prompt is built rather than being a property of the tag, because the pages Cowork
+reads carry other people's text and the whole point of the split is that none of it can become an
+instruction.
+
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Symptom | Cause |
 | --- | --- |
@@ -355,4 +396,5 @@ A refused request — wrong token, missing token — is written to the applicati
 | Cloudflare `530` / `1033` | The CNAME is missing or unproxied. |
 | Cowork does something not on the list | Its saved prompt has been edited. Re-paste it from `hal-mary cowork-config`. |
 | The same action performed twice | An outcome was not reported. Anything unreported is re-issued on the next run, by design. |
+| A run is handed an action that looks stale | It should not be: every action expires at the end of the NFL week that emitted it. If you see an older one, `[actions].week_boundary_*` is wrong for this league. |
 | `pending_actions` is always empty | The normal case. It fills when a job emits one — today that is the bye-week bench, which needs a synced roster, a board with bye weeks, and a current week. |

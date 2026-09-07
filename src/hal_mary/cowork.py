@@ -80,10 +80,23 @@ KNOWN_TOOLS = (
     "cowork_schedule",
 )
 
-#: Tools that change hal-mary's state. A ``read_only`` task may list none of
-#: them. ``report_observation`` is deliberately not here: it only ever writes a
-#: note tagged as browser-sourced, which nothing later reads as an instruction.
-ACTING_TOOLS = frozenset({"report_action"})
+#: Tools a ``read_only`` task may not list.
+#:
+#: ``report_action`` because it changes hal-mary's state. ``pending_actions``
+#: because fetching the instruction list is part of acting: a read-only job that
+#: could fetch it but not report on it would receive a plan, have no way to say
+#: what happened to it, and leave hal-mary re-issuing every entry forever.
+#:
+#: ``report_observation`` is deliberately not here. It only ever writes a note
+#: that ``memory.build_context`` quarantines into its own untrusted section, so
+#: it cannot put anything in front of a later prompt as an established fact.
+#:
+#: **This bounds the tools hal-mary hands out, and nothing more.** It says
+#: nothing about the browser the same Cowork session is holding, which is logged
+#: into ESPN and could in principle change the roster by clicking. That is why
+#: the read-only prompts say hal-mary has given them no tool that changes
+#: anything, rather than claiming they are incapable of it.
+ACTING_TOOLS = frozenset({"report_action", "pending_actions"})
 
 DAYS = (
     "monday",
@@ -142,7 +155,15 @@ class Schedule:
 
 
 def tasks_path(settings: Settings) -> Path:
-    return Path(settings.paths.cowork_tasks)
+    """The task file, already absolute.
+
+    Returned as given, not re-wrapped: ``Settings`` anchors every configured path
+    to the config file's directory, and a ``Path(...)`` around one here would
+    read as a safety net while being the bug that anchoring exists to prevent —
+    it would silently accept a working-directory-relative value from some future
+    caller that skipped the anchoring.
+    """
+    return settings.paths.cowork_tasks
 
 
 def _require(raw: dict[str, Any], key: str, name: str) -> Any:
@@ -295,10 +316,32 @@ def waiver_settings(conn: sqlite3.Connection) -> dict[str, Any]:
             "known": False,
             "reason": "the synced league payload carries no waiver processing day",
         }
+
+    # Unreadable is as unknown as absent, and just as loud. Coercing a day we do
+    # not recognise into an index default would reinstate exactly the assumed
+    # Wednesday this function exists to refuse — and do it silently, which is
+    # worse than the gap it was covering, because nothing then says a guess was
+    # made.
+    day = str(days[0])
+    if day.strip().lower() not in DAYS:
+        return {
+            "known": False,
+            "reason": f"the synced waiver processing day is {day!r}, which is not a weekday",
+        }
+    try:
+        process_hour = int(hour)
+    except (TypeError, ValueError):
+        return {"known": False, "reason": f"the synced waiver processing hour is {hour!r}"}
+    if not 0 <= process_hour < 24:
+        return {
+            "known": False,
+            "reason": f"the synced waiver processing hour is {process_hour}, not an hour of a day",
+        }
+
     return {
         "known": True,
-        "process_day": str(days[0]),
-        "process_hour": int(hour),
+        "process_day": day,
+        "process_hour": process_hour,
         "acquisition_type": acquisition.get("acquisitionType"),
     }
 
@@ -331,9 +374,14 @@ def _derive_waivers(task: Task, settings: Settings, waivers: dict[str, Any]) -> 
                 ),
             ),
         )
-    lead = task.lead_minutes if task.lead_minutes is not None else settings.cowork.waiver_lead_minutes
-    process_day = str(waivers["process_day"]).lower()
-    index = DAYS.index(process_day) if process_day in DAYS else 2
+    lead = (
+        task.lead_minutes
+        if task.lead_minutes is not None
+        else settings.cowork.waiver_lead_minutes
+    )
+    # Validated by waiver_settings, which reports an unrecognised day as unknown
+    # rather than letting one reach here to be defaulted.
+    index = DAYS.index(str(waivers["process_day"]).lower())
     # An arbitrary week containing that weekday, so subtracting the lead rolls
     # the day backwards correctly rather than by hand.
     anchor = datetime(2026, 1, 5, waivers["process_hour"], 0, tzinfo=UTC) + timedelta(days=index)
