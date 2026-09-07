@@ -25,7 +25,8 @@ uv run hal-mary sync        # pull league state
 uv run hal-mary serve       # web app + scheduler
 ```
 
-See [`CLAUDE.md`](CLAUDE.md) for conventions and commands,
+See [`docs/SETUP.md`](docs/SETUP.md) for first-time setup (ESPN credentials, league ids, the
+Claude login), [`CLAUDE.md`](CLAUDE.md) for conventions and commands,
 [`docs/superpowers/specs/`](docs/superpowers/specs/) for the design of record, and
 [`docs/DECISIONS.md`](docs/DECISIONS.md) for why it is built this way.
 

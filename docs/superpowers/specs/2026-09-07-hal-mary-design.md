@@ -155,3 +155,63 @@ ESPN failure keeps last snapshot, shows stale banner with age. Claude timeout/pa
 - Dev: `uv run hal-mary serve --reload`. Stop it when not developing.
 - Prod: new Proxmox VM (`hal-mary`), `provision-dev.sh` + `uv`, `claude` login once, clone to `~/src/hal-mary`, `deploy/hal-mary.service` as a systemd user unit with `loginctl enable-linger`, DB at `~/hal-mary-data/hal.db` on local disk. VM creation and auth provided by Bryan when ready.
 
+
+---
+
+## Spike results (2026-09-07)
+
+Two spikes ran before implementation, both answerable without ESPN credentials.
+
+### Spike 1 — `claude -p` invocation cost
+
+Measured on `dev-scratch` with `claude` 2.1.260, model `opus`, on the prompt "Reply with exactly: OK".
+
+| Invocation | Cost | Cache-creation tokens |
+|---|---|---|
+| Bare `-p --model opus --tools ""` | $0.823 | 82,289 |
+| Plus `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` | $0.048 | 4,780 |
+| Plus `--setting-sources ""` | $0.005 | 230 |
+
+A bare `claude -p` inherits the operator's entire environment: every configured MCP server, plugin,
+skill, and settings file. On this box that was 82,000 tokens of system prompt attached to a two-token
+question, at 165 times the isolated cost.
+
+**Every hal-mary invocation therefore carries all three isolation flags**, hardcoded in
+`claude_runner` rather than exposed per job, so no job can omit them. Beyond cost, isolation removes a
+correctness hazard: without it, a hal-mary job inherits whatever tooling happens to be installed on
+the host, and its behavior changes when Bryan installs something unrelated.
+
+Also confirmed under isolation:
+
+- Web tools work. A search for current ESPN rankings returned 2026 data with a source URL in 22.8
+  seconds for $0.17. The project's central premise holds.
+- Structured output works. `--json-schema` puts a parsed object on the result event's
+  `structured_output` key.
+- A draft-advice-shaped call with tools off and a schema returned in 14.5 seconds, inside the pick
+  clock with margin.
+- `--verbose` is required alongside `--output-format stream-json` under `-p`.
+
+### Spike 2 — reading the `espn-api` source
+
+Two defects in `espn-api` 0.46.0 make it unsafe for the live draft poll.
+
+`refresh_draft()` duplicates picks: `self.draft = []` runs only in `BaseLeague.__init__`, while
+`_fetch_draft` appends without clearing. A five-second poll would grow the list without bound.
+
+`_fetch_draft` returns early unless `draftDetail.drafted` is true. Whether ESPN sets that flag during
+a live draft or only at completion is the assumption we cannot afford to be wrong about.
+
+**Draft picks therefore come from the raw endpoint** and everything else from the library:
+
+```
+GET https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leagues/{id}
+    ?view=mDraftDetail
+```
+
+`draftDetail.picks` is read directly and the `drafted` flag is ignored. That is roughly fifteen lines
+of `httpx` and it removes both defects. The library still handles settings, teams, rosters, free
+agents, and box scores, where its parsing earns its place.
+
+This narrows the remaining open question to one thing: **does ESPN populate `draftDetail.picks` while
+a draft is in progress?** It is answerable with a single request against a mock draft, and the manual
+pick-entry path is built regardless, since it also covers ESPN being unreachable at the worst moment.
