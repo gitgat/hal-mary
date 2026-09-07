@@ -34,6 +34,64 @@ REAL_TEAM_COUNT = 6
 REAL_DRAFT_ORDER = [1, 2, 3, 4, 5, 6]
 REAL_MY_TEAM_ID = 6
 
+#: The order ESPN actually drew when the draft opened — **deliberately not**
+#: :data:`REAL_DRAFT_ORDER`.
+#:
+#: This constant is the point of Task 15. ``draftSettings.orderType`` on this
+#: league is ``DRAFT_START``, so the ``pickOrder`` a pre-draft sync stores is a
+#: placeholder, and the placeholder it stored happens to be the identity
+#: permutation ``[1, 2, 3, 4, 5, 6]``. Every fake in this suite defaulted to a
+#: snake board built from that same identity order, so the stored order and
+#: ESPN's real board had *never once disagreed in any test* — the divergence
+#: path, which is the only path on which the bug exists, was untestable by
+#: construction.
+#:
+#: Here Caroline (team 6) picks **second**, not last. Under the placeholder she
+#: owns overall pick 6 and is four picks away; under this order she owns overall
+#: pick 2 and is on the clock right now. Two numbers that cannot be confused for
+#: each other, so a component reading the wrong source says so loudly.
+SHUFFLED_DRAFT_ORDER = [1, 6, 5, 4, 3, 2]
+
+
+def snake_schedule(
+    order: list[int], rounds: int = 16, made: set[int] | None = None
+) -> list[dict[str, Any]]:
+    """ESPN's own draft board for ``order``, in the shape ``draft_schedule`` returns.
+
+    One row per slot of the whole draft, filled or not — those empty rows *are*
+    the pick schedule, which is why ``EspnClient.draft_schedule`` keeps the rows
+    ``draft_picks`` filters out.
+    """
+    slots = []
+    for overall in range(1, rounds * len(order) + 1):
+        index = (overall - 1) % len(order)
+        if ((overall - 1) // len(order)) % 2 == 1:
+            index = len(order) - 1 - index
+        slots.append(
+            {
+                "overall_pick": overall,
+                "round_num": (overall - 1) // len(order) + 1,
+                "round_pick": index + 1,
+                "team_id": order[index],
+                "made": overall in (made or set()),
+            }
+        )
+    return slots
+
+
+#: ESPN's board after the DRAFT_START shuffle, disagreeing with the stored
+#: ``pickOrder`` in the only way that matters: about which picks are hers.
+DIVERGENT_SCHEDULE = snake_schedule(SHUFFLED_DRAFT_ORDER)
+
+#: What each source says while pick 2 is on the clock, under
+#: :data:`DIVERGENT_SCHEDULE`. Named so a test asserts against the disagreement
+#: rather than against two bare integers a reader has to re-derive.
+PLACEHOLDER_NEXT_PICK = 6  # what the stale [1..6] pickOrder claims is hers
+PLACEHOLDER_PICKS_AWAY = 4
+SHUFFLED_NEXT_PICK = 2  # what ESPN actually drew: she is on the clock
+SHUFFLED_PICKS_AWAY = 0
+SHUFFLED_PICK_AFTER = 11  # her round-2 pick, coming back down the snake
+
 #: QB 1, RB 2, WR 2, TE 1, D/ST 1, K 1, RB/WR/TE 1, BE 7, IR 1. Sixteen of those
 #: are drafted (everything but the IR slot), which is where "16 rounds" comes
 #: from.
@@ -229,6 +287,41 @@ SAMPLE_BOARD = [
     {"player_id": -1008, "name": "Trey McBride", "position": "TE", "pro_team": "ARI",
      "tier": 4, "rank": 8, "bye_week": 8, "note": "Catches plenty; rarely scores."},
 ]
+
+#: The sample board's names in board order, which is the order picks come off it.
+BOARD_ORDER = [row["name"] for row in SAMPLE_BOARD]
+
+
+def espn_pick(overall: int, team_id: int, player_id: int, name: str | None = None) -> dict:
+    """One made pick, in the shape ``EspnClient.draft_picks`` returns."""
+    return {
+        "overall_pick": overall,
+        "round_num": (overall - 1) // REAL_TEAM_COUNT + 1,
+        "round_pick": (overall - 1) % REAL_TEAM_COUNT + 1,
+        "team_id": team_id,
+        "player_id": player_id,
+        "player_name": name,
+    }
+
+
+def picks_through(count: int, order: list[int] | None = None) -> list[dict[str, Any]]:
+    """``count`` picks, taking players off the top of the sample board.
+
+    ``order`` says which team made each pick; it defaults to
+    :data:`REAL_DRAFT_ORDER`. It matters when the schedule and the stored pick
+    order disagree — the picks have to come from the *real* order, or the fixture
+    is telling two stories at once.
+    """
+    slots = order or REAL_DRAFT_ORDER
+    return [
+        espn_pick(
+            index + 1,
+            slots[index % len(slots)],
+            SAMPLE_BOARD[index]["player_id"],
+            BOARD_ORDER[index],
+        )
+        for index in range(count)
+    ]
 
 
 # --- fakes -------------------------------------------------------------------

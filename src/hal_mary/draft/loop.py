@@ -353,7 +353,10 @@ class DraftLoop:
         self.bus = bus
         self._warmed = False
         #: ESPN's own slot-to-team board, read once the draft opens. ``None``
-        #: until then, because before the draft it is a provisional lie.
+        #: until then, because before the draft it is a provisional lie. Kept
+        #: only as the "already read this process" guard: what the board is
+        #: *for* is written to the ``draft_order`` table, where the page and the
+        #: advisor can read it too.
         self._schedule: list[dict[str, Any]] | None = None
         #: Which of *her* picks the advisor last ran for. The whole defence
         #: against advising a dozen times per turn.
@@ -438,6 +441,19 @@ class DraftLoop:
         when — which is why this waits for the first real pick, and why it never
         reads it twice: once the draft is running, the order does not change.
 
+        What it does with the board is the point of Task 15: round one's
+        slot-to-team mapping is **persisted**, and ``league._espn_order`` prefers
+        it over the pre-draft ``pickOrder`` from then on. So the loop does not
+        keep a private view of who picks when — it corrects the one source the
+        draft page, the advisor and this loop all read. The alternative, passing
+        this loop's window into ``advise``, would label the card from the
+        schedule while the page stayed on the arithmetic, and a card labelled
+        from a different source than the page reads as stale on every turn.
+
+        The write is once and only once (see :func:`store.store_draft_order`): a
+        restart mid-draft re-reads the board, and a second answer that disagreed
+        must not move her pick window while she is looking at it.
+
         A failure is not fatal. The snake arithmetic over the synced pick order
         is the fallback, and it is right whenever ESPN did not shuffle.
         """
@@ -456,42 +472,66 @@ class DraftLoop:
             return
         self._schedule = sorted(rows, key=lambda slot: slot["overall_pick"])
         log.info("read ESPN's draft board: %d slots, order now final", len(self._schedule))
+        self._store_order()
 
-    def _upcoming_from_schedule(self, my_team_id: int, next_pick: int) -> list[int] | None:
-        """Her remaining pick numbers, straight from ESPN's board.
+    def _store_order(self) -> None:
+        """Persist round one of the board as *the* draft order, once.
 
-        ``None`` when there is no schedule to read them from, which is the
-        caller's signal to fall back to the arithmetic.
+        Round one is the whole order: every later round is that list snaked, and
+        storing one list keeps the stored shape identical to the ``pickOrder`` it
+        replaces — so every consumer of ``LeagueContext.draft_order`` gets the
+        corrected value with no other change at all.
+
+        A board whose first round is short or names a team twice is not an order.
+        Storing it would put two of her picks in one round, or none; the snake
+        arithmetic over the placeholder is wrong in a smaller way than that.
+
+        Never fatal: this runs on the pick-clock path, and a card built on the
+        old order beats no card.
         """
-        if self._schedule is None:
-            return None
-        mine = [
-            slot["overall_pick"]
+        if self._schedule is None:  # pragma: no cover - only called after a read
+            return
+        first_round = [
+            slot["team_id"]
             for slot in self._schedule
-            if slot.get("team_id") == my_team_id and slot["overall_pick"] >= next_pick
+            if slot.get("round_num") == 1 and slot.get("team_id") is not None
         ]
-        # A board that knows nothing about her team is not a board to trust.
-        return mine or None
+        if len(first_round) != len(set(first_round)) or len(first_round) < 2:
+            log.warning(
+                "ESPN's draft board has an unusable first round (%d slot(s), %d distinct "
+                "team(s)); keeping the pick order the sync stored",
+                len(first_round),
+                len(set(first_round)),
+            )
+            return
+        try:
+            if store.store_draft_order(self.conn, first_round):
+                log.info("stored the draft order ESPN drew: %s", first_round)
+        except Exception:  # a locked database must not cost her the card
+            log.exception("could not store the draft order; the placeholder stands")
 
     def _maybe_advise(self, deadline: float | None = None) -> dict[str, Any]:
+        # The schedule read comes first, and it writes what it learns to the
+        # database rather than keeping it here. Only then is the league loaded,
+        # so ``league.draft_order`` is the order ESPN drew rather than the
+        # placeholder — and the page and the advisor, which load the same league
+        # the same way, agree with this loop by construction rather than by two
+        # implementations of the same arithmetic happening to match.
+        next_pick = store.next_overall_pick(self.conn)
+        self._read_schedule(next_pick)
+
         try:
             league = load_league_context(self.conn, self.settings)
         except LeagueUnknown as exc:
             log.warning("cannot advise: %s", exc)
             return {"advised": False}
 
-        next_pick = store.next_overall_pick(self.conn)
-        self._read_schedule(next_pick)
-        upcoming = self._upcoming_from_schedule(league.my_team_id, next_pick)
-        if upcoming is None:
-            upcoming = league.upcoming_picks(next_pick)
+        upcoming = league.upcoming_picks(next_pick)
         if not upcoming:
             # The only end-of-draft signal the board arithmetic gives.
             # ``picks_until_mine`` would count down forever past pick 96.
             return {"advised": False, "draft_over": True}
 
-        # From the schedule this is a subtraction; from the arithmetic it is a
-        # snake walk. Both answer "how many teams pick before she does".
         if upcoming[0] - next_pick > self.settings.draft.advise_within_picks:
             return {"advised": False}
 

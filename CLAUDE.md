@@ -88,8 +88,22 @@ empty for exactly that reason.
   boundary so nothing downstream has to. The empty rows are the pick schedule, not noise:
   `draft_schedule()` returns them.
 - **`draftSettings.pickOrder` is provisional until the draft opens.** This league's `orderType` is
-  `DRAFT_START`, so ESPN assigns the real order when the draft begins. Re-read it then; never cache
-  a pre-draft order or a pre-draft `draft_schedule()`.
+  `DRAFT_START`, so ESPN assigns the real order when the draft begins. Never cache a pre-draft order
+  or a pre-draft `draft_schedule()`. On the first poll that sees a real pick,
+  `DraftLoop._read_schedule` writes round one of ESPN's board to the **`draft_order` table**, once,
+  and `league._espn_order` prefers it from then on. It is its own table rather than a
+  `league_settings` column because that row is rewritten wholesale by every sync — a column there
+  would be erased, mid-draft, by the `/sync` button.
+- **The draft page, the advisor and the draft loop read one draft order, through
+  `LeagueContext.draft_order`.** Never hand one of them a pick window computed somewhere else. All
+  three run the same snake arithmetic over the same list, so when that list is wrong they are wrong
+  *together*: nothing on the page contradicts anything else, there is no staleness flag for it, and
+  the advisor's own prompt asserts the false position too. Giving the advisor a separate source also
+  makes the card's label disagree with the page's on every turn, which is the false-staleness bug
+  `docs/DECISIONS.md` already records. `tests/unit/test_draft_order_source.py` pins all three
+  against a fixture where ESPN's board and the stored `pickOrder` genuinely disagree — that fixture
+  is the point of the test, because before it existed the fake client's default schedule *was* the
+  snake and the divergence had never once been exercised.
 - **Never poll a live draft through `espn-api`.** `refresh_draft()` appends to a list cleared only
   in the constructor, and `_fetch_draft` returns early unless `draftDetail.drafted` is true — a flag
   that may only be set once the draft is over. `hal_mary.espn.client.draft_picks()` reads the raw

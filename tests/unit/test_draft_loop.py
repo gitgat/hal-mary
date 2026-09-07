@@ -29,11 +29,14 @@ from draft_fixtures import (
     FakeEspnClient,
     FakeRunner,
     RecordingBus,
+    espn_pick,
     make_settings,
     ok_result,
     open_db,
+    picks_through,
     seed_board,
     seed_synced_league,
+    snake_schedule,
 )
 
 from hal_mary.draft import store
@@ -46,29 +49,6 @@ ADVICE = {
     "backups": [{"name": "Brock Bowers", "reason": "Take the tight end if Robinson is gone."}],
     "watch_out": "He is on a bye in week 5, the one week his real team does not play.",
 }
-
-
-def espn_pick(overall: int, team_id: int, player_id: int, name: str | None = None) -> dict:
-    return {
-        "overall_pick": overall,
-        "round_num": (overall - 1) // 6 + 1,
-        "round_pick": (overall - 1) % 6 + 1,
-        "team_id": team_id,
-        "player_id": player_id,
-        "player_name": name,
-    }
-
-
-#: The first few picks of the real draft, in board order, taken by other teams.
-BOARD_ORDER = [row["name"] for row in SAMPLE_BOARD]
-
-
-def picks_through(count: int) -> list[dict]:
-    """``count`` picks, taking players off the top of the sample board."""
-    return [
-        espn_pick(index + 1, (index % 6) + 1, SAMPLE_BOARD[index]["player_id"], BOARD_ORDER[index])
-        for index in range(count)
-    ]
 
 
 def loop_ready(tmp_path, *, picks=None, advice_results=8, board=None, replace=None, **kwargs):
@@ -430,25 +410,6 @@ async def test_espns_pre_populated_placeholder_picks_are_ignored(tmp_path):
 
 
 # --- the pick schedule -------------------------------------------------------
-
-
-def snake_schedule(order: list[int], rounds: int = 16) -> list[dict]:
-    """ESPN's own draft board for ``order``, in the shape Task 12 returns."""
-    slots = []
-    for overall in range(1, rounds * len(order) + 1):
-        index = (overall - 1) % len(order)
-        if ((overall - 1) // len(order)) % 2 == 1:
-            index = len(order) - 1 - index
-        slots.append(
-            {
-                "overall_pick": overall,
-                "round_num": (overall - 1) // len(order) + 1,
-                "round_pick": index + 1,
-                "team_id": order[index],
-                "made": False,
-            }
-        )
-    return slots
 
 
 async def test_the_schedule_is_read_when_the_draft_opens_and_not_before(tmp_path):

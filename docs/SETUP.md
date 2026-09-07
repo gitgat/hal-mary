@@ -106,3 +106,27 @@ uv run hal-mary serve
 ```
 
 The startup line prints the LAN URL. Open it on a phone on the same network, or over the VPN.
+
+## 6. Draft night
+
+The draft order is the one thing hal-mary cannot know before the draft opens. This league's
+`draftSettings.orderType` is `DRAFT_START`, so ESPN draws the order at the moment the draft begins
+and everything before that is a placeholder.
+
+hal-mary handles this itself: on the first poll that sees a real pick, the draft loop reads ESPN's
+own draft board, stores the order it finds, and the draft page, the advice card and the loop all use
+it from then on. So under normal operation there is nothing to do.
+
+**If the loop is not running** — no ESPN credentials, a loop that failed to start (the page says so
+in a band across the top), or picks being entered by hand — nothing reads the real order, and the
+"picks until yours" countdown is running on the pre-draft placeholder.
+
+The fallback, in that case:
+
+1. Hit **Sync** once, immediately after the draft opens.
+2. Then eyeball "on the clock" on the draft page against ESPN's draft room for two picks.
+
+Do the eyeballing even if the numbers look plausible. A wrong draft order is a *silent* failure: the
+page and the advice card compute her position the same way from the same list, so they agree with
+each other while both being wrong, and no banner fires. A human comparing two screens is the only
+thing that catches it.

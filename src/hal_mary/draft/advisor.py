@@ -172,13 +172,20 @@ def advise(
         # Caroline looking at nothing at all while the clock runs. The promise is
         # "never an empty card", so it is kept here, where it is made.
         log.exception("draft advice failed outside the model call; using the blind fallback")
+        upcoming, until = _her_picks(conn, settings, next_overall_pick)
         payload = {
             **_blind_fallback(),
             "source": "fallback",
             "attempts": 0,
             "next_overall_pick": next_overall_pick,
-            "picks_until_mine": None,
-            "my_next_picks": [],
+            "picks_until_mine": until,
+            # Not ``[]``. The draft page reads this to decide which of *her*
+            # picks a card is advice for, and empty makes it fall back to
+            # ``next_overall_pick`` — the pick that was on the clock when the
+            # advisor ran, not hers. The card then announces it is out of date on
+            # her turn, every turn, which is Task 7b's bug reached through the one
+            # path that had no test.
+            "my_next_picks": upcoming,
             "board_built_at": None,
         }
 
@@ -192,6 +199,30 @@ def advise(
         payload["advice_id"] = None
     _publish(bus, payload)
     return payload
+
+
+def _her_picks(
+    conn: sqlite3.Connection, settings: Settings, next_overall_pick: int
+) -> tuple[list[int], int | None]:
+    """Her next picks and how far away they are, for the card that has nothing else.
+
+    Best effort by design: this runs on the path where something already failed,
+    so if the league cannot be read either — which is the most likely reason it
+    failed — it answers "I do not know" rather than raising a second time. Empty
+    then means what it always meant, and the page's own fallback applies.
+
+    It reads the league the same way the page and the loop do, so the numbers
+    here are the same numbers, from the same source.
+    """
+    try:
+        league = load_league_context(conn, settings)
+        upcoming = league.upcoming_picks(next_overall_pick)
+        if not upcoming:
+            return [], None
+        return upcoming[:2], league.picks_until_mine(next_overall_pick)
+    except Exception:  # the caller is already the last resort; never raise again
+        log.warning("could not work out which pick the fallback card is for", exc_info=True)
+        return [], None
 
 
 def _reason(
