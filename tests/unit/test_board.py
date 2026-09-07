@@ -25,6 +25,7 @@ which inverts to p = (r - 1) * N + (slot if odd/linear else N + 1 - slot):
 
 import pytest
 
+from hal_mary.draft import board
 from hal_mary.draft.board import (
     apply_picks,
     available,
@@ -737,3 +738,14 @@ def test_available_treats_a_row_drafted_by_a_team_as_gone_even_without_the_flag(
     row = {"player_id": 1, "name": "gone", "position": "RB", "tier": 1, "rank": 1,
            "drafted_by_team_id": 104}
     assert available([row]) == []
+
+
+def test_slot_positions_is_public_so_callers_need_not_re_derive_the_flex():
+    """The advisor turns "which slots are open" into "which positions would fill
+    them" for its deterministic fallback. That mapping lives here, with the rest
+    of the roster knowledge, rather than being copied into a second module where
+    the two could disagree about what a FLEX accepts.
+    """
+    assert board.slot_positions("QB") == frozenset({"QB"})
+    assert board.slot_positions("flex") == frozenset({"RB", "WR", "TE"})
+    assert board.slot_positions("D/ST") == frozenset({"D/ST"})

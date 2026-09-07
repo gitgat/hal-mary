@@ -206,7 +206,7 @@ class EspnClient:
         self.settings = settings
         self._transport = transport
         # A hung request during a draft is worse than a failed one: the pick
-        # clock is 60 to 90 seconds and the poll interval is 5, so a request
+        # clock is 90 seconds and the poll interval is 5, so a request
         # that never returns silently stops the loop. The bounds come from
         # config.toml's [espn] section, next door to draft.poll_seconds.
         self._timeout = timeout or httpx.Timeout(

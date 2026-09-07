@@ -42,7 +42,8 @@ cost.
 **Decision:** Deep research runs on a schedule before the draft and writes a tiered board to the
 database. On-the-clock advice runs with web tools disabled against that board.
 
-**Why:** A web-enabled Claude call takes 30 to 120 seconds. The ESPN pick clock is 60 to 90 seconds.
+**Why:** A web-enabled Claude call takes 30 to 120 seconds. This league's pick clock is 90 seconds
+(`draftSettings.timePerSelection`, confirmed from the live payload).
 Doing research on the clock loses the pick. Splitting the work means the slow, expensive thinking
 happens when there is time for it, and the fast call only has to reason over facts already gathered.
 
@@ -367,3 +368,117 @@ table to maintain and a lockout that outlives the fix for it.
 
 **Why the password is never logged:** a log full of near-miss guesses is its own disclosure, and it
 is the file most likely to be pasted into a chat window while debugging.
+
+---
+
+---
+
+## 2026-09-07 — The league's own settings have a manual fallback in `config.toml`
+
+**Decision:** `hal_mary.league.load_league_context` is the single accessor for the league's size,
+scoring, roster slots, draft order and Caroline's slot. A synced `league_settings` row wins field by
+field; a `[league]` section in `config.toml` fills in whatever it does not supply. Neither source
+available raises `LeagueUnknown` naming both fixes. `board_build` and the advisor read the league
+only through it and never touch `EspnClient`.
+
+**Why:** hal-mary has to be able to run a whole draft with **no ESPN access at all** — the draft is
+close and the cookies may not hold. Only two things genuinely need ESPN on draft night: discovering
+picks, which already had `record_manual_pick`, and the league settings, which had nothing. Without
+this, a box with no working cookies cannot compute a single pick number or roster need, and a model
+handed no league context assumes a twelve-team standard-scoring draft — this league is six-team full
+PPR, so every recommendation would be confidently wrong.
+
+**Why field-by-field rather than whole-source:** a sync that landed without the roster slots is a
+real outcome, and "we know the team count but not the roster" is more useful than falling back
+wholesale to a section someone may have filled in months ago.
+
+**Would revisit if:** ESPN ever becomes a dependency hal-mary can assume, which it will not.
+
+---
+
+## 2026-09-07 — The draft loop reconciles the board against every recorded pick
+
+**Decision:** Each poll applies `loop.pending_picks(conn)` — every recorded pick the board does not
+yet agree with — rather than only the list `sync_draft` calls new. Picks already filed as unmatched
+are skipped, so the pass converges and publishes nothing on an idle poll.
+
+**Why:** `sync_draft` returns a pick as new exactly once. Anything that goes wrong on that one pass —
+a duplicate that came back unmatched, a hand-entered pick that ESPN later attributes to a team, a
+board rebuilt after a pick was applied — stays wrong for the rest of the draft, and the failure is
+silent: the board thinks a player is available who is not, and recommends him. Reconciling against
+the whole pick list means divergence heals itself on the next five-second poll.
+
+**Cost:** one board load and one 96-row read per poll, which is nothing.
+
+**Would revisit if:** the pick list ever became large enough for the read to matter, which at 96 rows
+it is not.
+
+---
+
+## 2026-09-07 — Downstream keeps its own guard against a pick that names nobody
+
+**Decision:** On top of `pick_is_made` at the client boundary, `draft/store.py` excludes rows with no
+`player_name` and no positive `player_id` from `next_overall_pick` and `recent_picks`, and the draft
+loop skips them when reconciling. Research-built board rows carry synthetic ids starting at
+**-1001**, never near `-1`.
+
+**Why:** the entry above filters ESPN's pre-populated board at the one place that knows ESPN's
+vocabulary, and that is the right place. This is a second lock on the same door, and it earns its few
+lines because **the failure it prevents is total and silent rather than partial and loud.** One
+placeholder row reaching the `draft_picks` table by any route at all — a hand-entered pick that went
+wrong, a fixture, a future code path, a restore of an older database — puts the next overall pick at
+**97 in a 96-pick draft**. Every end-of-draft check in the system then reads "the draft is over"
+before the draft has started: `my_upcoming_picks` returns empty, the loop reports `draft_over`, the
+advisor is never called. hal-mary sits there advising nothing, all night, with no error anywhere and
+nothing on the page to say why. There is no partial version of this failure and nothing to notice it
+by. The synthetic-id floor of -1001 is the same argument from the other side: the board deliberately
+allows negative ids, so `-1` colliding with a researched player is a real collision, not a
+theoretical one.
+
+**Would revisit if:** never, really. It costs one SQL predicate.
+
+---
+
+## 2026-09-07 — One draft-loop tick has one time budget, and it starts before the ESPN read
+
+**Decision:** `draft.advice_budget_s` (60s) bounds a whole tick — the ESPN sync *and* every Claude
+attempt. The deadline is an instant fixed at the top of `run_once` and passed into `advise`, which
+starts an attempt only when it can finish inside what is left. The cost of an attempt is its
+`timeout_s` **plus** `claude_runner.TIMEOUT_TEARDOWN_S`, exported from the runner rather than copied.
+
+**Why:** the pick clock is 90 seconds. Sizing the attempts by adding up `timeout_s` values gave 55
+and felt safe, and it was wrong twice over. A timed-out call also pays the SIGKILL reap (5s) and the
+stdout join (2s) *after* its deadline, so two timeouts are 69s, not 55. And `sync_draft` runs earlier
+in the same tick, bounded at 25s by `espn.connect_timeout_s + read_timeout_s`. A slow ESPN followed
+by two Claude timeouts is ~94 seconds against a 90-second clock: the pick is gone before the
+deterministic card renders, which defeats the entire point of having a deterministic card.
+
+**Why not lean on the two picks of runway** that `advise_within_picks = 2` nominally buys: that
+assumes the other five managers use their clocks. Once the top of the board is gone people pick in
+ten seconds, so two picks is twenty seconds of runway, not one hundred and eighty. Lead time is not
+a budget.
+
+**Why a runtime gate rather than better arithmetic:** arithmetic in a comment drifts the moment
+anyone tunes a timeout, and the symptom is a recommendation arriving after the pick was made — which
+nobody notices until draft night. The gate makes the bound true by construction: whatever the sync
+spent, the advisor spends only the remainder, and when nothing fits the board's own card renders
+immediately. The worked sum in `config.toml` is the explanation, not the guarantee.
+
+**What is not bounded, stated plainly because the next person will trust the comment.** The gate
+bounds the *Claude* spend. It cannot cancel an HTTP read already in flight, and a tick makes up to
+three of them — `warm()`'s `player_name_map`, `draft_picks()` (which fetches the name map itself when
+the warm failed), and `_read_schedule()` on the tick the draft opens — each nominally 25s and more in
+the pathological case, because httpx times out per operation and not per request. The true bound on a
+tick is therefore `max(advice_budget_s, whatever the ESPN reads took)`, roughly 50-75s worst case,
+not a flat 60. That is still the right shape: ESPN spending 50 seconds leaves 10, nothing fits, and
+Caroline gets the board's own card at once rather than nothing at all. The lever for the ESPN half is
+`espn.read_timeout_s`, not these two job timeouts.
+
+**What it costs:** a slow sync costs an attempt, not the card. That is the right trade — skipping the
+sync instead would risk recommending a player taken five seconds ago, which is the failure the whole
+unmatched-pick machinery exists to prevent, while losing an attempt only downgrades a researched
+recommendation to a ranked-list one.
+
+**Would revisit if:** the measured tools-off latency moves far from 15s, or the league changes its
+pick clock. Both are one config edit, and the test that pins the sum fails first.
+

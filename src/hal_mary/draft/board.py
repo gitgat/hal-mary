@@ -43,6 +43,7 @@ __all__ = [
     "picks_until_mine",
     "roster_needs",
     "scarcity",
+    "slot_positions",
 ]
 
 #: Sorts entries with no tier/rank behind everything that has one, without
@@ -388,9 +389,21 @@ def roster_needs(roster: list[dict], roster_slots: dict[str, int]) -> dict[str, 
     return {slot: remaining[slot] for slot in open_slots}
 
 
-def _slot_positions(slot: str) -> frozenset[str]:
+def slot_positions(slot: str) -> frozenset[str]:
+    """Which positions may fill roster slot ``slot`` (case-insensitively).
+
+    ``"QB"`` accepts only quarterbacks; ``"FLEX"`` accepts a running back, a
+    receiver or a tight end. Public because the advisor's deterministic fallback
+    has to turn "which slots are still open" into "which players could fill
+    them", and a second copy of this mapping in another module is a second copy
+    that can disagree with this one about what a FLEX accepts.
+    """
     key = slot.upper()
     return _MULTI_POSITION_SLOTS.get(key, frozenset({key}))
+
+
+#: Internal alias kept so the rest of this module reads as it always did.
+_slot_positions = slot_positions
 
 
 def scarcity(board: list[dict], *, within_tiers: int = 2) -> dict[str, dict[str, int | None]]:

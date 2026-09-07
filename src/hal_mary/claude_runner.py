@@ -72,6 +72,7 @@ from .config import JobConfig, Settings
 __all__ = [
     "CONTEXT_SEPARATOR",
     "ISOLATION_ARGS",
+    "TIMEOUT_TEARDOWN_S",
     "ClaudeResult",
     "ClaudeRunner",
     "StreamChunk",
@@ -102,6 +103,20 @@ _REAP_TIMEOUT_S = 5.0
 #: reader thread has drained the pipe; reading its buffer without joining first
 #: throws away the diagnostic exactly when there is one.
 _STDERR_JOIN_TIMEOUT_S = 2.0
+
+#: What a timeout costs *beyond* the job's own ``timeout_s``.
+#:
+#: When a deadline expires the runner kills the process group and reaps it
+#: (:data:`_REAP_TIMEOUT_S`), then joins the stdout reader to recover whatever
+#: the model said before it stopped (:data:`_STDERR_JOIN_TIMEOUT_S`), then writes
+#: the ``claude_calls`` row. None of that is inside ``timeout_s``, so a job
+#: configured for 25 seconds can occupy 32.
+#:
+#: Exported because the draft advisor budgets a 90-second pick clock and has to
+#: know the true cost of an attempt. A private copy of these numbers in that
+#: module would drift from these the first time either is tuned, and the symptom
+#: would be a recommendation arriving after the pick was made.
+TIMEOUT_TEARDOWN_S = _REAP_TIMEOUT_S + _STDERR_JOIN_TIMEOUT_S
 
 #: Exit code recorded for a call that never reached the binary at all.
 _NEVER_RAN = -1
