@@ -118,7 +118,13 @@ Argv, built from config, prompt excluded (it goes over stdin):
 - Prompt goes over stdin, written from a thread so a 40 KB board prompt cannot deadlock on the pipe
   buffer. `extra_context` (task 4's `build_context()` output) is prepended with a fixed separator.
 - Working directory is `claude.scratch_dir`, created if absent, so the CLI cannot wander into the
-  repo. Relative paths in config resolve against the process working directory.
+  repo. **Relative paths in config resolve against the directory holding `config.toml`**, not the
+  process working directory — the latter is the checkout for a developer and something else under
+  systemd, and resolving against it silently emptied the standing context out of every prompt. See
+  the decision entry in `docs/DECISIONS.md`.
+- **The child's environment is an allowlist**, `claude_runner.ENV_PASSTHROUGH`, so `ESPN_S2`,
+  `SWID` and `WEB_PASSWORD` never reach a process running with web tools on. The binary
+  authenticates from the subscription credentials under `HOME`.
 - Timeout is `jobs[job].timeout_s`; on expiry the whole **process group** is killed, because
   `claude` spawns children that a plain child kill would orphan.
 - stream-json is parsed forgivingly: unparseable lines (a truncated final line is normal after a
@@ -129,7 +135,8 @@ Argv, built from config, prompt excluded (it goes over stdin):
   recommendation. `argv_json` excludes the prompt and reduces the system prompt to a digest;
   `prompt_hash` is the sha256 of what was actually sent.
 - Tests point `claude.binary` at `tests/fake_claude/claude`, which replays a fixture and records its
-  own argv and stdin. The single live test is marked `integration` and skips without `HAL_MARY_LIVE`.
+  own argv, stdin and environment. It is driven by a `fake_knobs.json` in its working directory
+  rather than by environment variables, which the allowlist above would otherwise have to admit. The single live test is marked `integration` and skips without `HAL_MARY_LIVE`.
 
 ### Memory (`memory.py`)
 

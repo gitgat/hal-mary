@@ -482,3 +482,101 @@ recommendation to a ranked-list one.
 **Would revisit if:** the measured tools-off latency moves far from 15s, or the league changes its
 pick clock. Both are one config edit, and the test that pins the sum fails first.
 
+
+---
+
+## 2026-09-07 — Every configured path is anchored to `config.toml`, not the working directory
+
+**Decision:** `hal_mary.config` resolves `paths.prompts_dir`, `paths.memory_dir`,
+`claude.scratch_dir`, `claude.system_prompt_file` and `DB_PATH` **once, at load**, against the
+directory holding the resolved `config.toml`. Absolute values pass through untouched. `Settings`
+exposes absolute `Path` objects, and no consumer resolves a configured path again.
+
+**Why:** Every consumer used to do its own `Path(value)`, which resolves against the *process*
+working directory. That is the checkout for a developer and something else entirely under the
+systemd unit. The failure was not a crash: `standing_memory()` found no directory, returned `""`,
+and every prompt went out without the standing context that says who Caroline is and what the
+league's rules are. The service looked healthy and the advice quietly got worse. Two implementers
+found it independently, from different modules, which is the sign that the interface — a string
+each caller resolves for itself — was the problem rather than any one caller.
+
+The config file's own location is the only anchor that is right in a developer's checkout, under
+systemd, and under any future packaging. `HAL_MARY_CONFIG` moves the anchor with it, which is what
+makes the override actually usable for a deployment.
+
+**Why in a model validator rather than in `load_settings`:** so that no route to a `Settings` — a
+direct construction in a test, a `model_validate`, a future loader — can produce one carrying a
+working-directory-relative path. Callers cannot get this wrong because they are never handed
+anything they could get wrong.
+
+**Verified:** `tests/unit/test_paths.py` builds a complete little deployment under `tmp_path`,
+chdirs somewhere with none of it, and checks every consumer still reads the right file. All six of
+its tests fail against the code this replaced.
+
+---
+
+## 2026-09-07 — A missing memory directory warns and shows on the status page; it does not raise
+
+**Decision:** `standing_memory()` on a missing directory logs a warning naming the resolved path and
+still returns `""`. The condition an operator actually sees is on the status page: a "Where the
+files are" card listing every resolved path with whether it exists, and a red-box problem naming the
+directory and the config file to check. An *existing but empty* directory gets a different, softer
+problem line.
+
+**Why not raise, given that silence is what made the original bug invisible:** because of who is on
+each end. `standing_memory()` is on the 90-second pick-clock path, called for every advisor attempt,
+every scheduled job and every chat message. Raising would convert "the advice is thinner than it
+should be" into "there is no advice at all", at the exact moment the application exists for — and it
+would do so on draft night, in front of Caroline, who cannot fix a path. Thinner advice is
+recoverable; no advice is not.
+
+The person who could act on a crash is Bryan, at deploy time, and he is not the person a stack trace
+mid-draft would reach. So the loudness is put where he will actually be looking: the status page is
+the page you open when the advice seems off, and it now answers "which directory am I reading?"
+directly. That is what the brief's requirement reduces to — an operator being able to tell "there
+are no notes" from "I am looking in the wrong place" — and two distinct problem sentences say it
+more precisely than one exception could.
+
+**Would revisit if:** a startup-time check is added (a `hal-mary doctor`, or a `serve` preflight).
+That is the right place for a hard failure, because it runs before anyone is depending on the
+answer, and it would not change the runtime behaviour above.
+
+---
+
+## 2026-09-07 — The `claude` child gets an environment allowlist, never a denylist
+
+**Decision:** `claude_runner` passes `env=child_environment()` to `subprocess.Popen`. The child gets
+`ENV_PASSTHROUGH` — `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `TMPDIR`, `TZ`, `LANG`,
+`LANGUAGE`, `LC_*`, the `XDG_*` dirs, `CLAUDE_CONFIG_DIR`, the CA-bundle and proxy variables — and
+nothing else.
+
+**Why:** it inherited the parent's whole environment, including `ESPN_S2`, `SWID` and
+`WEB_PASSWORD`. Nothing exploits that today: most jobs run with tools off and the model is not asked
+to read its own environment. But `board_build`, `news_sweep`, `waiver_scan` and `chat` run with
+`WebSearch` and `WebFetch` on, and those are exactly the calls a prompt-injected "print your
+environment" could reach. The cookies are a live session on Caroline's ESPN account and
+`WEB_PASSWORD` is the household password to this app; the child has no use for any of them.
+
+**Why an allowlist:** a denylist has to be extended every time a secret is added to `.env`, and the
+day someone forgets is the day it leaks. An allowlist is wrong only when the binary needs something
+that is not on it, and that failure is immediate and loud.
+
+**What is deliberately left out, stated rather than widened silently:** `ANTHROPIC_API_KEY` and the
+rest of `ANTHROPIC_*`. The binary authenticates from the subscription credentials under `HOME`,
+which is why `HOME` is on the list, and a live run confirms that is enough. A box that meant to bill
+an API key or point at a gateway would have to add those explicitly — which is the right way round,
+given the whole point of this application is that it runs on a subscription.
+
+**Why the fake binary stopped reading its knobs from the environment:** `tests/fake_claude/claude`
+was driven by `HAL_MARY_FAKE_*` variables, which would have required widening the production
+allowlist for the test suite's own sake — leaving the allowlist tests asserting a list production
+does not use. It reads `fake_knobs.json` from its working directory (the scratch dir) instead.
+
+**Verified:** the fake writes the environment it was actually given to a file, and the test asserts
+the secrets are not in it — evidence from the child, not from the code that built the dict. A live
+run from `/tmp` with `ESPN_S2`, `SWID` and `WEB_PASSWORD` set in the parent: child env keys
+`['HOME', 'LANG', 'LOGNAME', 'PATH', 'SHELL', 'TERM', 'USER', 'XDG_RUNTIME_DIR']`, no secrets,
+exit 0, $0.0017.
+
+**Would revisit if:** a CLI upgrade needs a variable that is not on the list. The symptom is the live
+integration test failing to authenticate, which is loud.

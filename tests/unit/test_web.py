@@ -1072,3 +1072,72 @@ def test_age_in_words_handles_nonsense():
 
     assert age_in_words(None) == "never"
     assert age_in_words("not-a-timestamp") == "unknown"
+
+
+# --- /status: the resolved paths ---------------------------------------------
+#
+# The bug this reports on: a relative memory_dir resolved against the process
+# working directory found nothing, standing_memory() returned "", and every
+# prompt went out without its standing context. Nothing crashed and nothing was
+# logged where anyone would see it. The status page is where an operator looks
+# when the advice is off, so it has to be able to say "I am looking here, and
+# there is nothing there".
+
+
+def test_status_shows_every_resolved_path(db_path: Path):
+    settings = make_settings(db_path)
+    with client_for(db_path, settings=settings) as client:
+        login(client)
+        text = client.get("/status").text
+
+    assert str(settings.paths.memory_dir) in text
+    assert str(settings.paths.prompts_dir) in text
+    assert str(settings.claude.system_prompt_file) in text
+    assert str(settings.config_path) in text
+
+
+def test_status_calls_a_missing_memory_directory_a_problem(db_path: Path, tmp_path: Path):
+    """Named in the red box, with the path it actually looked at."""
+    absent = tmp_path / "no-such-memory"
+    settings = make_settings(db_path)
+    settings = settings.model_copy(
+        update={"paths": settings.paths.model_copy(update={"memory_dir": absent})}
+    )
+
+    with client_for(db_path, settings=settings) as client:
+        login(client)
+        text = client.get("/status").text
+
+    assert str(absent) in text
+    assert "does not exist" in text
+    assert "Problems right now" in text
+
+
+def test_status_distinguishes_an_empty_memory_directory_from_a_missing_one(
+    db_path: Path, tmp_path: Path
+):
+    """"There are no notes" reads differently from "I am looking in the wrong
+    place". Both are worth saying; saying the same thing for both is the bug."""
+    empty = tmp_path / "empty-memory"
+    empty.mkdir()
+    settings = make_settings(db_path)
+    settings = settings.model_copy(
+        update={"paths": settings.paths.model_copy(update={"memory_dir": empty})}
+    )
+
+    with client_for(db_path, settings=settings) as client:
+        login(client)
+        text = client.get("/status").text
+
+    assert "does not exist" not in text
+    assert "no standing-memory" in text.lower()
+
+
+def test_status_is_quiet_about_paths_that_are_all_there(db_path: Path):
+    """The repo's own config: nothing about paths belongs in the red box."""
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/status").text
+
+    assert "does not exist" not in text
+    assert "no standing-memory" not in text.lower()

@@ -50,7 +50,7 @@ def test_real_claude_answers_under_the_isolation_flags(tmp_path: Path):
     settings = settings.model_copy(
         update={
             "claude": settings.claude.model_copy(
-                update={"scratch_dir": str(tmp_path / "scratch")}
+                update={"scratch_dir": tmp_path / "scratch"}
             )
         }
     )

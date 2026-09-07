@@ -3,31 +3,45 @@
 
 The unit suite must never spawn the real CLI: it costs money, needs auth, and
 takes 15-25 seconds a call. Tests point ``settings.claude.binary`` at this
-script and drive it entirely through the environment:
+script and drive it through a JSON file named ``fake_knobs.json`` in its own
+working directory — which the runner sets to ``claude.scratch_dir``, so the
+harness knows where to write it.
 
-``HAL_MARY_FAKE_FIXTURE``
+**Deliberately not environment variables.** The runner hands its child an
+explicit allowlist precisely so that ``ESPN_S2``, ``SWID`` and ``WEB_PASSWORD``
+cannot reach it. A fake driven through the environment would need that
+allowlist widened for the test suite's own knobs, and the tests asserting the
+allowlist would then be asserting a list that production does not use.
+
+Recognised keys:
+
+``fixture``
     Path to a ``.jsonl`` file. Its lines are echoed to stdout verbatim, one per
     line, which is exactly what ``--output-format stream-json`` looks like.
-    Unset means no stdout at all (a crashed CLI).
-``HAL_MARY_FAKE_EXIT``
+    Absent means no stdout at all (a crashed CLI).
+``exit``
     Exit code, default ``0``.
-``HAL_MARY_FAKE_SLEEP``
+``sleep``
     Seconds to sleep before writing anything, default ``0``. Lets the timeout
     path be tested in a second instead of in fifteen minutes.
-``HAL_MARY_FAKE_HANG``
-    Seconds to sleep *after* writing the fixture, default ``0``. ``SLEEP`` tests
+``hang``
+    Seconds to sleep *after* writing the fixture, default ``0``. ``sleep`` tests
     a call that produces nothing before its deadline; this tests one that
     produces output and then stops responding, which is what leaves lines
     buffered in the runner's queue when the timeout fires.
-``HAL_MARY_FAKE_STDERR``
+``stderr``
     Text to write to stderr, so the "nonzero exit captures stderr" path is
     exercisable.
-``HAL_MARY_FAKE_ARGV_OUT``
+``argv_out``
     If set, ``sys.argv[1:]`` is written there as JSON, so tests can assert on
     the argv the runner constructed.
-``HAL_MARY_FAKE_STDIN_OUT``
+``stdin_out``
     If set, everything read from stdin is written there, so tests can assert
     the prompt travelled over stdin and not in argv.
+``env_out``
+    If set, the whole environment this process was given is written there as
+    JSON. That is the evidence behind the allowlist test: what the child
+    actually received, not what the runner meant to send.
 
 stdin is always drained, whether or not it is recorded: a real CLI reads its
 prompt, and a fake that did not would let the writer block on a full pipe.
@@ -37,41 +51,58 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
+
+KNOBS_FILE = "fake_knobs.json"
+
+
+def load_knobs() -> dict:
+    path = Path(KNOBS_FILE)
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def main() -> int:
-    argv_out = os.environ.get("HAL_MARY_FAKE_ARGV_OUT")
+    knobs = load_knobs()
+
+    argv_out = knobs.get("argv_out")
     if argv_out:
         with open(argv_out, "w", encoding="utf-8") as handle:
             json.dump(sys.argv[1:], handle)
 
+    env_out = knobs.get("env_out")
+    if env_out:
+        with open(env_out, "w", encoding="utf-8") as handle:
+            json.dump(dict(os.environ), handle)
+
     stdin_data = sys.stdin.read()
-    stdin_out = os.environ.get("HAL_MARY_FAKE_STDIN_OUT")
+    stdin_out = knobs.get("stdin_out")
     if stdin_out:
         with open(stdin_out, "w", encoding="utf-8") as handle:
             handle.write(stdin_data)
 
-    sleep_s = float(os.environ.get("HAL_MARY_FAKE_SLEEP", "0"))
+    sleep_s = float(knobs.get("sleep", 0))
     if sleep_s:
         time.sleep(sleep_s)
 
-    fixture = os.environ.get("HAL_MARY_FAKE_FIXTURE")
+    fixture = knobs.get("fixture")
     if fixture:
         with open(fixture, encoding="utf-8") as handle:
             for line in handle:
                 sys.stdout.write(line.rstrip("\n") + "\n")
                 sys.stdout.flush()
 
-    hang_s = float(os.environ.get("HAL_MARY_FAKE_HANG", "0"))
+    hang_s = float(knobs.get("hang", 0))
     if hang_s:
         time.sleep(hang_s)
 
-    stderr_text = os.environ.get("HAL_MARY_FAKE_STDERR")
+    stderr_text = knobs.get("stderr")
     if stderr_text:
         sys.stderr.write(stderr_text)
         sys.stderr.flush()
 
-    return int(os.environ.get("HAL_MARY_FAKE_EXIT", "0"))
+    return int(knobs.get("exit", 0))
 
 
 if __name__ == "__main__":

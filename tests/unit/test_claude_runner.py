@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,7 +24,12 @@ from pathlib import Path
 import pytest
 
 from hal_mary import db
-from hal_mary.claude_runner import ClaudeRunner
+from hal_mary.claude_runner import (
+    ENV_PASSTHROUGH,
+    ENV_PASSTHROUGH_PREFIXES,
+    ClaudeRunner,
+    child_environment,
+)
 from hal_mary.config import (
     ClaudeConfig,
     DraftConfig,
@@ -70,12 +76,23 @@ class Harness:
     stdin_path: Path
     monkeypatch: pytest.MonkeyPatch
     scratch: Path
+    knobs: dict
 
-    def use(self, fixture: str = "simple_text.jsonl", **env: str) -> None:
-        """Point the fake binary at a fixture, plus any extra fake knobs."""
-        self.monkeypatch.setenv("HAL_MARY_FAKE_FIXTURE", str(FIXTURES / fixture))
-        for key, value in env.items():
-            self.monkeypatch.setenv(key, value)
+    def use(self, fixture: str | None = "simple_text.jsonl", **knobs: object) -> None:
+        """Point the fake binary at a fixture, plus any extra fake knobs.
+
+        Written to ``fake_knobs.json`` in the scratch directory, which is the
+        fake's working directory. Not the environment: the runner hands its
+        child an explicit allowlist, and a fake driven through the environment
+        would need that allowlist widened for the tests' own sake.
+        """
+        if fixture is not None:
+            knobs["fixture"] = str(FIXTURES / fixture)
+        self.knobs.update(knobs)
+        self.scratch.mkdir(parents=True, exist_ok=True)
+        (self.scratch / "fake_knobs.json").write_text(
+            json.dumps(self.knobs), encoding="utf-8"
+        )
 
     @property
     def argv(self) -> list[str]:
@@ -137,8 +154,6 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Harness:
 
     argv_path = tmp_path / "argv.json"
     stdin_path = tmp_path / "stdin.txt"
-    monkeypatch.setenv("HAL_MARY_FAKE_ARGV_OUT", str(argv_path))
-    monkeypatch.setenv("HAL_MARY_FAKE_STDIN_OUT", str(stdin_path))
 
     h = Harness(
         settings=settings,
@@ -148,6 +163,7 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Harness:
         stdin_path=stdin_path,
         monkeypatch=monkeypatch,
         scratch=scratch,
+        knobs={"argv_out": str(argv_path), "stdin_out": str(stdin_path)},
     )
     h.use()
     yield h
@@ -264,7 +280,12 @@ def test_extra_context_is_prepended_to_the_prompt(harness: Harness):
     assert delivered.index("The board so far.") < delivered.index("The task.")
 
 
-def test_cwd_is_the_scratch_dir_and_is_created(harness: Harness, monkeypatch):
+def test_cwd_is_the_scratch_dir_and_is_created(harness: Harness, monkeypatch, tmp_path: Path):
+    """A scratch directory the harness has never touched, so "created" means it.
+
+    The fake finds no knobs file there and behaves like a CLI that produced
+    nothing; that is fine, because what is under test is the cwd and the mkdir.
+    """
     seen = {}
     import subprocess
 
@@ -275,10 +296,17 @@ def test_cwd_is_the_scratch_dir_and_is_created(harness: Harness, monkeypatch):
         return real_popen(*args, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", spy)
-    assert not harness.scratch.exists()
-    harness.runner.run("tools_off", "hello")
-    assert Path(seen["cwd"]).resolve() == harness.scratch.resolve()
-    assert harness.scratch.is_dir()
+
+    fresh = tmp_path / "never-created" / "scratch"
+    settings = harness.settings.model_copy(
+        update={"claude": harness.settings.claude.model_copy(update={"scratch_dir": fresh})}
+    )
+    assert not fresh.exists()
+
+    ClaudeRunner(settings, harness.conn).run("tools_off", "hello")
+
+    assert Path(seen["cwd"]).resolve() == fresh.resolve()
+    assert fresh.is_dir()
 
 
 def test_system_prompt_comes_from_the_config_file_by_default(harness: Harness):
@@ -369,7 +397,7 @@ def test_transcript_is_written_and_raw_path_points_at_it(harness: Harness):
 
 
 def test_timeout_kills_and_reports(harness: Harness):
-    harness.use("simple_text.jsonl", HAL_MARY_FAKE_SLEEP="30")
+    harness.use("simple_text.jsonl", sleep="30")
     result = harness.runner.run("impatient", "hello")
     assert not result.ok
     assert result.error is not None
@@ -379,7 +407,7 @@ def test_timeout_kills_and_reports(harness: Harness):
 
 
 def test_nonzero_exit_captures_stderr(harness: Harness):
-    harness.use("simple_text.jsonl", HAL_MARY_FAKE_EXIT="2", HAL_MARY_FAKE_STDERR="boom: no auth")
+    harness.use("simple_text.jsonl", exit="2", stderr="boom: no auth")
     result = harness.runner.run("tools_off", "hello")
     assert not result.ok
     assert result.exit_code == 2
@@ -429,8 +457,8 @@ def test_success_writes_exactly_one_claude_calls_row(harness: Harness):
 @pytest.mark.parametrize(
     ("job", "env"),
     [
-        ("impatient", {"HAL_MARY_FAKE_SLEEP": "30"}),
-        ("tools_off", {"HAL_MARY_FAKE_EXIT": "3", "HAL_MARY_FAKE_STDERR": "nope"}),
+        ("impatient", {"sleep": "30"}),
+        ("tools_off", {"exit": "3", "stderr": "nope"}),
     ],
     ids=["timeout", "nonzero-exit"],
 )
@@ -493,7 +521,7 @@ def test_stream_does_not_duplicate_partial_message_text(harness: Harness):
 
 
 def test_stream_failure_still_yields_a_done_chunk(harness: Harness):
-    harness.use("streaming.jsonl", HAL_MARY_FAKE_EXIT="4", HAL_MARY_FAKE_STDERR="stream boom")
+    harness.use("streaming.jsonl", exit="4", stderr="stream boom")
     chunks = list(harness.runner.stream("tools_off", "hello"))
     assert chunks[-1].kind == "done"
     assert not chunks[-1].result.ok
@@ -584,7 +612,7 @@ def test_stderr_is_waited_for_not_raced(harness: Harness, monkeypatch):
 
     monkeypatch.setattr(ClaudeRunner, "_drain_stderr", staticmethod(slow_drain))
     harness.use(
-        "simple_text.jsonl", HAL_MARY_FAKE_EXIT="1", HAL_MARY_FAKE_STDERR="auth expired"
+        "simple_text.jsonl", exit="1", stderr="auth expired"
     )
     result = harness.runner.run("tools_off", "hello")
     assert not result.ok
@@ -603,7 +631,7 @@ def test_unusable_scratch_dir_is_reported_not_raised(harness: Harness, tmp_path:
     broken = harness.settings.model_copy(
         update={
             "claude": harness.settings.claude.model_copy(
-                update={"scratch_dir": str(a_file / "scratch")}
+                update={"scratch_dir": a_file / "scratch"}
             )
         }
     )
@@ -645,7 +673,7 @@ def test_transcript_header_records_no_system_prompt_when_there_is_none(harness: 
 
 def test_abandoned_stream_kills_and_still_records_a_row(harness: Harness):
     """The SSE client went away. The call still happened and still cost money."""
-    harness.use("streaming.jsonl", HAL_MARY_FAKE_HANG="30")
+    harness.use("streaming.jsonl", hang="30")
     chunks = harness.runner.stream("tools_off", "hello")
     first = next(chunks)
     assert first.kind == "text"
@@ -671,7 +699,7 @@ def test_lines_buffered_at_the_deadline_still_reach_the_transcript(harness: Harn
         return real_parse(line, sink)
 
     monkeypatch.setattr(ClaudeRunner, "_parse", staticmethod(slow_parse))
-    harness.use("streaming.jsonl", HAL_MARY_FAKE_HANG="30")
+    harness.use("streaming.jsonl", hang="30")
     result = harness.runner.run("impatient", "hello")  # timeout_s = 1
 
     assert not result.ok
@@ -681,3 +709,72 @@ def test_lines_buffered_at_the_deadline_still_reach_the_transcript(harness: Harn
     # line means only three were consumed before the deadline.
     assert len(lines) == 6, lines
     assert json.loads(lines[-1])["type"] == "result"
+
+
+# --------------------------------------------------------------------------
+# the child's environment
+# --------------------------------------------------------------------------
+#
+# `claude -p` inherits nothing it is not handed. Most jobs run with tools off,
+# but board_build, news_sweep, waiver_scan and chat run with WebSearch and
+# WebFetch on — and those are exactly the calls where a prompt-injected
+# "print your environment" would have something worth taking. ESPN_S2 and SWID
+# are a session on Caroline's ESPN account; WEB_PASSWORD is the household
+# password to this app.
+
+
+SECRET_KEYS = ("ESPN_S2", "SWID", "WEB_PASSWORD", "DB_PATH")
+
+
+def test_the_child_environment_drops_the_secrets(harness: Harness, monkeypatch, tmp_path: Path):
+    """The evidence is what the child actually received, not what we meant to send."""
+    for key in SECRET_KEYS:
+        monkeypatch.setenv(key, f"secret-value-for-{key}")
+    env_out = tmp_path / "child-env.json"
+    harness.use("simple_text.jsonl", env_out=str(env_out))
+
+    harness.runner.run("tools_on", "hello")
+
+    child = json.loads(env_out.read_text(encoding="utf-8"))
+    leaked = sorted(set(child) & set(SECRET_KEYS))
+    assert leaked == [], f"the child inherited {leaked}"
+    assert not [v for v in child.values() if v.startswith("secret-value-for-")]
+
+
+def test_the_child_environment_keeps_what_the_binary_needs(
+    harness: Harness, monkeypatch, tmp_path: Path
+):
+    """HOME above all: the binary's subscription credentials live under it."""
+    monkeypatch.setenv("LC_ALL", "en_GB.UTF-8")
+    env_out = tmp_path / "child-env.json"
+    harness.use("simple_text.jsonl", env_out=str(env_out))
+
+    harness.runner.run("tools_on", "hello")
+
+    child = json.loads(env_out.read_text(encoding="utf-8"))
+    assert child["PATH"] == os.environ["PATH"]
+    assert child["HOME"] == os.environ["HOME"]
+    assert child["LC_ALL"] == "en_GB.UTF-8"
+
+
+def test_the_allowlist_is_a_list_not_a_filter(monkeypatch):
+    """Allow by name, never deny by name. A deny list has to be updated every
+    time a new secret is added; this one is wrong only when something the binary
+    needs is left out, which is loud."""
+    monkeypatch.setenv("SOMETHING_NOBODY_THOUGHT_OF", "value")
+    monkeypatch.setenv("ESPN_S2", "cookie")
+
+    built = child_environment()
+
+    assert "SOMETHING_NOBODY_THOUGHT_OF" not in built
+    assert "ESPN_S2" not in built
+    assert set(built) <= set(ENV_PASSTHROUGH) | {
+        k for k in built if k.startswith(ENV_PASSTHROUGH_PREFIXES)
+    }
+
+
+def test_an_unset_allowlisted_variable_is_simply_absent(monkeypatch):
+    """Never a key with an empty value: `TMPDIR=""` is not the same as no TMPDIR."""
+    monkeypatch.delenv("TMPDIR", raising=False)
+
+    assert "TMPDIR" not in child_environment()
