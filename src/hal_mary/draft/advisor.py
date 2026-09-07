@@ -518,16 +518,21 @@ def _fallback(state: dict[str, Any]) -> dict[str, Any]:
         }
 
     best = pool[0]
-    position = best.get("position") or "his position"
+    # "RB" is a word Caroline has no reason to know, and this string is not
+    # written by a model that was told to avoid jargon.
+    code = (best.get("position") or "").upper()
+    position = _POSITION_WORDS.get(code, code) or "his position"
     reason = (
         f"hal-mary could not get a full answer in time, so this is the board's own: "
         f"{best['name']} is the highest-ranked player left "
         + (
-            f"at a position you still have to fill ({position}). "
+            f"at a position you still have to fill (you need a {position}). "
             if ranked
             else "on the whole board, and every starting spot is already filled. "
         )
-        + f"He is graded tier {best.get('tier')}, ranked {best.get('rank')} overall."
+        + f"Research put him in tier {best.get('tier')} — a tier is a group of players "
+        "the research treated as interchangeable, and tier 1 is the best group — and "
+        f"{best.get('rank')}th best overall."
     )
     if best.get("note"):
         reason += f" {best['note']}"
@@ -537,7 +542,9 @@ def _fallback(state: dict[str, Any]) -> dict[str, Any]:
         "backups": [
             {
                 "name": entry["name"],
-                "reason": f"Also tier {entry.get('tier')}, ranked {entry.get('rank')} overall.",
+                "reason": (
+                    f"Also in group {entry.get('tier')}, {entry.get('rank')}th best overall."
+                ),
             }
             for entry in pool[1:3]
         ],

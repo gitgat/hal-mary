@@ -358,3 +358,23 @@ def test_the_prompt_files_are_real_deliverables():
     # has stopped being a retry.
     assert len(short) < len(full)
     assert "one sentence" in short or "short" in short
+
+
+def test_the_fallback_explains_its_own_jargon(tmp_path):
+    """Every other reason string is written by a model that was told not to use
+    jargon. This one is written by Python, and it goes straight onto Caroline's
+    card with no surrounding context — so the one word it cannot avoid, "tier",
+    has to explain itself here.
+    """
+    conn, settings, runner, bus = advisor_ready(
+        tmp_path, [failed_result(error="timeout"), failed_result(error="timeout")]
+    )
+
+    result = advise(conn, settings, runner, bus, next_overall_pick=6)
+
+    assert "tier" in result["reason"].lower()
+    assert "interchangeable" in result["reason"].lower() or (
+        "group" in result["reason"].lower()
+    ), "a bare tier number means nothing to someone who has never drafted"
+    for backup in result["backups"]:
+        assert "tier" not in backup["reason"].lower() or "group" in backup["reason"].lower()
