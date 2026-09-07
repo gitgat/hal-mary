@@ -53,7 +53,7 @@ the `Co-Authored-By` and `Claude-Session` trailers.
 uv sync                        # install deps
 uv run pytest                  # full test suite
 uv run pytest tests/unit -x    # fast loop while developing
-uv run hal-mary serve          # web app + scheduler (dev)
+uv run hal-mary serve          # web app on the LAN; --reload for development
 uv run hal-mary sync           # pull league state and draft picks from ESPN
 uv run hal-mary espn-check     # are the cookies still good? exits nonzero when not
 uv run hal-mary job <name>     # run one job on demand
@@ -108,3 +108,15 @@ pick-clock path is wrong.
 - **Tests must never spawn the real `claude` binary** except the one live integration test, which
   skips when the binary or its auth is missing. Unit tests point `config.claude.binary` at
   `tests/fake_claude/claude`.
+- **`TestClient` cannot test a stream.** Starlette's `TestClient` (and httpx's ASGI transport)
+  buffer the whole response before returning it, so an endless response like `/events` deadlocks
+  them and neither can deliver an `http.disconnect`. Drive the app at the ASGI layer instead; see
+  `EventProbe` in `tests/unit/test_web.py`.
+- **The web app opens a connection per request**, from the `connect` factory passed to
+  `create_app`. Anything running off the event loop — a sync, the draft loop, a scheduled job —
+  opens its own connection inside its own worker. See `docs/DECISIONS.md`.
+- **`app.routes` does not contain your routes.** This FastAPI represents each
+  `include_router` as one opaque `_IncludedRouter` object holding the original router, so a test
+  that walks `app.routes` looking for paths finds three pathless objects and silently checks
+  nothing. `flatten_routes` in `tests/unit/test_web.py` unwraps them, and the test asserts the
+  paths it expected to find before it asserts anything about them.

@@ -282,3 +282,88 @@ from the real payload, and the only fixture in the tree that is not synthetic.
 
 **Would revisit if:** ESPN ever starts using a positive placeholder id, which would make the rule
 unenforceable from the pick row alone and would need cross-checking against `draftDetail.inProgress`.
+
+---
+
+## 2026-09-07 — The web app takes a connection *factory*, not a connection
+
+**Decision:** `create_app(settings, connect=...)` is given a callable that opens a
+`sqlite3.Connection`, and every request opens and closes its own. There is no long-lived connection
+on the app object.
+
+**Why:** A `sqlite3.Connection` may not be used from a thread other than the one that opened it —
+the driver raises. The web app's code runs on at least three: uvicorn's event loop, Starlette's
+`TestClient` portal thread, and the `asyncio.to_thread` worker that runs a sync off the loop. A
+shared connection would work in development and fail in whichever of those a given deployment
+happened to hit. Opening a local SQLite file costs microseconds, WAL means readers never block the
+writer, and the factory is also the seam the tests inject a temporary database through.
+
+**Consequence for later tasks:** anything that runs off the event loop — the draft poll loop, the
+scheduler's jobs — opens its connection *inside* its own worker. Passing one in is the bug.
+
+---
+
+## 2026-09-07 — `/events` closes its generator explicitly
+
+**Decision:** `/events` is served by `EventStreamResponse`, a `StreamingResponse` subclass whose
+`stream_response` calls `body_iterator.aclose()` in a `finally`.
+
+**Why:** Starlette ends a stream by cancelling the task iterating it, which leaves the async
+generator suspended rather than closed — Python finalises it whenever the garbage collector gets
+there. That generator holds the `EventBus` subscription. Caroline's phone locks its screen, the
+socket drops, and the subscription outlives the connection; a draft evening of that is a bus fanning
+out to dozens of dead queues. `aclose()` throws `GeneratorExit` in, which unwinds the
+`async with bus.subscribe()` block and unsubscribes synchronously, so it completes even inside the
+cancelled scope it runs in.
+
+**Verified:** `tests/unit/test_web.py` drives `/events` at the ASGI layer and asserts
+`bus.subscriber_count == 0` immediately after an `http.disconnect`. It has to be driven at that
+layer: Starlette's `TestClient` and httpx's ASGI transport both buffer a whole response before
+returning it, so an endless stream deadlocks them and neither can deliver a disconnect at all.
+
+---
+
+## 2026-09-07 — The session cookie is signed with a key derived from the password
+
+**Decision:** The `itsdangerous` signing key is `scrypt(WEB_PASSWORD,
+salt="hal-mary.web.session.v1", n=2**14, r=8, p=1)`, derived once per process and cached. There is
+no separate secret key, and none is stored. PBKDF2 with 600k rounds is the fallback for an OpenSSL
+build that refuses scrypt's memory bound.
+
+**Why derive it from the password:** three properties, all wanted. There is no second secret to
+manage or leak. Sessions survive a restart, so a reboot at 6am does not log Caroline out at 7. And
+changing `WEB_PASSWORD` invalidates every outstanding cookie, which is the only thing "change the
+password" can usefully mean for a single shared password.
+
+**Why a KDF rather than a hash:** this shipped as a bare SHA-256, and that was wrong. The session
+cookie crosses the LAN in cleartext — there is no TLS on a home network — so a captured cookie (a
+guest device, a phone backup, a router that logs) is something an attacker can test password guesses
+against *offline*. Against a single SHA-256 that is billions of guesses a second on a laptop GPU,
+and a password two people chose to type on a phone does not survive billions of guesses. scrypt
+makes each guess cost 16 MB of memory as well as time.
+
+**Cost:** tens of milliseconds, once per process. An attacker who learns the password can mint
+cookies — but they could simply log in, so nothing is lost. A stolen *database* still does not yield
+the key, because the password is not in it.
+
+---
+
+## 2026-09-07 — Failed logins are counted per client, not globally
+
+**Decision:** `LoginLimiter` locks a client out after `web.login_max_attempts` failures for
+`web.login_lockout_seconds`, keyed on the client address, held in memory per process. A locked-out
+client is refused **without** its password being compared, and every failure is logged: the address
+and the running count, never the attempt itself.
+
+**Why per client and not one global counter:** the KDF above only covers *offline* guessing. Online,
+a device on the network could try the household password thousands of times a second and nothing
+anywhere would have said so. But a global counter would hand that same device a way to lock Caroline
+out of her own app thirty seconds before her pick — a denial of service dressed as a security
+control. Per client is weaker (several addresses buy several budgets) but it cannot be turned
+against her, which on a home LAN is the better trade.
+
+**Why in memory:** a restart forgives everyone, which is right for a household. The alternative is a
+table to maintain and a lockout that outlives the fix for it.
+
+**Why the password is never logged:** a log full of near-miss guesses is its own disclosure, and it
+is the file most likely to be pasted into a chat window while debugging.
