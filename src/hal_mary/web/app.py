@@ -58,6 +58,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from hal_mary import db
 from hal_mary.config import Settings
 from hal_mary.espn.sync import last_sync
+from hal_mary.memory import standing_memory_files
 
 __all__ = [
     "EventStreamResponse",
@@ -735,6 +736,27 @@ def _status_context(
     if not claude_ok:
         problems.append(claude_reason)
 
+    # Configured paths, resolved. This block exists because the failure it
+    # reports has no other symptom: a memory_dir resolved against the wrong
+    # directory does not crash anything, it just strips the standing context out
+    # of every prompt and makes the advice quietly worse. Two different
+    # sentences on purpose — "there are no notes" and "I am looking in the wrong
+    # place" are different problems with different fixes.
+    memory_dir = settings.paths.memory_dir
+    if not memory_dir.is_dir():
+        problems.append(
+            f"The standing-memory directory {memory_dir} does not exist, so every "
+            f"prompt is going out without the context that says who Caroline is "
+            f"and what the league's rules are. Check paths.memory_dir in "
+            f"{settings.config_path}."
+        )
+    elif not standing_memory_files(settings):
+        problems.append(
+            f"{memory_dir} holds no standing-memory notes, so every prompt is "
+            f"going out without the context that says who Caroline is and what "
+            f"the league's rules are."
+        )
+
     syncs = []
     for kind, label in SYNC_KINDS:
         row = last_sync(conn, kind)
@@ -768,7 +790,11 @@ def _status_context(
             "SELECT job, started_at, finished_at, status, summary, error"
             " FROM job_runs ORDER BY id DESC LIMIT 10",
         ),
-        "db_path": settings.db_path,
+        "db_path": str(settings.db_path),
+        "paths": [
+            {"label": label, "path": str(path), "ok": exists}
+            for label, path, exists in settings.resolved_paths()
+        ],
     }
 
 

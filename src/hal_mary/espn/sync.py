@@ -63,9 +63,6 @@ SYNC_RUN_KEEP = 200
 #: real numbers when something starts loading them.
 CURRENT_ROSTER_WEEK = None
 
-# src/hal_mary/espn/sync.py -> espn -> hal_mary -> src -> repo root
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-
 
 # --- sync_runs bookkeeping -------------------------------------------------
 
@@ -409,11 +406,15 @@ def sync_draft(conn: sqlite3.Connection, client: Any) -> list[dict[str, Any]]:
 
 
 def league_memory_path(settings: Settings) -> Path:
-    """Where ``league.md`` lives, honouring a relative ``paths.memory_dir``."""
-    directory = Path(settings.paths.memory_dir).expanduser()
-    if not directory.is_absolute():
-        directory = _REPO_ROOT / directory
-    return directory / LEAGUE_MEMORY_FILENAME
+    """Where ``league.md`` lives.
+
+    ``paths.memory_dir`` is already absolute — ``hal_mary.config`` anchors it to
+    the directory holding ``config.toml``. This used to anchor a relative value
+    against the repo root itself, which was a *second* answer to the same
+    question: the sync would write here while ``standing_memory`` read somewhere
+    else, and the file would exist and never reach a prompt.
+    """
+    return settings.paths.memory_dir / LEAGUE_MEMORY_FILENAME
 
 
 DEFAULT_PRESERVED_TAIL = f"""{LEAGUE_PRESERVE_SENTINEL}

@@ -108,8 +108,23 @@ def write_config(
 
     Copying rather than hand-writing means a test cannot pass against a config
     shape the shipped file does not have.
+
+    The prompt and memory paths are rewritten to absolute repo paths on the way
+    out. Every relative path in config.toml is anchored to *that file's*
+    directory, and this copy lives in ``tmp_path`` — so without this the tests
+    would read a ``prompts/`` that does not exist. Pointing them at the repo is
+    deliberate: ``prompts/board_build.md`` is a deliverable, and a test that read
+    a stub instead would not notice it going missing.
     """
     text = (REPO / "config.toml").read_text(encoding="utf-8")
+    for key, relative in (
+        ("prompts_dir", "prompts"),
+        ("memory_dir", "memory"),
+        ("system_prompt_file", "prompts/system.md"),
+    ):
+        line = f'{key} = "{relative}"'
+        assert line in text, f"config.toml no longer contains {line!r}"
+        text = text.replace(line, f'{key} = "{REPO / relative}"', 1)
     for old, new in (replace or {}).items():
         assert old in text, f"config.toml no longer contains {old!r}"
         text = text.replace(old, new, 1)
@@ -123,10 +138,8 @@ def make_settings(
 ) -> Settings:
     """Settings from a temporary config, with the fixture environment overlaid.
 
-    ``claude.binary`` is left alone: these tests never spawn it. Paths that would
-    otherwise be resolved against the repo (prompts, memory) stay pointed at the
-    repo on purpose — ``prompts/board_build.md`` is a deliverable, and a test
-    that read a stub instead would not notice it going missing.
+    ``claude.binary`` is left alone: these tests never spawn it. ``write_config``
+    points the prompt and memory paths back at the repo; see its docstring.
     """
     values = {**FIXTURE_ENV, "TEAM_ID": str(REAL_MY_TEAM_ID), **env}
     return load_settings(config_path=write_config(tmp_path, extra, replace), env=values)

@@ -21,6 +21,7 @@ nouns, which is exactly where keyword search is strongest.
 from __future__ import annotations
 
 import itertools
+import logging
 import re
 import sqlite3
 from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -32,12 +33,15 @@ from typing import Any
 
 from . import db
 
+log = logging.getLogger(__name__)
+
 __all__ = [
     "Note",
     "build_context",
     "prune_notes",
     "search_notes",
     "standing_memory",
+    "standing_memory_files",
     "write_note",
     "write_notes",
 ]
@@ -401,6 +405,27 @@ def search_notes(
 # --- standing memory ---------------------------------------------------------
 
 
+def standing_memory_files(settings: Any) -> list[Path]:
+    """Every file :func:`standing_memory` will read, in the order it reads them.
+
+    Separate from :func:`standing_memory` so the status page can say *how many*
+    standing notes are in play without reading them all, and can never disagree
+    with what the prompts actually got.
+    """
+    directory = settings.paths.memory_dir
+    if not directory.is_dir():
+        return []
+    return [
+        path
+        for path in sorted(directory.glob("*.md"), key=lambda p: p.name)
+        # `league.example.md` is the tracked placeholder that ships so a fresh
+        # checkout has the template; the real `league.md` beside it is generated
+        # and gitignored. Sending both would put "nothing has synced yet" into
+        # the same prompt as the actual league.
+        if not path.name.endswith(".example.md")
+    ]
+
+
 def standing_memory(settings: Any) -> str:
     """Concatenate every ``*.md`` in ``settings.paths.memory_dir``, in name order.
 
@@ -408,16 +433,27 @@ def standing_memory(settings: Any) -> str:
     Caroline is, how she wants to be talked to, what the league's rules are.
     They go into every prompt in full, so they are kept short by hand.
 
+    ``settings.paths.memory_dir`` is already absolute — ``hal_mary.config``
+    anchors it to the directory holding ``config.toml``. Do not re-resolve it:
+    resolving it against the working directory is the bug this returns "" for.
+
     **Read fresh on every call, never cached.** Bryan and Caroline edit them
     while the service is running, and an advisor still quoting last week's
     version of `caroline.md` because a process started before the edit is a bug
     that would take days to notice.
 
-    A missing directory yields ``""``, an unreadable file is skipped, and a file
-    that is not valid UTF-8 is decoded with replacement characters. Nothing
-    about the state of this directory may raise: a deployment whose memory
-    directory is missing, or one file of which was saved in the wrong encoding,
-    should give slightly thinner advice, not a stack trace on every page.
+    A missing directory logs a warning naming the resolved path and yields
+    ``""``; an unreadable file is skipped; a file that is not valid UTF-8 is
+    decoded with replacement characters. **Nothing here raises.** This is called
+    on the 90-second pick clock, and a deployment whose memory directory is
+    missing should give thinner advice, not no advice at all — see
+    ``docs/DECISIONS.md``. The loudness that an operator actually sees is on the
+    status page, which renders ``Settings.resolved_paths()``; the warning is for
+    whoever is already reading the log.
+
+    An *existing but empty* directory is silent on purpose. "There are no notes"
+    and "I am looking in the wrong place" are different conditions and an
+    operator has to be able to tell them apart.
 
     ``league.md`` carries the ``hal-mary:preserve-below`` sentinel that the ESPN
     sync writes around. Nothing here interprets it: the file goes in whole,
@@ -428,18 +464,19 @@ def standing_memory(settings: Any) -> str:
     tracked placeholder for the generated, gitignored ``league.md``; it is
     documentation for whoever sets up a box, not context for Claude.
     """
-    directory = Path(settings.paths.memory_dir)
+    directory = settings.paths.memory_dir
     if not directory.is_dir():
+        log.warning(
+            "standing memory directory %s does not exist, so every prompt is "
+            "going out without the context that says who Caroline is and what "
+            "the league's rules are. Check paths.memory_dir in %s.",
+            directory,
+            getattr(settings, "config_path", "config.toml"),
+        )
         return ""
 
     sections: list[str] = []
-    for path in sorted(directory.glob("*.md"), key=lambda p: p.name):
-        # `league.example.md` is the tracked placeholder that ships so a fresh
-        # checkout has the template; the real `league.md` beside it is generated
-        # and gitignored. Sending both would put "nothing has synced yet" into
-        # the same prompt as the actual league.
-        if path.name.endswith(".example.md"):
-            continue
+    for path in standing_memory_files(settings):
         try:
             # errors="replace", not strict: one curly apostrophe pasted from a
             # web page and saved as cp1252 is a byte that is not valid UTF-8,

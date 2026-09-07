@@ -41,27 +41,27 @@ def test_env_example_carries_no_real_values():
 
 def test_system_prompt_file_exists_and_is_substantial():
     settings = load_settings(env={})
-    prompt = REPO / settings.claude.system_prompt_file
+    prompt = settings.claude.system_prompt_file
     assert prompt.is_file()
     assert len(prompt.read_text(encoding="utf-8")) > 500
 
 
 def test_configured_directories_exist():
     settings = load_settings(env={})
-    assert (REPO / settings.paths.prompts_dir).is_dir()
-    assert (REPO / settings.paths.memory_dir).is_dir()
+    assert settings.paths.prompts_dir.is_dir()
+    assert settings.paths.memory_dir.is_dir()
 
 
 def test_standing_memory_files_exist():
     settings = load_settings(env={})
-    memory = REPO / settings.paths.memory_dir
+    memory = settings.paths.memory_dir
     assert (memory / "caroline.md").is_file()
     assert (memory / LEAGUE_TEMPLATE).is_file()
 
 
 def test_memory_files_are_marked_human_editable():
     settings = load_settings(env={})
-    text = (REPO / settings.paths.memory_dir / "caroline.md").read_text(encoding="utf-8")
+    text = (settings.paths.memory_dir / "caroline.md").read_text(encoding="utf-8")
     assert "human-editable" in text.lower()
 
 
@@ -72,7 +72,7 @@ LEAGUE_PRESERVE_SENTINEL = "<!-- hal-mary:preserve-below -->"
 
 def test_league_memory_has_a_machine_readable_preserve_sentinel():
     settings = load_settings(env={})
-    text = (REPO / settings.paths.memory_dir / LEAGUE_TEMPLATE).read_text(encoding="utf-8")
+    text = (settings.paths.memory_dir / LEAGUE_TEMPLATE).read_text(encoding="utf-8")
     assert text.count(LEAGUE_PRESERVE_SENTINEL) == 1
     before, _, after = text.partition(LEAGUE_PRESERVE_SENTINEL)
     assert "---" in before, "the sentinel is preceded by a horizontal rule"
@@ -81,7 +81,7 @@ def test_league_memory_has_a_machine_readable_preserve_sentinel():
 
 def test_league_memory_explains_what_the_sentinel_means():
     settings = load_settings(env={})
-    text = (REPO / settings.paths.memory_dir / LEAGUE_TEMPLATE).read_text(encoding="utf-8")
+    text = (settings.paths.memory_dir / LEAGUE_TEMPLATE).read_text(encoding="utf-8")
     assert "hal-mary sync" in text
     assert "preserved" in text.lower()
 
@@ -128,7 +128,7 @@ _LOOKS_LIKE_A_FULL_NAME = re.compile(r"\b[A-Z][a-z]+ [A-Z][a-z]+\b")
 
 def test_league_template_carries_no_real_league_data():
     settings = load_settings(env={})
-    text = (REPO / settings.paths.memory_dir / LEAGUE_TEMPLATE).read_text(encoding="utf-8")
+    text = (settings.paths.memory_dir / LEAGUE_TEMPLATE).read_text(encoding="utf-8")
 
     assert not _LOOKS_LIKE_AN_ID.search(text), "the template looks like it contains a league id"
     assert not _LOOKS_LIKE_A_FULL_NAME.search(text), (

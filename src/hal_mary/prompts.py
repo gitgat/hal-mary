@@ -15,7 +15,6 @@ teams" produces advice for a league that does not exist.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
 __all__ = ["PromptError", "load_prompt", "render", "render_prompt"]
@@ -33,8 +32,13 @@ def load_prompt(settings: Any, name: str) -> str:
     Fresh on every call for the same reason standing memory is: these files are
     edited while the service runs, and an advisor still using the version that
     was on disk when the process started is a bug nobody would find for days.
+
+    ``settings.paths.prompts_dir`` is already an absolute path anchored to the
+    directory holding ``config.toml`` — see ``hal_mary.config``. Do not resolve
+    it again; resolving it against the working directory is what broke this
+    under a service manager.
     """
-    path = Path(settings.paths.prompts_dir).expanduser() / name
+    path = settings.paths.prompts_dir / name
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:

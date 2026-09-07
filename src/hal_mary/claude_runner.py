@@ -22,6 +22,10 @@ job. If a future job genuinely needs an MCP server, it gets a new explicit
 argument here and a new test, not a config key that defaults to "inherit
 everything".
 
+The child's *environment* is isolated the same way and for the same reason: it
+gets :data:`ENV_PASSTHROUGH` and nothing else, so ``ESPN_S2``, ``SWID`` and
+``WEB_PASSWORD`` never reach a process that has web tools on. See that constant.
+
 Other CLI facts this module encodes, measured rather than assumed:
 
 * ``--verbose`` is **required** alongside ``--output-format stream-json`` under
@@ -60,7 +64,7 @@ import subprocess
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -71,11 +75,14 @@ from .config import JobConfig, Settings
 
 __all__ = [
     "CONTEXT_SEPARATOR",
+    "ENV_PASSTHROUGH",
+    "ENV_PASSTHROUGH_PREFIXES",
     "ISOLATION_ARGS",
     "TIMEOUT_TEARDOWN_S",
     "ClaudeResult",
     "ClaudeRunner",
     "StreamChunk",
+    "child_environment",
 ]
 
 log = logging.getLogger(__name__)
@@ -94,6 +101,87 @@ ISOLATION_ARGS: tuple[str, ...] = (
 #: output goes through here, so every caller gets the same shape and prompt
 #: files can rely on the headings being present.
 CONTEXT_SEPARATOR = "\n\n--- END CONTEXT ---\n\n"
+
+#: Environment variables the ``claude`` child is allowed to inherit.
+#:
+#: An allowlist, never a denylist. A denylist has to be extended every time a
+#: new secret is added to ``.env``, and the day someone forgets is the day it
+#: leaks; this list is wrong only when the binary needs something that is not on
+#: it, and that failure is immediate and loud rather than silent.
+#:
+#: What is deliberately *not* here: ``ESPN_S2`` and ``SWID`` (a live session on
+#: Caroline's ESPN account), ``WEB_PASSWORD`` (the household password to this
+#: app) and ``DB_PATH``. The child has no use for any of them. Nothing exploits
+#: that today — the model is not asked to read its own environment — but
+#: ``board_build``, ``news_sweep``, ``waiver_scan`` and ``chat`` run with
+#: ``WebSearch`` and ``WebFetch`` on, and a page that talks a model into
+#: printing an environment variable is exactly the injection those jobs are
+#: exposed to.
+#:
+#: Also not here: ``ANTHROPIC_API_KEY`` and the rest of ``ANTHROPIC_*``. The
+#: binary authenticates from the subscription credentials under ``HOME``, which
+#: is why ``HOME`` is on the list. A box that meant to bill an API key instead
+#: would need it added here explicitly, which is the right way round — and
+#: :func:`child_environment` says so in the log when it drops one, because that
+#: is the single case in this whole list that would otherwise be silent: a box
+#: carrying both a login and a key keeps working, on the subscription, and the
+#: only evidence is the invoice. A box with no ``~/.claude`` at all fails on the
+#: next call, loudly, and needs no warning.
+ENV_PASSTHROUGH: tuple[str, ...] = (
+    "PATH",          # find node, and whatever the binary shells out to
+    "HOME",          # ~/.claude — the subscription credentials and CLI state
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TERM",
+    "TMPDIR",
+    "TZ",
+    "LANG",
+    "LANGUAGE",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_DATA_HOME",
+    "XDG_RUNTIME_DIR",
+    "CLAUDE_CONFIG_DIR",
+    "NODE_EXTRA_CA_CERTS",    # a homelab TLS-inspecting proxy, should one appear
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+)
+
+#: Prefixes allowed alongside :data:`ENV_PASSTHROUGH`. ``LC_*`` is a family, not
+#: a fixed set, and getting it wrong shows up as mangled non-ASCII in prose the
+#: model wrote about a player's name.
+ENV_PASSTHROUGH_PREFIXES: tuple[str, ...] = ("LC_",)
+
+
+def child_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment handed to ``claude``: :data:`ENV_PASSTHROUGH`, and nothing else.
+
+    An unset variable is absent rather than empty — ``TMPDIR=""`` means
+    something different to ``TMPDIR`` unset, and the difference is a temporary
+    file written to the wrong place.
+    """
+    env = os.environ if source is None else source
+    if env.get("ANTHROPIC_API_KEY"):
+        log.warning(
+            "ANTHROPIC_API_KEY is set but is not passed to %s; the call will be "
+            "billed to the subscription credentials under HOME instead. Add it "
+            "to claude_runner.ENV_PASSTHROUGH if this box is meant to bill the "
+            "key.",
+            "claude",
+        )
+    return {
+        key: value
+        for key, value in env.items()
+        if key in ENV_PASSTHROUGH or key.startswith(ENV_PASSTHROUGH_PREFIXES)
+    }
+
 
 #: Grace period for a killed process group to actually die.
 _REAP_TIMEOUT_S = 5.0
@@ -434,7 +522,9 @@ class ClaudeRunner:
         if explicit is not None:
             text = explicit.strip()
             return text or None
-        path = Path(self.settings.claude.system_prompt_file).expanduser()
+        # Already absolute, anchored to the config file's directory by
+        # hal_mary.config. Re-resolving it here is the bug, not the fix.
+        path = self.settings.claude.system_prompt_file
         try:
             text = path.read_text(encoding="utf-8").strip()
         except OSError as exc:
@@ -450,11 +540,13 @@ class ClaudeRunner:
 
         Never the repo root: the CLI reads ``CLAUDE.md`` and wanders into files
         under its working directory, and this application's own source is the
-        last thing a football research job should be reasoning about. A relative
-        ``claude.scratch_dir`` is resolved against the process working
-        directory, which for the deployed daemon is the repo root.
+        last thing a football research job should be reasoning about.
+
+        ``claude.scratch_dir`` arrives absolute, anchored to the directory
+        holding ``config.toml`` — so it lands beside the deployment rather than
+        wherever a service manager happened to start the process.
         """
-        path = Path(self.settings.claude.scratch_dir).expanduser().resolve()
+        path = self.settings.claude.scratch_dir
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -530,7 +622,7 @@ class ClaudeRunner:
             except OSError as exc:
                 transcript = None
                 result = finish(
-                    f"scratch directory {self.settings.claude.scratch_dir!r} is unusable: {exc}",
+                    f"scratch directory {self.settings.claude.scratch_dir} is unusable: {exc}",
                     _NEVER_RAN,
                 )
                 yield StreamChunk("done", "", result)
@@ -546,6 +638,9 @@ class ClaudeRunner:
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         cwd=str(scratch),
+                        # An explicit allowlist, not the operator's whole
+                        # environment: see ENV_PASSTHROUGH.
+                        env=child_environment(),
                         text=True,
                         encoding="utf-8",
                         errors="replace",

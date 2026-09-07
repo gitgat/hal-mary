@@ -5,11 +5,21 @@ these tests are the contract every other module reads through.
 """
 
 import textwrap
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from hal_mary.config import ENV_KEYS, ConfigError, Settings, load_settings
+from hal_mary.config import (
+    ENV_KEYS,
+    ClaudeConfig,
+    ConfigError,
+    DraftConfig,
+    PathsConfig,
+    Settings,
+    WebConfig,
+    load_settings,
+)
 
 MINIMAL_TOML = """
 [claude]
@@ -47,6 +57,8 @@ enabled = true
 cron = "0 6 * * *"
 """
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 FULL_ENV = {
     "ESPN_S2": "cookie-s2",
     "SWID": "{swid}",
@@ -70,14 +82,14 @@ def test_loads_the_repo_config_toml_by_default():
     assert settings.claude.binary == "claude"
     assert settings.web.port == 8080
     assert settings.draft.poll_seconds == 5
-    assert settings.paths.prompts_dir == "prompts"
+    assert settings.paths.prompts_dir == REPO_ROOT / "prompts"
     assert "draft_advice" in settings.jobs
 
 
 def test_reads_sections_from_an_explicit_toml_path(minimal_config):
     settings = load_settings(config_path=minimal_config, env={})
     assert settings.claude.permission_mode == "dontAsk"
-    assert settings.claude.scratch_dir == ".scratch"
+    assert settings.claude.scratch_dir == minimal_config.parent / ".scratch"
     assert settings.web.session_cookie == "hal_mary_session"
     assert settings.draft.advise_within_picks == 2
 
@@ -87,7 +99,7 @@ def test_env_overlay_populates_secrets(minimal_config):
     assert settings.espn_s2 == "cookie-s2"
     assert settings.swid == "{swid}"
     assert settings.web_password == "hunter2"
-    assert settings.db_path == "/var/lib/hal.db"
+    assert settings.db_path == Path("/var/lib/hal.db")
 
 
 def test_numeric_env_keys_coerce_to_int(minimal_config):
@@ -133,7 +145,9 @@ def test_missing_secrets_lists_only_the_absent_keys(minimal_config):
 
 def test_db_path_defaults_when_unset(minimal_config):
     settings = load_settings(config_path=minimal_config, env={})
-    assert settings.db_path == "./hal.db"
+    # Anchored like every other path: a cwd-relative default under systemd
+    # creates a second, empty database beside the unit's working directory.
+    assert settings.db_path == minimal_config.parent / "hal.db"
     assert "DB_PATH" not in settings.missing_secrets()
 
 
@@ -297,3 +311,138 @@ def test_web_section_carries_the_session_and_stream_tunables(minimal_config):
     assert repo.auth_check_seconds == 3600
     assert repo.login_max_attempts == 5
     assert repo.login_lockout_seconds == 60.0
+
+
+# --- path anchoring ----------------------------------------------------------
+#
+# Every relative path in config.toml is resolved against *the directory holding
+# config.toml*, not the process working directory. Under the systemd unit the
+# working directory is not the source tree, and a memory_dir that resolved
+# against it would find nothing, return "" and quietly strip the standing
+# context out of every prompt. No crash, no log line, just worse advice.
+
+
+def test_relative_paths_anchor_to_the_config_files_directory(minimal_config, tmp_path, monkeypatch):
+    """The proof: resolve with the working directory somewhere else entirely."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    settings = load_settings(config_path=minimal_config, env={})
+
+    assert settings.paths.memory_dir == tmp_path / "memory"
+    assert settings.paths.prompts_dir == tmp_path / "prompts"
+    assert settings.claude.scratch_dir == tmp_path / ".scratch"
+    assert settings.claude.system_prompt_file == tmp_path / "prompts" / "system.md"
+
+
+def test_resolved_paths_are_path_objects_not_strings(minimal_config):
+    """Callers get something already resolved, so none of them can re-resolve it
+    against the wrong anchor."""
+    settings = load_settings(config_path=minimal_config, env={})
+
+    for value in (
+        settings.paths.memory_dir,
+        settings.paths.prompts_dir,
+        settings.claude.scratch_dir,
+        settings.claude.system_prompt_file,
+    ):
+        assert isinstance(value, Path), f"{value!r} is not a Path"
+        assert value.is_absolute(), f"{value} is not absolute"
+
+
+def test_absolute_paths_in_config_are_left_exactly_as_given(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        textwrap.dedent(MINIMAL_TOML)
+        .replace('memory_dir = "memory"', 'memory_dir = "/srv/hal/memory"')
+        .replace('scratch_dir = ".scratch"', 'scratch_dir = "/var/tmp/hal-scratch"')
+    )
+
+    settings = load_settings(config_path=path, env={})
+
+    assert settings.paths.memory_dir == Path("/srv/hal/memory")
+    assert settings.claude.scratch_dir == Path("/var/tmp/hal-scratch")
+
+
+def test_hal_mary_config_anchors_paths_at_that_files_directory(tmp_path, monkeypatch):
+    """The override moves the anchor with it; that is the whole point of it."""
+    deployed = tmp_path / "deployed"
+    deployed.mkdir()
+    config = deployed / "config.toml"
+    config.write_text(textwrap.dedent(MINIMAL_TOML))
+    monkeypatch.chdir(tmp_path)
+
+    settings = load_settings(env={"HAL_MARY_CONFIG": str(config)})
+
+    assert settings.paths.memory_dir == deployed / "memory"
+    assert settings.config_path == config
+
+
+def test_a_relative_db_path_anchors_too(minimal_config, tmp_path, monkeypatch):
+    """Same defect, different file: a cwd-relative DB_PATH under systemd creates
+    a second, empty database instead of opening the real one."""
+    monkeypatch.chdir(tmp_path / "..")
+
+    settings = load_settings(config_path=minimal_config, env={"DB_PATH": "./hal.db"})
+
+    assert settings.db_path == tmp_path / "hal.db"
+
+
+
+def test_resolved_paths_reports_each_path_and_whether_it_exists(minimal_config, tmp_path):
+    """What the status page renders, so a wrong anchor is diagnosable without
+    an SSH session."""
+    (tmp_path / "memory").mkdir()
+
+    settings = load_settings(config_path=minimal_config, env={})
+    report = {label: (path, exists) for label, path, exists in settings.resolved_paths()}
+
+    assert report["Memory"] == (tmp_path / "memory", True)
+    assert report["Prompts"] == (tmp_path / "prompts", False)
+    assert report["Config file"] == (minimal_config, True)
+
+
+def test_a_relative_config_path_still_yields_absolute_paths(tmp_path, monkeypatch):
+    """The validator's promise is that *no* route to a Settings produces a
+    cwd-relative path. ``config_path`` is a public field, so a future loader or
+    test helper setting a relative one must not reintroduce the bug with the
+    guard apparently still standing.
+    """
+    (tmp_path / "config.toml").write_text(textwrap.dedent(MINIMAL_TOML))
+    monkeypatch.chdir(tmp_path)
+
+    loaded = load_settings(config_path=tmp_path / "config.toml", env={})
+    # model_validate is the route a future loader would take; the relative
+    # config_path is what it might plausibly hand over.
+    settings = Settings.model_validate({**loaded.model_dump(), "config_path": "config.toml"})
+
+    assert settings.config_path.is_absolute()
+    assert settings.paths.memory_dir == tmp_path / "memory"
+    assert settings.db_path == tmp_path / "hal.db"
+    assert settings.claude.scratch_dir.is_absolute()
+
+
+def test_settings_constructed_directly_with_a_relative_config_path_anchors_absolutely(
+    tmp_path, monkeypatch
+):
+    """The same thing by the shortest route: a plain constructor call."""
+    monkeypatch.chdir(tmp_path)
+
+    settings = Settings(
+        config_path=Path("deploy/config.toml"),
+        claude=ClaudeConfig(
+            default_model="m",
+            permission_mode="dontAsk",
+            scratch_dir=".scratch",
+            system_prompt_file="prompts/system.md",
+        ),
+        paths=PathsConfig(prompts_dir="prompts", memory_dir="memory"),
+        draft=DraftConfig(poll_seconds=5, advise_within_picks=2),
+        web=WebConfig(host="127.0.0.1", port=8080, session_cookie="c"),
+        jobs={},
+    )
+
+    assert settings.paths.memory_dir == tmp_path / "deploy" / "memory"
+    assert settings.claude.system_prompt_file == tmp_path / "deploy" / "prompts" / "system.md"
+    assert settings.db_path == tmp_path / "deploy" / "hal.db"

@@ -119,9 +119,25 @@ empty for exactly that reason.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export
   mounted on every node, and SQLite on NFS corrupts. The production VM keeps `hal.db` on its own
   disk.
+- **Every configured path is absolute by the time you see it.** `hal_mary.config` anchors
+  `paths.*`, `claude.scratch_dir`, `claude.system_prompt_file` and `DB_PATH` to the directory
+  holding the resolved `config.toml` — never the working directory, which is the checkout for you
+  and something else under systemd. Use `settings.paths.memory_dir` as given; a `Path(...)` around
+  it is the bug, not a safety net. `Settings.resolved_paths()` is what the status page renders.
+  See `docs/DECISIONS.md`.
+- **A missing memory directory warns and shows on the status page; it never raises.**
+  `standing_memory()` is on the pick-clock path, so thinner advice beats no advice. An existing but
+  empty directory is silent — "there are no notes" and "I am looking in the wrong place" are
+  different problems and the status page says which.
+- **The `claude` child gets `claude_runner.ENV_PASSTHROUGH` and nothing else.** No `ESPN_S2`, no
+  `SWID`, no `WEB_PASSWORD`, no `ANTHROPIC_*`; the binary authenticates from `~/.claude` under
+  `HOME`. Do not widen that list without saying why in `docs/DECISIONS.md` and running the live
+  integration test.
 - **Tests must never spawn the real `claude` binary** except the one live integration test, which
   skips when the binary or its auth is missing. Unit tests point `config.claude.binary` at
-  `tests/fake_claude/claude`.
+  `tests/fake_claude/claude`, which is driven by a `fake_knobs.json` in its working directory —
+  deliberately not by environment variables, which the allowlist above would have to be widened
+  for.
 - **`TestClient` cannot test a stream.** Starlette's `TestClient` (and httpx's ASGI transport)
   buffer the whole response before returning it, so an endless response like `/events` deadlocks
   them and neither can deliver an `http.disconnect`. Drive the app at the ASGI layer instead; see

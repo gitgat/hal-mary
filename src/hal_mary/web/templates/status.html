@@ -75,6 +75,23 @@
   <p class="small muted">{{ db_path }}</p>
 </div>
 
+{# Where hal-mary is actually looking. A wrong anchor here has no other symptom:
+   the prompts simply go out thinner, and nothing crashes. #}
+<div class="card">
+  <h2>Where the files are</h2>
+  {% for entry in paths %}
+    <div class="row">
+      <span class="label">{{ entry.label }}</span>
+      <span class="value">
+        <span class="chip {{ 'ok' if entry.ok else 'bad' }}">{{ 'found' if entry.ok else 'missing' }}</span>
+      </span>
+    </div>
+    <p class="small muted">{{ entry.path }}</p>
+  {% endfor %}
+  <p class="small muted">The scratch directory and the database are created on first use, so
+  "missing" is only alarming once hal-mary has run.</p>
+</div>
+
 <div class="card">
   <h2>Recent jobs</h2>
   {% if jobs %}
