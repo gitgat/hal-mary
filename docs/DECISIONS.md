@@ -83,3 +83,75 @@ reviewing every diff. Chat context does not survive between sessions; files do.
 
 **The discipline that pays for it:** TDD, a green `main`, and no completion claim without command
 output. Those are recorded as hard rules in `CLAUDE.md`.
+
+---
+
+## 2026-09-07 — Every Claude call runs in an isolated environment
+
+**Decision:** `claude_runner` passes `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` and
+`--setting-sources ""` on every invocation. These are hardcoded in the runner, not exposed per job,
+so no job can omit them.
+
+**Why:** measured on this box, on the same trivial prompt:
+
+| Invocation | Cost | Cache-creation tokens |
+|---|---|---|
+| Bare `-p --model opus` | $0.823 | 82,289 |
+| Plus strict MCP config | $0.048 | 4,780 |
+| Plus empty setting sources | $0.005 | 230 |
+
+A bare `claude -p` inherits the operator's whole environment: every MCP server, plugin, skill, and
+settings file installed for the user. That was 82,000 tokens of system prompt on a two-token
+question, at 165 times the isolated cost. For a service running scheduled research jobs and answering
+on a pick clock, that difference is the cost model.
+
+Cost is not the only reason. Without isolation, a hal-mary job inherits whatever tooling happens to be
+installed on the host, so its behavior would change when Bryan installs something unrelated to this
+project. The bot must depend only on what this repository declares.
+
+**Would revisit if:** a job genuinely needs an MCP server, in which case it gets its own explicit
+`--mcp-config` rather than inheriting the operator's.
+
+---
+
+## 2026-09-07 — Draft picks come from the raw ESPN endpoint, not the library
+
+**Decision:** `espn-api` handles league settings, teams, rosters, free agents, and box scores. Draft
+picks are fetched directly:
+
+```
+GET https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leagues/{id}
+    ?view=mDraftDetail
+```
+
+reading `draftDetail.picks` and ignoring the `drafted` flag.
+
+**Why:** reading the library's source turned up two defects that matter only for live polling.
+`refresh_draft()` appends picks to a list that is cleared only in the constructor, so a five-second
+poll grows it without bound. And `_fetch_draft` returns early unless `draftDetail.drafted` is true,
+which may only happen once a draft completes — the window we care about is exactly the window it
+might report nothing. Fifteen lines of `httpx` removes both problems.
+
+**Cost:** we map player ids to names ourselves, which the library would otherwise do.
+
+**Would revisit if:** the library fixes both defects upstream.
+
+---
+
+## 2026-09-07 — Deployment targets the VM by FQDN, never the short name
+
+**Decision:** everything that reaches the production VM uses `hal-mary.thehalf.io` or its IP.
+
+**Why:** the bare short name `hal-mary` has no DNS record. It falls through Pi-hole's wildcard for the
+domain and resolves to the keepalived ingress VIP, which currently answers as `birdo` — the swarm
+manager and ingress host. An SSH to the short name during setup connected successfully and landed
+there. Running the install steps would have put Node, uv, Claude Code, and a long-running service onto
+the cluster's control plane, on a Pi booting from an SD card.
+
+The homelab notes already warn never to target that VIP, because keepalived fails it over between
+managers mid-session. Worth recording that the polarity is the reverse of the other documented gotcha
+in those notes, where the short name was correct and the FQDN wrong. Neither rule generalizes. Resolve
+the name and check what answers.
+
+**Would revisit if:** someone adds a real DNS record for the short name, which would make it safe but
+still not necessary.
