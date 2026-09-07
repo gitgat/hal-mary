@@ -179,3 +179,28 @@ name that matters has an apostrophe in it eventually.
 **Would revisit if:** recall proves weak in practice — a note that exists and is not retrieved
 because the job phrased it differently from the query. The upgrade is a vector index alongside FTS,
 not instead of it.
+
+---
+
+## 2026-09-07 — Every `claude` call is environment-isolated, and the flags are not configurable
+
+**Decision:** `claude_runner` passes `--strict-mcp-config`, `--mcp-config '{"mcpServers":{}}'` and
+`--setting-sources ""` on every single invocation. They are a module constant, not a `config.toml`
+key, and a test asserts they appear in the argv for every job.
+
+**Why:** Measured on this box with the CLI at 2.1.260. A bare `claude -p` inherits the operator's
+whole environment — every MCP server, plugin and skill installed for the user running the daemon.
+A two-token prompt pulled in 82,289 cached tokens and cost **$0.82**. With the two MCP flags it was
+$0.048; adding `--setting-sources ""` brought it to **$0.005**. That is 165x, on a call this
+application makes dozens of times a day, funded by a personal subscription.
+
+**Why not configurable:** a per-job flag defaulting to "inherit everything" is one forgotten key away
+from a $0.82 pick-clock call, and the failure is silent — the advice still arrives, it just costs a
+hundred times more. A job that genuinely needs an MCP server gets an explicit new argument here and
+a test to go with it.
+
+**Verified:** `tests/integration/test_claude_live.py` runs the real binary under these flags and
+fails if the call costs more than $0.10. A measured live run: $0.0017, 2.1s, `mcp_servers: []`.
+
+**Would revisit if:** a future job needs a real MCP server, which would add an opt-in argument rather
+than remove the default.

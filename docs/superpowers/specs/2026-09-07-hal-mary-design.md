@@ -83,28 +83,52 @@ hal-mary/
 
 ### Claude runner (`claude_runner.py`)
 
-One function `run(job: JobSpec, prompt: str, *, session_id=None, resume=None, stream=False) -> ClaudeResult`.
+**Built in task 3.** `ClaudeRunner(settings, conn)` with two entry points:
 
-Builds the subprocess argv from config:
+- `run(job, prompt, *, schema=None, resume=None, system_prompt=None, extra_context=None)
+  -> ClaudeResult` — blocking, for jobs and the draft advisor.
+- `stream(job, prompt, *, resume=None, system_prompt=None, extra_context=None)
+  -> Iterator[StreamChunk]` — text fragments as they arrive then one `done` chunk, for the chat SSE
+  endpoint. Adds `--include-partial-messages`.
+
+`ClaudeResult` is frozen: `ok, text, structured, session_id, cost_usd, duration_ms, exit_code,
+error, raw_path`. Nothing raises for a failed call except an unknown job name — timeouts, nonzero
+exits, a missing binary and schema parse failures all come back as `ok=False` with `error` set, so a
+scheduler is never crashed by a bad call.
+
+Argv, built from config, prompt excluded (it goes over stdin):
 
 ```
-claude -p --output-format stream-json --include-partial-messages
-       --model <config.jobs[job].model>
-       --system-prompt-file prompts/system.md   (or --system-prompt <text>)
-       --tools <"" | WebSearch WebFetch>         from config.jobs[job].tools
-       --allowedTools WebSearch WebFetch         when tools enabled
-       --permission-mode dontAsk
-       --json-schema <schema>                    when job.schema is set
-       --no-session-persistence                  for jobs; omitted for chat
-       --resume <id>                             for chat continuation
-       --max-budget-usd <config.jobs[job].max_budget_usd>  optional
+<claude.binary> -p --output-format stream-json --verbose
+       --model <jobs[job].model> --permission-mode <claude.permission_mode>
+       --strict-mcp-config --mcp-config {"mcpServers":{}} --setting-sources ""
+       [--include-partial-messages]   streaming only
+       [--system-prompt <text>]       explicit arg, else claude.system_prompt_file
+       --tools "" | --tools <t...> --allowedTools <t...>    from jobs[job].tools
+       [--json-schema <compact>]      only when a schema is passed
+       --max-budget-usd <n>
+       --resume <id> | --no-session-persistence             mutually exclusive
 ```
 
-- Prompt goes over stdin. Working directory is a scratch dir, not the repo, so Claude can't wander into project files.
-- Timeout per job from config. On timeout: kill, record failure.
-- Parses stream-json events; yields text deltas when `stream=True` (chat SSE), else collects final `result` and structured output.
-- Every call writes a row to `claude_calls` (job, model, argv, prompt_hash, duration_ms, cost_usd if reported, exit_code, output_path).
-- The binary path is `config.claude.binary` (default `claude`), so tests point it at `tests/fake_claude/`.
+- **The three isolation flags are hardcoded and unconditional.** A bare `claude -p` inherits every
+  MCP server, plugin and skill the operator has installed: measured at $0.82 for a two-token prompt
+  on this box, against $0.005 with the flags. See the decision entry in `docs/DECISIONS.md`.
+  `--verbose` is required alongside `--output-format stream-json` under `-p`.
+- Prompt goes over stdin, written from a thread so a 40 KB board prompt cannot deadlock on the pipe
+  buffer. `extra_context` (task 4's `build_context()` output) is prepended with a fixed separator.
+- Working directory is `claude.scratch_dir`, created if absent, so the CLI cannot wander into the
+  repo. Relative paths in config resolve against the process working directory.
+- Timeout is `jobs[job].timeout_s`; on expiry the whole **process group** is killed, because
+  `claude` spawns children that a plain child kill would orphan.
+- stream-json is parsed forgivingly: unparseable lines (a truncated final line is normal after a
+  kill) and unknown event types are skipped, never fatal. Structured output prefers the result
+  event's `structured_output` and falls back to `json.loads(result)`.
+- Every call writes exactly one `claude_calls` row, failures included, and the full transcript to
+  `scratch_dir/transcripts/<timestamp>-<job>-<id>.jsonl` — the debugging record behind a bad
+  recommendation. `argv_json` excludes the prompt and reduces the system prompt to a digest;
+  `prompt_hash` is the sha256 of what was actually sent.
+- Tests point `claude.binary` at `tests/fake_claude/claude`, which replays a fixture and records its
+  own argv and stdin. The single live test is marked `integration` and skips without `HAL_MARY_LIVE`.
 
 ### Memory (`memory.py`)
 
