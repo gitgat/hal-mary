@@ -96,6 +96,12 @@ pick-clock path is wrong.
   `uv run python scripts/record_espn_fixtures.py` with real cookies — the one exception is
   `draft_detail_prepopulated_real_league.json`, built field for field from the real pre-draft
   payload. No test may reach the network; `tests/conftest.py` blocks both HTTP stacks.
+- **`memory/league.md` is generated, gitignored, and contains real people.**
+  `hal-mary sync` rewrites it from the live ESPN payload: real leaguemates' names and the league
+  id. Only the placeholder `memory/league.example.md` is tracked. Never `git add -f` it, never
+  re-track it, and never paste its contents into a commit, an issue, or a test fixture. Names in
+  git history cannot be removed by a later commit. `tests/unit/test_project_files.py` pins both the
+  ignore rule and the template's shape.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export
   mounted on every node, and SQLite on NFS corrupts. The production VM keeps `hal.db` on its own
   disk.

@@ -66,6 +66,11 @@ uv run hal-mary espn-check     # exits nonzero if the cookies do not work
 uv run hal-mary sync           # pulls the league and prints a summary
 ```
 
+That first sync creates `memory/league.md` — it does not ship in the repo, because it is written
+from the live ESPN payload and holds real leaguemates' names and the league id. It is gitignored
+for that reason; `memory/league.example.md` is the tracked placeholder showing its shape. Anything
+you write below the `<!-- hal-mary:preserve-below -->` line survives every later sync verbatim.
+
 ## 4. Claude
 
 hal-mary shells out to the `claude` binary and uses whatever subscription that binary is logged into.

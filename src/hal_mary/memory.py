@@ -423,6 +423,10 @@ def standing_memory(settings: Any) -> str:
     sync writes around. Nothing here interprets it: the file goes in whole,
     sentinel included, because the hand-written half below it is exactly the
     part Claude most needs.
+
+    ``*.example.md`` files are skipped. ``memory/league.example.md`` is the
+    tracked placeholder for the generated, gitignored ``league.md``; it is
+    documentation for whoever sets up a box, not context for Claude.
     """
     directory = Path(settings.paths.memory_dir)
     if not directory.is_dir():
@@ -430,6 +434,12 @@ def standing_memory(settings: Any) -> str:
 
     sections: list[str] = []
     for path in sorted(directory.glob("*.md"), key=lambda p: p.name):
+        # `league.example.md` is the tracked placeholder that ships so a fresh
+        # checkout has the template; the real `league.md` beside it is generated
+        # and gitignored. Sending both would put "nothing has synced yet" into
+        # the same prompt as the actual league.
+        if path.name.endswith(".example.md"):
+            continue
         try:
             # errors="replace", not strict: one curly apostrophe pasted from a
             # web page and saved as cp1252 is a byte that is not valid UTF-8,
