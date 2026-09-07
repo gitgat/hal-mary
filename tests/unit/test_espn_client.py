@@ -390,6 +390,19 @@ def test_check_auth_reports_a_hung_request(settings):
     assert "unreachable" in reason.lower()
 
 
+def test_check_auth_without_a_league_id_says_so_without_a_request(no_network):
+    """Cookies alone are not enough: without LEAGUE_ID there is no URL to call."""
+    seen: list[httpx.Request] = []
+    settings = load_settings(env={"ESPN_S2": "cookie", "SWID": "{swid}"})
+    client = client_for(settings, transport=draft_transport({}, requests_seen=seen))
+
+    ok, reason = client.check_auth()
+
+    assert ok is False
+    assert "LEAGUE_ID" in reason
+    assert seen == []
+
+
 # --- player_name_map -------------------------------------------------------
 
 

@@ -177,12 +177,33 @@ class EspnClient:
             season=self.settings.season, league_id=self.settings.league_id
         )
 
-    def _cookies(self) -> dict[str, str]:
-        if not self.settings.espn_s2 or not self.settings.swid:
-            raise EspnAuthError(
-                "ESPN_S2 and SWID are not set; copy them from a logged-in browser "
-                "session into .env"
+    def _require_config(self) -> None:
+        """Fail before building a URL, or a request, out of ``None``.
+
+        All four keys are reported together because a box that is missing one is
+        usually missing several, and the useful message is the whole list.
+        Without LEAGUE_ID the URL would be ``/seasons/None/leagues/None``, which
+        ESPN answers with a 404 — reported as "league not found", which sends
+        whoever is reading the status page looking in exactly the wrong place.
+        """
+        missing = [
+            name
+            for name, value in (
+                ("ESPN_S2", self.settings.espn_s2),
+                ("SWID", self.settings.swid),
+                ("LEAGUE_ID", self.settings.league_id),
+                ("SEASON", self.settings.season),
             )
+            if not value
+        ]
+        if missing:
+            raise EspnAuthError(
+                f"{', '.join(missing)} not set; copy the cookies from a logged-in browser "
+                "session into .env (see .env.example)"
+            )
+
+    def _cookies(self) -> dict[str, str]:
+        self._require_config()
         return {"espn_s2": self.settings.espn_s2, "SWID": self.settings.swid}
 
     def _raise_for_status(self, status: int) -> None:
@@ -223,8 +244,7 @@ class EspnClient:
     def _library(self) -> Any:
         """The lazily-built ``espn_api`` League, with its exceptions wrapped."""
         if self._league is None:
-            if not self.settings.league_id or not self.settings.season:
-                raise EspnAuthError("LEAGUE_ID and SEASON are not set; hal-mary cannot read ESPN")
+            self._require_config()
             try:
                 self._league = _build_league(self.settings)
             except ESPNAccessDenied as exc:
@@ -259,8 +279,7 @@ class EspnClient:
         at it would pull the player list, every roster and the schedule.
         """
         if self._request_layer is None:
-            if not self.settings.league_id or not self.settings.season:
-                raise EspnAuthError("LEAGUE_ID and SEASON are not set; hal-mary cannot read ESPN")
+            self._require_config()
             self._request_layer = EspnFantasyRequests(
                 sport="nfl",
                 year=self.settings.season,
@@ -458,7 +477,7 @@ class EspnClient:
         try:
             self._get(SETTINGS_VIEW)
         except EspnAuthError as exc:
-            if not self.settings.espn_s2 or not self.settings.swid:
+            if "not set" in str(exc):
                 return False, str(exc)
             return False, f"ESPN credentials have expired: {exc}"
         except EspnLeagueNotFound as exc:
