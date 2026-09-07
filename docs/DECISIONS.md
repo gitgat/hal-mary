@@ -155,3 +155,27 @@ the name and check what answers.
 
 **Would revisit if:** someone adds a real DNS record for the short name, which would make it safe but
 still not necessary.
+
+---
+
+## 2026-09-07 — Keyword search over notes, not embeddings; OR the terms
+
+**Decision:** Note retrieval is FTS5 keyword search. `memory.search_notes` sanitises any query down
+to quoted literal terms and ORs them, ranking by bm25 and then by recency. No vector index, no
+embedding model.
+
+**Why:** The corpus is small (hundreds of notes a season) and the queries are proper nouns — player
+names, team abbreviations, "hamstring" — which is exactly where keyword search beats a similarity
+score. An embedding store would add a model dependency and a second index to keep in sync with the
+`notes` triggers for no recall we can currently demonstrate. Terms are ORed rather than ANDed
+because this retrieval feeds a prompt: a four-word query that ANDs down to zero rows gives Claude no
+context at all, while OR plus rank plus `limit` puts the best note first and drops the tail.
+
+**The sanitiser is not optional.** FTS5's query language is not SQL, so parameter binding does not
+protect it — a bound string is still parsed as a query. `Ja'Marr Chase`, `RB*`, a lone `-` and a
+stray `"` each raise `sqlite3.OperationalError` and take down the page that asked. Every football
+name that matters has an apostrophe in it eventually.
+
+**Would revisit if:** recall proves weak in practice — a note that exists and is not retrieved
+because the job phrased it differently from the query. The upgrade is a vector index alongside FTS,
+not instead of it.

@@ -108,7 +108,7 @@ claude -p --output-format stream-json --include-partial-messages
 
 ### Memory (`memory.py`)
 
-Tables: `notes(id, created_at, source_job, topic, player_name, team_abbr, text, source_url, expires_at)` with an FTS5 virtual table over `text`, `player_name`, `topic`. `search(query, *, players=None, topics=None, limit=20, max_age_days=None)` returns ranked notes. `write(note)` from jobs and chat. Standing memory: `memory/*.md` files read at prompt-build time. Every prompt = system.md + standing memory + retrieved notes + job-specific context + task.
+Tables: `notes(id, created_at, source_job, topic, player_name, team_abbr, text, source_url, expires_at)` with an FTS5 virtual table over `text`, `player_name`, `topic`. As built: `search_notes(conn, query=None, *, players=None, topics=None, limit=20, max_age_days=None, include_expired=False)` returns ranked notes, `write_note(conn, note)` / `write_notes(conn, notes)` from jobs and chat, and `prune_notes(conn, older_than_days)` drops stale ones. Standing memory: `standing_memory(settings)` reads `memory/*.md` fresh at prompt-build time, never cached. `build_context(conn, settings, ...)` assembles the block: standing memory + caller-supplied live sections + retrieved notes. Every prompt = system.md + that block + job-specific task.
 
 ### ESPN (`espn/`)
 
