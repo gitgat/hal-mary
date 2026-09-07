@@ -17,6 +17,24 @@ whose working directory is not the source tree (the systemd unit, for one):
 
 Both are loud when they point at nothing: a typo'd path that silently loaded no
 secrets is exactly the failure they exist to prevent.
+
+Every path is anchored to config.toml, not to the working directory
+--------------------------------------------------------------------
+``paths.prompts_dir``, ``paths.memory_dir``, ``claude.scratch_dir``,
+``claude.system_prompt_file`` and ``DB_PATH`` are resolved **once, here**,
+against the directory holding the resolved ``config.toml``. Absolute values are
+passed through untouched.
+
+That anchor is the only one that is right in a developer's checkout, under the
+systemd unit (whose ``WorkingDirectory`` is not the source tree) and under any
+future packaging. The alternative — every consumer calling ``Path(value)`` and
+getting the process working directory — is not a crash: ``standing_memory()``
+finds no directory, returns ``""``, and every prompt goes out missing the
+standing context that says who Caroline is and what the league's rules are. The
+service looks healthy and the advice quietly gets worse.
+
+So :class:`Settings` exposes resolved, absolute ``Path`` objects rather than
+strings each caller re-resolves its own way. Consumers must use them as given.
 """
 
 from __future__ import annotations
@@ -28,7 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 __all__ = [
     "ClaudeConfig",
@@ -62,6 +80,21 @@ DOTENV_PATH_ENV = "HAL_MARY_ENV"
 
 DEFAULT_DB_PATH = "./hal.db"
 
+#: Config keys that name a path and are anchored to the config file's directory,
+#: keyed by the section attribute they live on. Adding a path to config.toml
+#: means adding it here; nothing else has to change.
+#:
+#: ``claude.binary`` is deliberately **not** here and must not be added. It is a
+#: command name, not a path: the shipped value is a bare ``"claude"``, which has
+#: to reach ``subprocess`` unchanged so it is looked up on ``PATH``. Anchoring it
+#: would turn that into ``<config dir>/claude`` and break every call. The cost is
+#: that a *relative* binary path like ``"./bin/claude"`` still resolves against
+#: the working directory — write it absolute if you need to point at one.
+ANCHORED_PATHS: dict[str, tuple[str, ...]] = {
+    "claude": ("scratch_dir", "system_prompt_file"),
+    "paths": ("prompts_dir", "memory_dir"),
+}
+
 # src/hal_mary/config.py -> src/hal_mary -> src -> repo root
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -80,13 +113,16 @@ class ClaudeConfig(_Frozen):
     binary: str = "claude"
     default_model: str
     permission_mode: str
-    scratch_dir: str
-    system_prompt_file: str
+    #: Anchored to the config file's directory by :class:`Settings`. Absolute
+    #: once a Settings exists; never resolve it again.
+    scratch_dir: Path
+    system_prompt_file: Path
 
 
 class PathsConfig(_Frozen):
-    prompts_dir: str
-    memory_dir: str
+    #: Both anchored to the config file's directory by :class:`Settings`.
+    prompts_dir: Path
+    memory_dir: Path
 
 
 class DraftConfig(_Frozen):
@@ -212,7 +248,16 @@ class JobConfig(_Frozen):
 
 
 class Settings(_Frozen):
-    """The whole resolved configuration: config.toml plus the environment."""
+    """The whole resolved configuration: config.toml plus the environment.
+
+    Every path field is absolute by the time an instance exists — see
+    :meth:`_anchor_paths` and the module docstring. Consumers use them as given.
+    """
+
+    #: The file this was loaded from. Every relative path in it is resolved
+    #: against ``config_path.parent``. The default keeps a directly-constructed
+    #: Settings (tests, mostly) behaving like one loaded from the checkout.
+    config_path: Path = _REPO_ROOT / "config.toml"
 
     claude: ClaudeConfig
     paths: PathsConfig
@@ -228,7 +273,56 @@ class Settings(_Frozen):
     team_id: int | None = None
     season: int | None = None
     web_password: str | None = None
-    db_path: str = DEFAULT_DB_PATH
+    db_path: Path = Path(DEFAULT_DB_PATH)
+
+    @model_validator(mode="after")
+    def _anchor_paths(self) -> Settings:
+        """Resolve every configured path against the config file's directory.
+
+        Done here rather than in ``load_settings`` so that *no* route to a
+        Settings — a direct construction in a test, a ``model_validate``, a
+        future loader — can produce one carrying a working-directory-relative
+        path. Absolute values pass through exactly as given.
+
+        ``config_path`` is itself resolved first, and that ``.resolve()`` is what
+        makes the promise above true rather than nearly true. ``load_settings``
+        always hands over an absolute path, but ``config_path`` is a public
+        field: a relative one would anchor every other path to a relative root,
+        which is the original bug wearing the guard's uniform.
+        """
+        root = self.config_path.expanduser().resolve().parent
+        object.__setattr__(self, "config_path", self.config_path.expanduser().resolve())
+        for section, fields in ANCHORED_PATHS.items():
+            current = getattr(self, section)
+            object.__setattr__(
+                self,
+                section,
+                current.model_copy(
+                    update={f: _anchor(getattr(current, f), root) for f in fields}
+                ),
+            )
+        object.__setattr__(self, "db_path", _anchor(self.db_path, root))
+        return self
+
+    def resolved_paths(self) -> list[tuple[str, Path, bool]]:
+        """Every configured path, resolved, with whether it exists on disk.
+
+        The status page renders this. An operator seeing "Memory · /srv/hal/memory
+        · missing" can tell the difference between "there are no notes" and "the
+        service is looking in the wrong place" without an SSH session — which is
+        the whole failure this anchoring exists to make visible.
+        """
+        return [
+            (label, path, path.exists())
+            for label, path in (
+                ("Config file", self.config_path),
+                ("Memory", self.paths.memory_dir),
+                ("Prompts", self.paths.prompts_dir),
+                ("System prompt", self.claude.system_prompt_file),
+                ("Claude scratch", self.claude.scratch_dir),
+                ("Database", self.db_path),
+            )
+        ]
 
     def job(self, name: str) -> JobConfig:
         """Return the config for job ``name``.
@@ -253,6 +347,12 @@ class Settings(_Frozen):
             "WEB_PASSWORD": self.web_password,
         }
         return [key for key in REQUIRED_ENV_KEYS if values[key] in (None, "")]
+
+
+def _anchor(value: str | Path, root: Path) -> Path:
+    """``value`` as an absolute path, relative ones resolved against ``root``."""
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else root / path
 
 
 def _override_path(source: Mapping[str, str], key: str) -> Path | None:
@@ -328,11 +428,17 @@ def load_settings(
     repo root, then the working directory. ``env`` defaults to
     ``$HAL_MARY_ENV`` (or the repo-root ``.env``) overlaid by ``os.environ``;
     when a mapping is passed it is used verbatim and no file is read.
+
+    Every configured path in the result is absolute, anchored to the directory
+    holding the file that was actually read — never the working directory.
     """
     override_source: Mapping[str, str] = env if env is not None else os.environ
     path = (
         Path(config_path) if config_path is not None else _resolve_config_path(override_source)
     )
+    # Absolute from here on: it is the anchor for every configured path, and an
+    # anchor that is itself relative to the working directory anchors nothing.
+    path = path.expanduser().resolve()
     try:
         with path.open("rb") as handle:
             raw = tomllib.load(handle)
@@ -359,6 +465,7 @@ def load_settings(
             values[key] = _coerce_int(key, values[key])
 
     return Settings(
+        config_path=path,
         claude=claude,
         paths=paths,
         draft=draft,

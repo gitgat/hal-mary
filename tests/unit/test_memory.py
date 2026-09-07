@@ -5,6 +5,7 @@ maintained by triggers, and an in-memory shortcut would not exercise the same
 migration path production runs.
 """
 
+import logging
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -663,3 +664,59 @@ def test_prune_notes_keeps_the_fts_index_in_step(conn):
     # The two-argument form is the only one that compares the index against the
     # content table; the one-argument form does not detect a stale index.
     conn.execute("INSERT INTO notes_fts(notes_fts, rank) VALUES('integrity-check', 1)")
+
+
+# --- a missing memory directory is loud --------------------------------------
+#
+# The bug this replaces: `paths.memory_dir` resolved against the process working
+# directory, so under a systemd unit whose WorkingDirectory is not the checkout
+# the directory was simply not there. standing_memory() returned "", every
+# prompt went out without the context saying who Caroline is and what the
+# league's rules are, and nothing anywhere said so. The service looked healthy
+# and the advice quietly got worse.
+
+
+def test_standing_memory_on_a_missing_directory_warns_and_names_the_path(tmp_path, caplog):
+    """It still must not raise — this is called on the pick clock — but silence
+    is what made the original bug invisible."""
+    absent = tmp_path / "not-here"
+    settings = load_settings(env={}).model_copy(
+        update={"paths": PathsConfig(prompts_dir=tmp_path / "prompts", memory_dir=absent)}
+    )
+
+    with caplog.at_level(logging.WARNING, logger="hal_mary.memory"):
+        assert memory.standing_memory(settings) == ""
+
+    assert str(absent) in caplog.text
+    assert caplog.records and caplog.records[0].levelno >= logging.WARNING
+
+
+def test_standing_memory_on_an_existing_empty_directory_says_nothing(memory_dir, caplog):
+    """"There are no notes" is not "I am looking in the wrong place". An operator
+    has to be able to tell those apart, so only one of them warns."""
+    with caplog.at_level(logging.WARNING, logger="hal_mary.memory"):
+        assert memory.standing_memory(settings_for(memory_dir)) == ""
+
+    assert caplog.records == []
+
+
+def test_standing_memory_files_lists_what_will_be_read(memory_dir):
+    """What the status page counts, so it never disagrees with what the prompts
+    actually got."""
+    (memory_dir / "caroline.md").write_text("real", encoding="utf-8")
+    (memory_dir / "league.example.md").write_text("template", encoding="utf-8")
+    (memory_dir / "notes.txt").write_text("not markdown", encoding="utf-8")
+
+    found = memory.standing_memory_files(settings_for(memory_dir))
+
+    assert [path.name for path in found] == ["caroline.md"]
+
+
+def test_standing_memory_files_on_a_missing_directory_is_empty(tmp_path):
+    settings = load_settings(env={}).model_copy(
+        update={
+            "paths": PathsConfig(prompts_dir=tmp_path / "prompts", memory_dir=tmp_path / "gone")
+        }
+    )
+
+    assert memory.standing_memory_files(settings) == []
