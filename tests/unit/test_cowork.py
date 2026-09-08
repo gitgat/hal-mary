@@ -480,17 +480,25 @@ prompt = "Look for news and call report_observation."
 def test_no_read_only_prompt_claims_cowork_itself_cannot_act(settings):
     """It has a browser and is logged into ESPN. Claim what is true.
 
-    `ACTING_TOOLS` covers hal-mary's surface and says nothing about the browser
-    the same session is holding. A prompt that says "you have no tool that could"
-    is false, and a false reassurance is worse than none — it is exactly the
-    sentence an injected instruction would like the model to have believed.
+    This test used to *require* the phrase "hal-mary has given ... only tools
+    that read", on the theory that describing what hal-mary handed over was
+    safely true even though describing Cowork as incapable was not. It is not
+    safely true: the MCP endpoint gives every tool to anyone with `MCP_TOKEN`,
+    with no per-task gating, so a read-only session is holding the acting tools
+    too and can prove it with one `list_tools`. The old assertion therefore
+    pinned the prompt to a claim the model can disprove.
+
+    What survives is the half that was always right — never say it cannot act —
+    plus the instruction that replaces the claim.
+    `tests/unit/test_readonly_prompt_truth.py` holds the fuller version.
     """
     for task in cowork.load_tasks(settings):
         if task.mode != "read_only":
             continue
         lowered = task.prompt.lower()
         assert "you have no tool that could" not in lowered, task.name
-        assert "hal-mary has given" in lowered or "hal-mary gives" in lowered, task.name
+        assert "there is no tool here" not in lowered, task.name
+        assert "do not change anything" in lowered, task.name
 
 
 def test_a_malformed_waiver_day_is_as_loud_as_an_absent_one(conn, settings):
