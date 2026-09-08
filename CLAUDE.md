@@ -392,6 +392,30 @@ empty for exactly that reason.
 - **There is no bye week in `players`.** `season.bye_weeks` reads `board.bye_week` and keys it by
   **normalised name**, because a board row researched before the first sync carries a synthetic
   negative id that will never join to a roster row.
+- **Name the weekday in a cron, never number it.** APScheduler's
+  `CronTrigger.from_crontab` counts `day_of_week` from **Monday**; crontab(5) counts from Sunday.
+  So `0 9 * * 0` — the obvious spelling of "Sunday morning" — fires on **Monday**, after every
+  Sunday game has been played. Use `sun`/`tue`/`wed,sat`. `tests/unit/test_scheduler.py` refuses a
+  digit in that field and asserts the computed `get_next_fire_time`, because asserting the cron
+  *string* renders somewhere catches none of this.
+- **Cadences are read in `scheduler.timezone`, not UTC.** These jobs are timed against NFL
+  kickoffs; "Sunday morning" in UTC is 02:00 Pacific. `scheduler_timezone(settings)` is the one
+  reader, and `misfire_grace_time_s` is set because APScheduler's default grace is *one second* — a
+  fire missed while the loop was blocked is otherwise dropped in silence.
+- **A job may have several cadences.** `JobConfig.cron` takes a string or a list; use
+  `config.crons` / `config.cadence`, never `config.cron`. `lineup_check` has three, because ESPN
+  locks each player at **his own kickoff**: a Thursday starter ruled out on Wednesday is lost by
+  Sunday morning. Each cadence is its own APScheduler id — `lineup_check`, `lineup_check#2` — so
+  `max_instances=1` still means one copy of each.
+- **`season.current_week` reads `LeagueContext.current_week`, not `roster_slots.week`.**
+  `espn.sync` writes every roster row of the current snapshot with a NULL week, so that column
+  looks like a source and is not. The order is ESPN, then the week the last sync stored, then
+  `None` — never the calendar. The fallback is what covers cookies that expired on Friday.
+- **An empty bye list means two different things and must not render as one.**
+  `lineup_check.ByeCheck` carries `checked` (was the week known at all) and `unchecked` (starters
+  with no bye week on file — anyone added after the board was built). Both reach the summary and the
+  lineup card. Silence here reads as "nobody is on a bye", which is the one sentence she must not be
+  told wrongly.
 - **Which jobs are scheduled depends on `scheduler.current_phase`**, re-checked daily by the
   reserved `_phase_check` job. `max_instances=1` and `coalesce=True` on everything. A scheduled run
   opens its own connection and its own `ClaudeRunner` inside its own thread.

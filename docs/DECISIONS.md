@@ -1401,3 +1401,80 @@ ESPN season *year*, read from the environment, and a second `season` attribute i
 the call site that builds `Settings` — which is how this was found. `[research]` also reads more
 accurately: these are how much live state the research jobs put in front of Claude, not facts about
 the season.
+
+
+---
+
+## 2026-09-08 — Weekday names in every cron, and Pacific rather than UTC
+
+**Decision.** Every `cron` in `config.toml` names its weekday (`sun`, `tue`, `wed,sat`), never
+numbers it. `[scheduler].timezone` is `America/Los_Angeles` and `scheduler_timezone()` is the only
+place it is read. `tests/unit/test_scheduler.py` asserts the computed `get_next_fire_time` lands on
+the intended weekday, and separately refuses any digit in a cron's day-of-week field.
+
+**Why.** APScheduler's `CronTrigger.from_crontab` numbers `day_of_week` from **Monday**. crontab(5)
+numbers it from Sunday. Everything shipped in the first cut of this task used the crontab spelling,
+so every weekday job fired **one day late**, verified against the branch's own APScheduler 3.11.3:
+
+```
+0 9 * * 0    lineup_check  intended Sunday   -> Mon 2026-10-12 09:00
+0 8 * * 2    waiver_scan   intended Tuesday  -> Wed 2026-10-07 08:00
+0 7 * * 3,6  news_sweep    intended Wed+Sat  -> Thu + Sun
+0 10 * * 2   weekly_recap  intended Tuesday  -> Wed 2026-10-07 10:00
+```
+
+The bye-week alarm — the single highest-value thing hal-mary produces — would have been written
+after every Sunday game had already kicked off, and waiver claims submitted after ESPN had processed
+them. The job would have run, succeeded, and shown green.
+
+**Nothing caught it**, because the tests asserted that the cron *string* rendered on the status page
+and in `hal-mary jobs`. A cron string is not a fire time. The two tests added here assert the thing
+that matters and refuse the spelling that caused it.
+
+UTC was the second half of the same mistake: these cadences are timed against NFL kickoffs, and
+`0 8 * * sun` in UTC is 01:00 Pacific — before the Sunday inactive lists the lineup prompt is told
+to go and read, and an hour adrift again whenever the clocks change.
+
+`misfire_grace_time_s` (3600) is set for the same family of reasons: APScheduler's default grace is
+**one second**, so a fire missed while the loop was blocked is skipped with only a log line.
+
+---
+
+## 2026-09-08 — The lineup check runs three times a week, because ESPN locks per player
+
+**Decision.** `JobConfig.cron` accepts a string or a list, exposed as `crons` / `cadence`.
+`lineup_check` ships three: Sunday 08:00, Thursday 15:00 and Monday 15:00, Pacific. Each cadence is
+a separate APScheduler registration (`lineup_check`, `lineup_check#2`, `lineup_check#3`) so
+`max_instances=1` still means one copy of each.
+
+**Why.** ESPN's `rosterLocktimeType` on this league is `INDIVIDUAL_GAME`: a player locks at **his
+own kickoff**, not at one deadline for the week. A Thursday-night starter ruled out on Wednesday
+evening is already lost by the time a Sunday-morning check runs, and the same is true of Monday
+night. One weekly run silently covers about two thirds of the games.
+
+They could not share a cron: the hours differ, and folding them into `0 8,15 * * sun,thu,mon` would
+be six web-enabled Opus calls a week instead of three. Cowork's own `cowork/tasks.toml` independently
+arrived at the same sunday/thursday/monday split, which is corroboration rather than coincidence.
+
+---
+
+## 2026-09-08 — "No byes" and "byes not checked" are different sentences
+
+**Decision.** `lineup_check._bye_check` returns a `ByeCheck` carrying `alarms`, `unchecked`
+(starters with no bye week on file) and `checked` (whether the week was known at all). All three
+reach the `job_runs` summary and the lineup card. A run that could not check says
+"DID NOT CHECK BYE WEEKS"; a clean run says "nobody in your lineup is on a bye".
+
+**Why.** Both conditions used to render as an empty alarm list, which is silence, which reads as
+"nobody is on a bye" — the one reassuring sentence that must never be produced by not looking. The
+week goes unknown in an ordinary way (cookies expire on Friday, Sunday's ESPN call returns nothing,
+and now the stored week covers that), and a starter goes unchecked in an even more ordinary one: a
+player claimed off waivers in October was never on the researched board, so `board.bye_week` has no
+row for him.
+
+The job is **not** failed for either. Thinner advice beats none on a Sunday morning — the same rule
+`standing_memory()` follows. It just has to say which it is giving.
+
+**The proper fix is a `players.bye_week` column** filled from ESPN's `proTeamSchedules_wl` view;
+the fixture already exists at `tests/fixtures/espn/pro_schedule.json`. Until then, `unchecked` is
+the honest report of the gap rather than a hidden one.

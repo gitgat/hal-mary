@@ -1840,7 +1840,10 @@ def test_status_lists_every_job_with_its_cadence(db_path: Path):
         login(client)
         text = client.get("/status").text
     assert "lineup_check" in text
-    assert "0 9 * * 0" in text, "the cadence is what says whether it runs at all"
+    assert "0 8 * * sun" in text, "the cadence is what says whether it runs at all"
+    # Every cadence, not just the first: the lineup check has three, and a page
+    # showing one of them says the Thursday game is not covered when it is.
+    assert "0 15 * * thu" in text
 
 
 def test_status_says_which_phase_hal_mary_thinks_it_is_in(db_path: Path):

@@ -110,6 +110,12 @@ draft_window_before_hours = 6
 draft_window_after_hours = 12
 season_days = 150
 phase_cron = "20 4 * * *"
+# Every cadence below is read in this zone, not UTC. The jobs are timed against
+# NFL kickoffs, and "Sunday morning" in UTC is 2am Pacific.
+timezone = "America/Los_Angeles"
+# How late a fire may be and still run. APScheduler defaults to one second, so a
+# fire missed while the loop was blocked is dropped in silence.
+misfire_grace_time_s = 3600
 
 [espn]
 # Transport limits for the raw ESPN reads. Bounded by the pick clock above: a
@@ -182,7 +188,7 @@ tools = ["WebSearch", "WebFetch"]
 timeout_s = 900
 max_budget_usd = 5.0
 enabled = true
-cron = "0 6 * * *"
+cron = "0 6 * * *"          # every morning, before the draft
 
 # The two on-the-clock attempts. Both run with no web tools, and their deadlines
 # are a budget against the pick clock, which this league sets at 90 seconds
@@ -257,7 +263,7 @@ tools = ["WebSearch", "WebFetch"]
 timeout_s = 900
 max_budget_usd = 3.0
 enabled = true
-cron = "0 7 * * 3,6"
+cron = "0 7 * * wed,sat"    # first in the week, then once the weekend has landed
 
 [jobs.waiver_scan]
 model = "opus"
@@ -265,7 +271,7 @@ tools = ["WebSearch", "WebFetch"]
 timeout_s = 900
 max_budget_usd = 3.0
 enabled = true
-cron = "0 8 * * 2"
+cron = "0 8 * * tue"        # before ESPN processes claims on Wednesday
 
 [jobs.lineup_check]
 model = "opus"
@@ -273,7 +279,11 @@ tools = ["WebSearch", "WebFetch"]
 timeout_s = 600
 max_budget_usd = 3.0
 enabled = true
-cron = "0 9 * * 0"
+# Three cadences, not one. ESPN locks each player at HIS OWN kickoff, so a
+# Thursday starter ruled out on Wednesday is lost by Sunday morning. Sunday
+# 08:00 is two hours before the earliest kickoff (10:00 Pacific); Thursday and
+# Monday 15:00 is a little over two hours before those night games.
+cron = ["0 8 * * sun", "0 15 * * thu", "0 15 * * mon"]
 
 [jobs.weekly_recap]
 model = "opus"
@@ -281,7 +291,7 @@ tools = ["WebSearch", "WebFetch"]
 timeout_s = 600
 max_budget_usd = 2.0
 enabled = true
-cron = "0 10 * * 2"
+cron = "0 10 * * tue"       # after the week has finished, with the waiver scan
 
 [cowork]
 # Claude Cowork's scheduled tasks are declared in cowork/tasks.toml; this is how

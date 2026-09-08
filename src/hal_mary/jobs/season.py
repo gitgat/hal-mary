@@ -143,13 +143,25 @@ def bye_weeks(conn: sqlite3.Connection) -> dict[str, int]:
     return byes
 
 
-def current_week(conn: sqlite3.Connection, client: Any = None) -> int | None:
-    """Which NFL week it is, from ESPN if it will say and the database if not.
+def current_week(
+    conn: sqlite3.Connection, settings: Any, client: Any = None
+) -> int | None:
+    """Which NFL week it is: from ESPN if it will say, from the last sync if not.
 
-    ``None`` is a real answer and callers have to handle it: with no week there
-    is no bye check to make, and inventing a week from the calendar would flag
-    the wrong players — which is worse than flagging none, because a wrong bye
-    warning teaches her to ignore the right one.
+    The fallback is the one that matters. The failure it exists for is ordinary:
+    ESPN cookies expire on a Friday, Sunday morning's call comes back with
+    nothing, and the week that Thursday's sync wrote into ``league_settings`` is
+    still perfectly correct. Without it the whole bye check rests on the model.
+
+    ``None`` is a real answer and every caller handles it. There is deliberately
+    no third fallback to the calendar: a week worked out from the date is right
+    every year until the season it is not, and a bye warning against the wrong
+    week either flags healthy players or — much worse — flags nobody, while
+    looking exactly like a week with no byes in it.
+
+    ``roster_slots.week`` is **not** consulted. It looks like a source and is
+    not: ``espn.sync`` writes every row of the current snapshot with a NULL
+    week, so the query that used to be here could only ever return ``None``.
     """
     if client is not None:
         try:
@@ -160,10 +172,13 @@ def current_week(conn: sqlite3.Connection, client: Any = None) -> int | None:
         except Exception:
             log.warning("could not read the current week from ESPN", exc_info=True)
 
-    row = conn.execute("SELECT MAX(week) AS week FROM roster_slots WHERE week IS NOT NULL").fetchone()
-    if row is not None and row["week"]:
-        return int(row["week"])
-    return None
+    from hal_mary.league import LeagueUnknown, load_league_context
+
+    try:
+        stored = load_league_context(conn, settings).current_week
+    except (LeagueUnknown, sqlite3.Error):
+        return None
+    return int(stored) if stored else None
 
 
 def player_names(roster: list[dict[str, Any]]) -> list[str]:

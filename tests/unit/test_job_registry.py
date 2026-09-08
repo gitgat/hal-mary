@@ -12,6 +12,7 @@ Two properties matter more than anything else here:
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 
 import pytest
@@ -115,7 +116,13 @@ def test_run_job_swallows_an_exception_and_records_it(ready, monkeypatch):
 
 
 def test_run_job_swallows_even_a_baseexception_that_is_not_an_exception(ready, monkeypatch):
-    """A job that raises ``KeyboardInterrupt`` is still not allowed to kill serve."""
+    """A ``MemoryError`` out of a research job is not an ``Exception``, and it is
+    still not a reason for the web process to stop serving the draft page.
+
+    ``KeyboardInterrupt`` and ``CancelledError`` are the deliberate exceptions to
+    this and are re-raised — a job that could not be cancelled would outlive a
+    shutdown. See ``test_run_job_re_raises_the_two_that_mean_stop``.
+    """
     conn, settings = ready
 
     def explode(*_):
@@ -218,3 +225,18 @@ def _raiser(message):
         raise sqlite3.OperationalError(message)
 
     return raise_it
+
+
+def test_run_job_re_raises_the_two_that_mean_stop(ready, monkeypatch):
+    """Cancellation is the scheduler shutting down. Swallowing it would make a
+    job impossible to stop, which is the opposite of what this module defends."""
+    conn, settings = ready
+
+    for error in (KeyboardInterrupt, asyncio.CancelledError):
+        def explode(*_, _error=error):
+            raise _error()
+
+        monkeypatch.setitem(registry.JOBS, "fake_stop", _spec(explode))
+        with pytest.raises(error):
+            registry.run_job("fake_stop", conn, settings, runner=None, client=None)
+        assert last_run(conn)["status"] == "error", "and it is still recorded on the way out"

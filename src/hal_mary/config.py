@@ -261,6 +261,16 @@ class SchedulerConfig(_Frozen):
     #: When to re-evaluate the phase. Daily, in the small hours, so the process
     #: moves from pre-draft to in-season on its own rather than at a restart.
     phase_cron: str = "20 4 * * *"
+    #: The timezone every cadence is read in. **Not UTC**, and this is not a
+    #: preference: the jobs are timed against NFL kickoffs, so "Sunday morning"
+    #: in UTC is 2am Pacific — before the Sunday inactive lists the lineup
+    #: prompt is told to go and read, and a whole day off once the clocks change.
+    timezone: str = "America/Los_Angeles"
+    #: How late a fire may be and still run. APScheduler's default is one
+    #: second, so a fire missed while the loop was blocked — a long sync, a
+    #: suspended box — is dropped, and the only trace is a log line nobody
+    #: reads. An hour late is still worth having for every job here.
+    misfire_grace_time_s: int = 3600
 
 
 class EspnConfig(_Frozen):
@@ -431,7 +441,30 @@ class JobConfig(_Frozen):
     timeout_s: int
     max_budget_usd: float
     enabled: bool = True
-    cron: str | None = None
+    #: When it runs. One crontab string, or several — a job can have more than
+    #: one cadence, and the lineup check does: ESPN locks each player at his own
+    #: kickoff rather than once a week, so Thursday and Monday night games need
+    #: their own check and cannot share Sunday morning's hour.
+    #:
+    #: **Name the weekday, never number it.** APScheduler's ``from_crontab``
+    #: counts weekdays from Monday and crontab(5) counts from Sunday, so a digit
+    #: in that field is right only by accident; ``0 9 * * 0`` fires on Monday.
+    #: ``tests/unit/test_scheduler.py`` refuses a digit there.
+    cron: str | list[str] | None = None
+
+    @property
+    def crons(self) -> list[str]:
+        """Every cadence this job has, as a list. Empty means "on demand only"."""
+        if not self.cron:
+            return []
+        if isinstance(self.cron, str):
+            return [self.cron]
+        return [entry for entry in self.cron if entry]
+
+    @property
+    def cadence(self) -> str:
+        """The cadences as one line, for the CLI and the status page."""
+        return ", ".join(self.crons)
 
 
 class Settings(_Frozen):

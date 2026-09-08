@@ -283,3 +283,66 @@ def test_it_runs_with_no_espn_client_at_all(tmp_path):
 
     assert summary
     assert advice_rows(conn)
+
+
+# --- saying so when it could not check --------------------------------------
+#
+# Both of these used to be silent, and silence here reads as "no byes this
+# week" — which is exactly the sentence she must not be told wrongly.
+
+
+def test_an_unknown_week_says_the_byes_were_not_checked(tmp_path):
+    """No ESPN, nothing synced, and a model that did not name the week either.
+    The job still gives a lineup; it must not imply the byes were checked."""
+    answer = {key: value for key, value in ANSWER.items() if key != "week"}
+    conn, settings, runner, _client = ready(tmp_path, [ok_result(answer)])
+
+    summary = lineup_check.run(conn, settings, runner, None)
+
+    assert "not check" in summary.lower() and "bye" in summary.lower(), summary
+    card = advice_rows(conn)[0]
+    assert "bye" in (card["body"] or "").lower()
+    assert "could not work out which" in (card["body"] or "").lower()
+
+
+def test_a_starter_with_no_bye_on_file_is_named_rather_than_skipped(tmp_path):
+    """A player picked up off waivers in October was never on the board, so
+    hal-mary has no bye week for him. Skipping him quietly is the failure."""
+    partial = [row for row in BOARD if row["name"] != "Trey McBride"]
+    conn, settings, runner, client = ready(tmp_path, [ok_result(ANSWER)], board=partial)
+
+    summary = lineup_check.run(conn, settings, runner, client)
+
+    card = advice_rows(conn)[0]
+    assert "Trey McBride" in card["body"]
+    assert "no bye week on file" in card["body"].lower()
+    assert "Trey McBride" in summary
+
+
+def test_a_starter_the_model_gave_a_bye_for_counts_as_checked(tmp_path):
+    """The board not knowing him is fine when this morning's research did."""
+    partial = [row for row in BOARD if row["name"] != "Trey McBride"]
+    answer = dict(
+        ANSWER,
+        starters=[
+            *ANSWER["starters"][:3],
+            dict(ANSWER["starters"][3], bye_week=11),
+        ],
+    )
+    conn, settings, runner, client = ready(tmp_path, [ok_result(answer)], board=partial)
+
+    lineup_check.run(conn, settings, runner, client)
+
+    assert "no bye week on file" not in advice_rows(conn)[0]["body"].lower()
+
+
+def test_a_clean_week_says_the_byes_were_checked_and_were_fine(tmp_path):
+    """"Nothing to do" has to be distinguishable from "nothing was looked at"."""
+    healthy = [dict(row, bye_week=WEEK + 3) for row in BOARD]
+    conn, settings, runner, client = ready(tmp_path, [ok_result(ANSWER)], board=healthy)
+
+    summary = lineup_check.run(conn, settings, runner, client)
+
+    body = advice_rows(conn)[0]["body"].lower()
+    assert "nobody in your lineup is on a bye" in body
+    assert "not check" not in summary.lower()

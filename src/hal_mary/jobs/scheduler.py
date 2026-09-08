@@ -33,8 +33,9 @@ import logging
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -50,6 +51,7 @@ __all__ = [
     "current_phase",
     "default_espn_client",
     "scheduled_run",
+    "scheduler_timezone",
 ]
 
 log = logging.getLogger(__name__)
@@ -136,6 +138,31 @@ def _has_made_picks(conn: sqlite3.Connection) -> bool:
 # --- the scheduler -----------------------------------------------------------
 
 
+def scheduler_timezone(settings: Settings) -> tzinfo:
+    """The zone every cadence is read in — ``scheduler.timezone``, never UTC.
+
+    Not a preference. These jobs are timed against NFL kickoffs: "Sunday
+    morning" read in UTC is 02:00 Pacific, hours before the inactive lists the
+    lineup prompt is told to go and read, and the offset moves by an hour when
+    the clocks change. The box runs UTC; the games do not.
+
+    An unreadable zone falls back to UTC with a loud log line rather than
+    refusing to start. A scheduler running at the wrong hour is a bad day; a
+    process that will not come up is a worse one.
+    """
+    name = settings.scheduler.timezone
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        log.error(
+            "scheduler.timezone %r is not a timezone this box knows, so every job "
+            "is scheduled in UTC — which for a Sunday-morning lineup check is the "
+            "middle of Saturday night, Pacific. Fix it in config.toml.",
+            name,
+        )
+        return UTC
+
+
 @dataclass(frozen=True)
 class SchedulerContext:
     """Everything a scheduled run needs, carried on the scheduler itself.
@@ -171,7 +198,8 @@ def build_scheduler(
     Not started here. The caller starts it — ``web.serve`` does, inside the
     lifespan — so a process that fails to build one still serves pages.
     """
-    scheduler = AsyncIOScheduler(timezone=UTC)
+    zone = scheduler_timezone(settings)
+    scheduler = AsyncIOScheduler(timezone=zone)
     scheduler.hal_mary = SchedulerContext(  # type: ignore[attr-defined]
         settings=settings,
         connect=connect,
@@ -188,11 +216,12 @@ def build_scheduler(
 
     scheduler.add_job(
         _phase_check(scheduler),
-        CronTrigger.from_crontab(settings.scheduler.phase_cron, timezone=UTC),
+        CronTrigger.from_crontab(settings.scheduler.phase_cron, timezone=zone),
         id=PHASE_JOB_ID,
         name="re-check which phase of the season it is",
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=settings.scheduler.misfire_grace_time_s,
         replace_existing=True,
     )
     apply_phase(scheduler, phase)
@@ -209,8 +238,14 @@ def apply_phase(scheduler: AsyncIOScheduler, phase: str) -> list[str]:
     """
     context: SchedulerContext = scheduler.hal_mary  # type: ignore[attr-defined]
     settings = context.settings
+    zone = scheduler_timezone(settings)
 
-    wanted: dict[str, str] = {}
+    # job id -> (job name, cron). A job may have several cadences — the lineup
+    # check has three, because ESPN locks each player at his own kickoff — and
+    # APScheduler holds one trigger per job id, so each cadence is its own
+    # registration. The first keeps the bare name so that the id a human reads
+    # in a log, and the id the status page posts to, is still ``lineup_check``.
+    wanted: dict[str, tuple[str, str]] = {}
     for spec in registry.specs_for_phase(phase):
         config = settings.jobs.get(spec.name)
         if config is None:
@@ -220,19 +255,21 @@ def apply_phase(scheduler: AsyncIOScheduler, phase: str) -> list[str]:
         if not config.enabled:
             log.info("job %s is disabled in config; not scheduling it", spec.name)
             continue
-        if not config.cron:
+        if not config.crons:
             # Deliberate for the on-the-clock jobs: draft_advice has a config
             # entry and no cadence because the draft loop calls it directly.
             continue
-        wanted[spec.name] = config.cron
+        for index, cron in enumerate(config.crons):
+            job_id = spec.name if index == 0 else f"{spec.name}#{index + 1}"
+            wanted[job_id] = (spec.name, cron)
 
     for job in list(scheduler.get_jobs()):
         if job.id != PHASE_JOB_ID and job.id not in wanted:
             scheduler.remove_job(job.id)
 
-    for name, cron in wanted.items():
+    for job_id, (name, cron) in wanted.items():
         try:
-            trigger = CronTrigger.from_crontab(cron, timezone=UTC)
+            trigger = CronTrigger.from_crontab(cron, timezone=zone)
         except ValueError:
             log.error("job %s has an unreadable cron %r; not scheduling it", name, cron)
             continue
@@ -246,17 +283,24 @@ def apply_phase(scheduler: AsyncIOScheduler, phase: str) -> list[str]:
                 bus=context.bus,
             ),
             trigger,
-            id=name,
-            name=registry.get(name).summary or name,
+            id=job_id,
+            name=f"{registry.get(name).summary or name} ({cron})",
             # The two rules that keep one long research call from becoming two.
-            # coalesce collapses a backlog (a laptop that was asleep) into one
-            # run rather than firing every missed hour in a row.
+            # coalesce collapses a backlog (a box that was asleep) into one run
+            # rather than firing every missed hour in a row.
             max_instances=1,
             coalesce=True,
+            # And this is what makes a missed fire run late rather than vanish.
+            # APScheduler's default grace is one second.
+            misfire_grace_time=settings.scheduler.misfire_grace_time_s,
             replace_existing=True,
         )
 
-    log.info("scheduler is in phase %s with jobs: %s", phase, ", ".join(sorted(wanted)) or "none")
+    log.info(
+        "scheduler is in phase %s with jobs: %s",
+        phase,
+        ", ".join(f"{job_id} ({cron})" for job_id, (_, cron) in sorted(wanted.items())) or "none",
+    )
     return sorted(wanted)
 
 

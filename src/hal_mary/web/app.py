@@ -1504,13 +1504,13 @@ def _scheduler_context(conn: sqlite3.Connection, settings: Settings) -> dict[str
             (name,),
         )
         scheduled = bool(
-            config and config.enabled and config.cron and phase in spec.phases
+            config and config.enabled and config.crons and phase in spec.phases
         )
         rows.append(
             {
                 "name": name,
                 "summary": spec.summary,
-                "cron": (config.cron if config else None),
+                "cron": (config.cadence if config else ""),
                 "enabled": bool(config.enabled) if config else False,
                 "phases": ", ".join(sorted(spec.phases)),
                 "scheduled": scheduled,

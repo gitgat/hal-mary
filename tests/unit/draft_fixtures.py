@@ -223,15 +223,19 @@ def seed_synced_league(conn, *, raw: dict[str, Any] | None = None, **overrides: 
         "draft_date": None,
         "roster_slots_json": json.dumps(REAL_ROSTER_SLOTS),
         "raw_json": json.dumps(raw_settings, sort_keys=True),
+        # NULL unless a test says otherwise, which is the state before the first
+        # in-season sync — and the state in which the bye check has no week.
+        "current_week": None,
     }
     row.update(overrides)
     conn.execute(
         """
         INSERT OR REPLACE INTO league_settings
             (id, season, league_id, name, team_count, scoring_type, draft_type,
-             draft_date, roster_slots_json, raw_json, updated_at)
+             draft_date, roster_slots_json, raw_json, updated_at, current_week)
         VALUES (1, :season, :league_id, :name, :team_count, :scoring_type, :draft_type,
-                :draft_date, :roster_slots_json, :raw_json, '2026-09-07T00:00:00+00:00')
+                :draft_date, :roster_slots_json, :raw_json, '2026-09-07T00:00:00+00:00',
+                :current_week)
         """,
         row,
     )

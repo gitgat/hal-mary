@@ -241,7 +241,7 @@ def _cmd_jobs(_args: argparse.Namespace) -> int:
     for name in all_names():
         spec = get(name)
         config = settings.jobs.get(name)
-        cadence = (config.cron if config else None) or "on demand only"
+        cadence = (config.cadence if config else "") or "on demand only"
         if config is not None and not config.enabled:
             cadence += " (turned off)"
         last = conn.execute(

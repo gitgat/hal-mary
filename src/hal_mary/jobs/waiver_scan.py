@@ -260,7 +260,7 @@ def _prompt_values(
     stale: str | None,
     client: Any,
 ) -> dict[str, Any]:
-    week = season.current_week(conn, client)
+    week = season.current_week(conn, settings, client)
     try:
         league = load_league_context(conn, settings)
         scoring = league.scoring_summary

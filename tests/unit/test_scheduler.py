@@ -148,7 +148,9 @@ def test_a_job_turned_off_in_config_is_not_registered(tmp_path):
         tmp_path,
         # The cron is unique to this job, which makes the surrounding lines a
         # safe anchor for flipping exactly one `enabled`.
-        replace={'enabled = true\ncron = "0 8 * * 2"': 'enabled = false\ncron = "0 8 * * 2"'},
+        replace={
+            'enabled = true\ncron = "0 8 * * tue"': 'enabled = false\ncron = "0 8 * * tue"'
+        },
     )
     conn = open_db(tmp_path)
     seed_synced_league(conn, draft_date=DRAFT)
@@ -300,3 +302,125 @@ def test_a_bus_that_throws_does_not_break_the_job(ready, monkeypatch):
     assert conn.execute(
         "SELECT status FROM job_runs ORDER BY id DESC LIMIT 1"
     ).fetchone()["status"] == "ok"
+
+
+# --- the day each job actually fires ----------------------------------------
+#
+# The whole task turns on these. `CronTrigger.from_crontab` numbers weekdays
+# from **Monday**, not from Sunday the way crontab(5) does, so `0 9 * * 0` — the
+# obvious spelling of "Sunday morning" — fires on **Monday**, after every Sunday
+# game has been played. Asserting the cron *string* renders somewhere catches
+# none of that. These assert the computed fire time.
+
+#: Which days each job is meant to run, by name. This is the intent; the cron
+#: strings in config.toml are an implementation of it, and when the two disagree
+#: it is the cron that is wrong.
+INTENDED_DAYS = {
+    "board_build": {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"},
+    # First in the week, and again once the weekend's news has landed.
+    "news_sweep": {"Wed", "Sat"},
+    # Before ESPN processes the week's claims on Wednesday.
+    "waiver_scan": {"Tue"},
+    # Sunday morning, and again for the Thursday and Monday night games —
+    # ESPN locks each player at his own kickoff, not once a week.
+    "lineup_check": {"Sun", "Thu", "Mon"},
+    "weekly_recap": {"Tue"},
+}
+
+#: A Monday noon UTC, so "the next fire" has somewhere to go in every direction.
+FROM = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+
+
+def fire_days(cron: str, zone, count: int = 14) -> list[str]:
+    """The weekday of each of the next ``count`` fire times, as three letters."""
+    from apscheduler.triggers.cron import CronTrigger
+
+    trigger = CronTrigger.from_crontab(cron, timezone=zone)
+    days, previous, now = [], None, FROM
+    for _ in range(count):
+        moment = trigger.get_next_fire_time(previous, now)
+        days.append(moment.strftime("%a"))
+        previous, now = moment, moment
+    return days
+
+
+def test_every_job_fires_on_the_day_it_is_meant_to(tmp_path):
+    """The defect this exists for: `* * 0` means Monday to APScheduler."""
+    settings = make_settings(tmp_path)
+    zone = scheduler.scheduler_timezone(settings)
+
+    for name, intended in INTENDED_DAYS.items():
+        config = settings.job(name)
+        assert config.crons, f"{name} has no cadence at all"
+        fired = set()
+        for cron in config.crons:
+            days = fire_days(cron, zone)
+            assert set(days) <= intended, (
+                f"{name} cron {cron!r} fires on {sorted(set(days) - intended)}, "
+                f"and is meant to run on {sorted(intended)}"
+            )
+            fired |= set(days)
+        assert fired == intended, (
+            f"{name} runs on {sorted(fired)} but is meant to run on {sorted(intended)}"
+        )
+
+
+def test_no_cadence_names_a_weekday_by_number(tmp_path):
+    """A number in the day-of-week field is the bug, whatever number it is.
+
+    APScheduler counts weekdays from Monday and crontab(5) counts from Sunday,
+    so a digit there is right only by accident. Names are unambiguous in both.
+    """
+    settings = make_settings(tmp_path)
+    for name, config in settings.jobs.items():
+        for cron in config.crons:
+            day_of_week = cron.split()[4]
+            assert not any(char.isdigit() for char in day_of_week), (
+                f"[jobs.{name}] cron {cron!r} names weekdays by number; "
+                "use sun/mon/tue/wed/thu/fri/sat"
+            )
+
+
+def test_the_lineup_check_lands_before_sunday_kickoff_in_her_own_timezone(tmp_path):
+    """UTC would put "Sunday morning" at 2am Pacific, before the inactive lists
+    the prompt tells the model to go and read."""
+    settings = make_settings(tmp_path)
+    zone = scheduler.scheduler_timezone(settings)
+    from apscheduler.triggers.cron import CronTrigger
+
+    sundays = [
+        CronTrigger.from_crontab(cron, timezone=zone).get_next_fire_time(None, FROM)
+        for cron in settings.job("lineup_check").crons
+    ]
+    sunday = next(moment for moment in sundays if moment.strftime("%a") == "Sun")
+    local = sunday.astimezone(zone)
+    assert 6 <= local.hour <= 9, f"a Sunday check at {local:%H:%M %Z} is not a morning one"
+
+
+def test_the_scheduler_runs_in_her_timezone_not_utc(tmp_path):
+    settings = make_settings(tmp_path)
+    assert "UTC" not in str(scheduler.scheduler_timezone(settings))
+
+
+def test_a_job_with_several_cadences_gets_one_trigger_each(ready):
+    _conn, settings, connect = ready
+    sched = build(settings, connect, at(days=2))
+
+    ids = job_ids(sched)
+    assert "lineup_check" in ids
+    extra = {job_id for job_id in ids if job_id.startswith("lineup_check#")}
+    assert len(extra) == len(settings.job("lineup_check").crons) - 1
+    for job in sched.get_jobs():
+        if job.id.startswith("lineup_check"):
+            assert job.max_instances == 1
+
+
+def test_a_missed_fire_is_still_run_rather_than_skipped_in_silence(ready):
+    """APScheduler's default grace is one second: a fire missed while the loop
+    was blocked is dropped, and the only trace is a log line nobody reads."""
+    _conn, settings, connect = ready
+    sched = build(settings, connect, at(days=2))
+
+    for job in sched.get_jobs():
+        assert job.misfire_grace_time == settings.scheduler.misfire_grace_time_s
+        assert job.misfire_grace_time > 60

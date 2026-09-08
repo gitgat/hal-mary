@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from dataclasses import dataclass
 from typing import Any
 
 from hal_mary import memory, prompts
@@ -135,7 +136,7 @@ def run(
             "Run `hal-mary sync` first."
         )
 
-    week = season.current_week(conn, client)
+    week = season.current_week(conn, settings, client)
     prompt = prompts.render_prompt(
         settings, PROMPT_FILE, _prompt_values(conn, settings, roster, week, stale)
     )
@@ -157,14 +158,14 @@ def run(
     if week is None and payload is not None:
         week = _positive_int(payload.get("week"))
 
-    alarms = _bye_alarms(conn, roster, payload, week)
+    byes = _bye_check(roster, payload, week)
 
     if payload is None or not payload.get("starters"):
         # The alarm still goes out. It is arithmetic over a roster and a
         # calendar, it never needed the model, and a timed-out research call is
         # no reason to keep quiet about a starter who will score zero.
-        if alarms:
-            _write_bye_alarm(conn, alarms, week)
+        if byes.alarms:
+            _write_bye_alarm(conn, byes.alarms, week)
         log.warning(
             "lineup check produced no usable lineup; the model said: %s",
             (getattr(result, "text", "") or "")[:2000],
@@ -174,26 +175,50 @@ def run(
             or "the lineup research call returned nothing usable"
         )
 
-    _write_lineup(conn, payload, week, alarms)
+    _write_lineup(conn, payload, week, byes)
     _write_notes(conn, payload)
 
-    return _summary(payload, alarms, week)
+    return _summary(payload, byes, week)
 
 
 # --- the bye-week alarm ------------------------------------------------------
 
 
-def _bye_alarms(
-    conn: sqlite3.Connection,
+@dataclass(frozen=True)
+class ByeCheck:
+    """What the bye check found, **and whether it happened at all**.
+
+    The third field is the point. An empty ``alarms`` list means one of two
+    completely different things — "nobody in her lineup is on a bye" and
+    "hal-mary could not check" — and rendering both as silence tells her the
+    reassuring one when the truth is the other. ``unchecked`` is the same
+    problem one player at a time: a man picked up off waivers in October was
+    never on the researched board, so there is no bye week on file for him.
+    """
+
+    #: Starters whose real team does not play this week.
+    alarms: list[dict[str, Any]]
+    #: Starters we have no bye week for at all, by name.
+    unchecked: list[str]
+    #: False when the week itself is unknown, so nothing could be checked.
+    checked: bool
+
+    @property
+    def complete(self) -> bool:
+        """Did every starter get checked against a bye week we actually have?"""
+        return self.checked and not self.unchecked
+
+
+def _bye_check(
     roster: list[dict[str, Any]],
     payload: dict[str, Any] | None,
     week: int | None,
-) -> list[dict[str, Any]]:
-    """Every player in her lineup whose real team does not play this week.
+) -> ByeCheck:
+    """Every starter whose real team does not play this week — and what we missed.
 
     Two sources, and either one is enough:
 
-    * ``board.bye_week``, researched before the draft and joined by name;
+    * ``board.bye_week``, researched before the draft and matched by name;
     * ``bye_week`` on the entry the model just returned, which is the fresher of
       the two because it was looked up on the web minutes ago.
 
@@ -201,26 +226,35 @@ def _bye_alarms(
     where it came from. The asymmetry is deliberate: a false alarm costs her the
     ten seconds it takes to look at ESPN, and a missed one costs every point that
     player would have scored.
+
+    With no week there is nothing to compare against, so the check does not
+    happen — and says so, rather than returning the same empty list a clean week
+    returns.
     """
+    starters = [entry for entry in roster if entry["starting"]]
     if not week:
-        return []
+        return ByeCheck(alarms=[], unchecked=[entry["name"] for entry in starters], checked=False)
 
     from_model = _model_byes(payload)
-    alarms = []
-    for entry in roster:
-        if not entry["starting"]:
-            # A bye on the bench is what a bench is for. Saying so would train
-            # her to ignore the warning that matters.
-            continue
+    alarms: list[dict[str, Any]] = []
+    unchecked: list[str] = []
+    for entry in starters:
+        # A bye on the bench is what a bench is for. Saying so would train her
+        # to ignore the warning that matters.
         key = normalize_name(entry["name"])
+        board_bye = _positive_int(entry.get("bye_week"))
+        model_bye = from_model.get(key)
+        if board_bye is None and model_bye is None:
+            unchecked.append(entry["name"])
+            continue
         sources = []
-        if entry.get("bye_week") and int(entry["bye_week"]) == week:
+        if board_bye == week:
             sources.append("hal-mary's own notes on him")
-        if from_model.get(key) == week:
+        if model_bye == week:
             sources.append("this morning's check of the NFL schedule")
         if sources:
             alarms.append({"player": entry["name"], "slot": entry["slot"], "sources": sources})
-    return alarms
+    return ByeCheck(alarms=alarms, unchecked=unchecked, checked=True)
 
 
 def _model_byes(payload: dict[str, Any] | None) -> dict[str, int]:
@@ -291,7 +325,7 @@ def _write_lineup(
     conn: sqlite3.Connection,
     payload: dict[str, Any],
     week: int | None,
-    alarms: list[dict[str, Any]],
+    byes: ByeCheck,
 ) -> None:
     """The lineup card, then the alarm on top of it.
 
@@ -302,21 +336,27 @@ def _write_lineup(
     label = f"Week {week}" if week else "This week"
     if not headline:
         headline = "Your lineup for this week"
-    body = _lineup_body(payload)
+    body = _lineup_body(payload, byes, week)
 
     season.write_advice(
         conn,
         kind="lineup",
         headline=f"{label}: {headline}",
         body=body,
-        payload={**payload, "week": week, "on_bye": alarms},
+        payload={
+            **payload,
+            "week": week,
+            "on_bye": byes.alarms,
+            "byes_checked": byes.checked,
+            "byes_unchecked": byes.unchecked,
+        },
         source_job=JOB_NAME,
     )
-    if alarms:
-        _write_bye_alarm(conn, alarms, week)
+    if byes.alarms:
+        _write_bye_alarm(conn, byes.alarms, week)
 
 
-def _lineup_body(payload: dict[str, Any]) -> str:
+def _lineup_body(payload: dict[str, Any], byes: ByeCheck, week: int | None) -> str:
     lines = ["**Start these:**"]
     for entry in payload.get("starters") or []:
         lines.append(
@@ -333,8 +373,44 @@ def _lineup_body(payload: dict[str, Any]) -> str:
             "In ESPN: **My Team**, then tap a player and choose **Move** to swap him "
             "with someone on your bench."
         ),
+        "",
+        *_bye_note(byes, week),
     ]
     return "\n".join(lines)
+
+
+def _bye_note(byes: ByeCheck, week: int | None) -> list[str]:
+    """Say what the bye check actually managed, in every case.
+
+    Three different sentences, because they are three different situations and
+    only one of them is reassuring. Saying nothing reads as the reassuring one.
+    """
+    if not byes.checked:
+        return [
+            (
+                "**About bye weeks:** hal-mary **could not work out which NFL week "
+                "it is**, so it did **not** check anyone for a bye. A player whose "
+                "real team is not playing scores zero. Check the ESPN app — it "
+                "shows **BYE** instead of an opponent — before you leave this "
+                "lineup alone."
+            )
+        ]
+    if byes.alarms:
+        names = ", ".join(alarm["player"] for alarm in byes.alarms)
+        line = f"**About bye weeks:** {names} is on a bye — see the card above."
+    else:
+        line = (
+            f"**About bye weeks:** nobody in your lineup is on a bye"
+            f"{f' in week {week}' if week else ''}, so every one of them plays."
+        )
+    if byes.unchecked:
+        line += (
+            "\n\n**Except these, who hal-mary has no bye week on file for:** "
+            + ", ".join(byes.unchecked)
+            + ". They were picked up after the draft research was done. Check them "
+            "in the ESPN app — it shows **BYE** instead of an opponent."
+        )
+    return [line]
 
 
 def _write_notes(conn: sqlite3.Connection, payload: dict[str, Any]) -> None:
@@ -356,13 +432,23 @@ def _write_notes(conn: sqlite3.Connection, payload: dict[str, Any]) -> None:
         memory.write_notes(conn, notes)
 
 
-def _summary(payload: dict[str, Any], alarms: list[dict[str, Any]], week: int | None) -> str:
-    label = f"week {week}" if week else "this week"
+def _summary(payload: dict[str, Any], byes: ByeCheck, week: int | None) -> str:
+    """One line for the ``job_runs`` row and the status page.
+
+    A run that could not check the byes must not read as a run that checked them
+    and found none — that is a green tick standing in for the one thing this job
+    exists to catch.
+    """
+    label = f"week {week}" if week else "week unknown"
     started = len(payload.get("starters") or [])
     line = f"{label}: {started} starters set"
-    if alarms:
-        names = ", ".join(alarm["player"] for alarm in alarms)
+    if byes.alarms:
+        names = ", ".join(alarm["player"] for alarm in byes.alarms)
         line += f" — ON A BYE AND STILL IN THE LINEUP: {names}"
+    if not byes.checked:
+        line += " — DID NOT CHECK BYE WEEKS: hal-mary could not work out which NFL week it is"
+    elif byes.unchecked:
+        line += f" — no bye week on file for {', '.join(byes.unchecked)}"
     return line
 
 

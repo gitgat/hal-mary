@@ -148,7 +148,8 @@ def test_jobs_lists_every_registered_job_with_its_cadence(monkeypatch, capsys, t
     out = capsys.readouterr().out
     assert "lineup_check" in out
     assert "board_build" in out
-    assert "0 9 * * 0" in out, "the cadence is the point of the listing"
+    assert "0 8 * * sun" in out, "the cadence is the point of the listing"
+    assert "0 15 * * thu" in out, "a job with three cadences shows all three"
 
 
 def test_jobs_shows_when_each_one_last_ran(monkeypatch, capsys, tmp_path):

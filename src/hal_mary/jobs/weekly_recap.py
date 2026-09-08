@@ -91,7 +91,7 @@ def run(
     """Write the recap. Raises :class:`JobFailed` when nothing usable came back."""
     stale = season.refresh_from_espn(conn, client)
     roster = season.my_roster(conn, settings)
-    week = season.current_week(conn, client)
+    week = season.current_week(conn, settings, client)
 
     prompt = prompts.render_prompt(
         settings, PROMPT_FILE, _prompt_values(conn, settings, roster, week, stale)
