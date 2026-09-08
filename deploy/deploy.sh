@@ -22,6 +22,22 @@
 # them are set and the defaults are the deployment.
 set -euo pipefail
 
+# The PATH this script needs, not the one it was handed.
+#
+# Ubuntu's default ~/.bashrc returns early for a non-interactive shell, so under
+# `ssh box ~/hal-mary/deploy/deploy.sh` neither ~/.local/bin (uv) nor
+# ~/.npm-global/bin (claude) is on PATH -- while an interactive `ssh box` then
+# running the same line works fine. The asymmetry is the same one
+# `hal_mary.doctor.UNIT_PATH` and the unit's `Environment=PATH=` exist for, and
+# these three must agree; tests/unit/test_deploy.py pins them to each other.
+#
+# The ORDER is why this matters rather than merely being tidy: `git pull` runs
+# before `uv sync`, so without this the checkout advances to the new commit and
+# then the script aborts -- leaving the dependencies and the running service on
+# the old one, with nothing on the box saying it is half-applied.
+PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
+export PATH
+
 # Absolute, and resolved before any `cd`, because the re-exec below runs it again.
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
