@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -139,6 +139,11 @@ class ScheduledTask:
     at: str | None
     next_run: str | None
     notes: tuple[str, ...]
+    #: For the waiver run: the weekday whose processing batch it is aiming at.
+    #: ``None`` for every other task, and when the league's waiver settings are
+    #: unknown. It is not cosmetic — it is what makes "before processing" and
+    #: "after the scan" two separate checks instead of one fuzzy one.
+    targets_processing_on: str | None = None
 
 
 @dataclass(frozen=True)
@@ -310,7 +315,12 @@ def waiver_settings(conn: sqlite3.Connection) -> dict[str, Any]:
         return {"known": False, "reason": "the synced league payload is not readable"}
     acquisition = (raw or {}).get("acquisitionSettings") or {}
     days = acquisition.get("waiverProcessDays") or []
-    hour = acquisition.get("waiverHours")
+    # `waiverProcessHour` is the hour claims are processed. `waiverHours` is a
+    # different number entirely — how long a player sits on waivers before he
+    # clears — and this league sets it to 24, which is not an hour of any day.
+    # Reading the second as the first made the run undatable here and would have
+    # dated it wrongly in any league where it happened to fall under 24.
+    hour = acquisition.get("waiverProcessHour")
     if not days or hour is None:
         return {
             "known": False,
@@ -322,11 +332,12 @@ def waiver_settings(conn: sqlite3.Connection) -> dict[str, Any]:
     # Wednesday this function exists to refuse — and do it silently, which is
     # worse than the gap it was covering, because nothing then says a guess was
     # made.
-    day = str(days[0])
-    if day.strip().lower() not in DAYS:
+    named = [str(day).strip().lower() for day in days]
+    unknown = [day for day in named if day not in DAYS]
+    if unknown:
         return {
             "known": False,
-            "reason": f"the synced waiver processing day is {day!r}, which is not a weekday",
+            "reason": f"the synced waiver processing day is {unknown[0]!r}, which is not a weekday",
         }
     try:
         process_hour = int(hour)
@@ -340,8 +351,9 @@ def waiver_settings(conn: sqlite3.Connection) -> dict[str, Any]:
 
     return {
         "known": True,
-        "process_day": day,
+        "process_days": named,
         "process_hour": process_hour,
+        "waiver_period_hours": acquisition.get("waiverHours"),
         "acquisition_type": acquisition.get("acquisitionType"),
     }
 
@@ -356,6 +368,47 @@ def _zone(name: str) -> ZoneInfo:
         raise CoworkConfigError(
             f"[cowork].timezone is {name!r}, which is not an IANA timezone name"
         ) from None
+
+
+WEEK_MINUTES = 7 * 24 * 60
+
+_CRON_DAYS = {
+    "mon": "monday",
+    "tue": "tuesday",
+    "wed": "wednesday",
+    "thu": "thursday",
+    "fri": "friday",
+    "sat": "saturday",
+    "sun": "sunday",
+}
+
+
+def _scan_minute(settings: Settings) -> int | None:
+    """When hal-mary's waiver scan runs, as a minute of the week.
+
+    ``None`` when there is no scan to be ordered against — an on-demand-only
+    job, or one whose cadence names several weekdays, where "the scan" is not a
+    single moment and the caller must not pretend it is.
+    """
+    job = settings.jobs.get("waiver_scan")
+    if job is None:
+        return None
+    # A job's cadence is one crontab string or several; both shapes reach here.
+    cron = getattr(job, "cron", None)
+    crons = [cron] if isinstance(cron, str) else list(cron or [])
+    if len(crons) != 1:
+        # No cadence, or several: "the scan" is not one moment to order against.
+        return None
+    fields = crons[0].split()
+    if len(fields) != 5:
+        return None
+    weekday = fields[4].lower()
+    if "," in weekday or weekday == "*":
+        return None
+    day = _CRON_DAYS.get(weekday[:3])
+    if day is None or not fields[1].isdigit():
+        return None
+    return DAYS.index(day) * 1440 + int(fields[1]) * 60
 
 
 def _derive_waivers(task: Task, settings: Settings, waivers: dict[str, Any]) -> ScheduledTask:
@@ -379,26 +432,72 @@ def _derive_waivers(task: Task, settings: Settings, waivers: dict[str, Any]) -> 
         if task.lead_minutes is not None
         else settings.cowork.waiver_lead_minutes
     )
+    hour = waivers["process_hour"]
     # Validated by waiver_settings, which reports an unrecognised day as unknown
     # rather than letting one reach here to be defaulted.
-    index = DAYS.index(str(waivers["process_day"]).lower())
-    # An arbitrary week containing that weekday, so subtracting the lead rolls
-    # the day backwards correctly rather than by hand.
-    anchor = datetime(2026, 1, 5, waivers["process_hour"], 0, tzinfo=UTC) + timedelta(days=index)
-    submit_by = anchor - timedelta(minutes=lead)
+    days = list(waivers["process_days"])
+    runs = sorted(DAYS.index(day) * 1440 + hour * 60 for day in days)
+
+    scan = _scan_minute(settings)
+    if scan is None:
+        # Nothing to order against: aim at the first processing run of the week
+        # and say plainly that the ordering was not checked.
+        target = runs[0]
+        gap = WEEK_MINUTES
+    else:
+        # The processing batch this run is for is the next one after the scan
+        # that fills its queue. Anything earlier submits an empty queue, which
+        # reports success and does nothing.
+        ahead = [(((run - scan) % WEEK_MINUTES), run) for run in runs]
+        # A batch at the very same minute as the scan is not "after" it: the two
+        # would race, and the scan losing means an empty queue.
+        ahead = [(delta, run) for delta, run in ahead if delta > 0]
+        gap, target = min(ahead) if ahead else (WEEK_MINUTES, runs[0])
+
+    # A lead longer than the window between the scan and the batch would put the
+    # run in front of the scan again. Halve it rather than drop it: the run still
+    # wants to be early enough that a failure can be noticed and repeated.
+    effective = lead
+    clamped = False
+    if effective >= gap:
+        effective = max(gap // 2, 1)
+        clamped = True
+
+    submit = (target - effective) % WEEK_MINUTES
+    day_name = DAYS[submit // 1440]
+    target_day = DAYS[(target % WEEK_MINUTES) // 1440]
+    notes = [
+        (
+            "Derived from this league: ESPN processes claims on "
+            f"{', '.join(day.title() for day in days)} at {hour:02d}:00, and a claim "
+            f"submitted after that is worth nothing, so this runs "
+            f"{effective // 60} hour(s) before the {target_day.title()} batch."
+        )
+    ]
+    if len(days) > 1:
+        notes.append(
+            f"This league processes on {len(days)} days a week, so a claim can be "
+            f"submitted most days. This run targets {target_day.title()} because it is "
+            "the batch that follows hal-mary's waiver scan."
+        )
+    if clamped:
+        notes.append(
+            f"The configured lead of {lead} minutes was longer than the "
+            f"{gap} minutes between the scan and that batch, so it was shortened "
+            "to keep the run after the scan that fills its queue."
+        )
+    if scan is None:
+        notes.append(
+            "hal-mary's waiver scan has no single weekly time, so this run could "
+            "not be ordered against it. Check by hand that the scan runs first."
+        )
     return ScheduledTask(
         task=task,
-        day=DAYS[submit_by.weekday()],
-        at=submit_by.strftime("%H:%M"),
+        day=day_name,
+        at=f"{(submit % 1440) // 60:02d}:{submit % 60:02d}",
         next_run=None,
-        notes=(
-            (
-                "Derived from this league: ESPN processes claims on "
-                f"{waivers['process_day']} at {waivers['process_hour']:02d}:00, and a claim "
-                f"submitted after that is worth nothing, so this runs {lead // 60} hour(s) "
-                "before it."
-            ),
-        ),
+        targets_processing_on=target_day,
+        notes=tuple(notes),
     )
 
 
@@ -482,15 +581,10 @@ def render(
             entry = _derive_waivers(task, settings, waivers)
         else:
             entry = ScheduledTask(task=task, day=task.day, at=task.at, next_run=None, notes=())
-        resolved.append(
-            ScheduledTask(
-                task=entry.task,
-                day=entry.day,
-                at=entry.at,
-                next_run=_next_run(entry, moment, zone),
-                notes=entry.notes,
-            )
-        )
+        # `replace` rather than a hand-listed rebuild: this used to name every
+        # field, so a field added to ScheduledTask was silently dropped on the
+        # way out and the renderer saw a None it had no way to explain.
+        resolved.append(replace(entry, next_run=_next_run(entry, moment, zone)))
 
     return Schedule(
         timezone=zone_name,

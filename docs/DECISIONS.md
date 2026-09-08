@@ -1616,3 +1616,26 @@ was not is how a session concludes it has finished a list it has not.
 **Would revisit if:** an action ever genuinely needs undoing from hal-mary's side. That is a new
 verb — an `undo` action emitted like any other, with its own row — not a backwards edit of the one
 that already ran.
+## 2026-09-08 — The waiver run is derived from the batch that follows the scan
+
+`cowork.waiver_settings` read `waiverHours` as the hour ESPN processes claims. It is not that. It
+is the length of the waiver period — how long a dropped player sits before clearing. The hour lives
+in `waiverProcessHour`. Every test that covered this wrote `"waiverHours": 10` by hand, so the
+fixture agreed with the bug and could not contradict it. Read against the real payload, which sets
+`waiverHours` to 24, the derivation refused its own input ("24 is not an hour of a day") and the
+waiver run never got a time. It failed closed, which is why nothing noticed.
+
+`waiverProcessDays` is also a list, and this league names six days. Taking `days[0]` modelled a
+weekly waiver run that does not exist here.
+
+Both are now read properly, and the run is aimed at **the processing batch that follows hal-mary's
+own `waiver_scan` job**, with the lead shortened when it would otherwise reach back past the scan.
+That ordering is the same pipeline invariant the lineup jobs have: hal-mary queues the claims and
+Cowork submits them, so a submit run in front of the scan finds an empty queue, reports "nothing to
+do", and is *correct* — the failure says nothing and costs a week of claims.
+
+The guard is a property test over every scan weekday and hour crossed with four processing-day
+shapes, not an example. An example passed by construction, because the derivation adapts to
+wherever the scan is: moving the scan could not make it fail. The property test also has to assert
+the batch is the *next* one — "between the scan and the batch" is satisfied by aiming a week out,
+and the first version of the test passed with the batch chosen by `max` instead of `min`.
