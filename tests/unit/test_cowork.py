@@ -124,10 +124,25 @@ def test_the_shipped_task_file_loads(settings):
     assert len({task.name for task in tasks}) == len(tasks)
 
 
-def test_the_three_jobs_that_matter_are_enabled_and_the_rest_are_not(settings):
-    """The file documents the whole menu; only the three that matter run on day one."""
+def test_only_the_intended_tasks_are_enabled(settings):
+    """The file documents the whole menu; this pins what actually runs.
+
+    Every enabled task is a model call on a schedule, forever, so the set is
+    worth stating rather than drifting. `connector-health` was added on
+    2026-09-08: a daily `get_league` on haiku whose whole job is catching
+    expired ESPN cookies, because that failure is silent and the alternative is
+    finding out on a Sunday morning.
+    """
     enabled = {task.name for task in cowork.load_tasks(settings) if task.enabled}
-    assert enabled == {"lineup-sunday", "lineup-thursday", "waivers", "news-sweep"}
+    assert enabled == {
+        "lineup-sunday",
+        "lineup-thursday",
+        "lineup-monday",
+        "waivers",
+        "news-sweep",
+        "connector-health",
+        "postweek-observations",
+    }
 
 
 def test_every_shipped_task_carries_a_prompt_that_says_the_three_things(settings):
@@ -392,12 +407,55 @@ def test_the_json_form_is_json(conn, settings):
     assert "waivers" in names
 
 
-def test_a_disabled_task_is_still_listed_but_marked(conn, settings):
+def test_a_disabled_task_is_still_listed_but_marked(conn, tmp_path):
+    """The whole menu renders, with `enabled` telling them apart.
+
+    This used to assert that *some* shipped task was disabled, which made it a
+    hostage to configuration: the day an operator turned the last one on, a test
+    about rendering failed for reasons that had nothing to do with rendering.
+    (That day was 2026-09-08.) It now writes a task file of its own.
+    """
+    tasks_file = tmp_path / "tasks.toml"
+    prompt = "Do not change anything. Do not call the acting tools. Report what you see."
+    tasks_file.write_text(
+        f"""
+[[task]]
+name = "on-task"
+purpose = "runs"
+enabled = true
+cadence = "weekly"
+day = "sunday"
+at = "09:00"
+model = "opus"
+mode = "read_only"
+tools = ["get_roster"]
+prompt = "{prompt}"
+
+[[task]]
+name = "off-task"
+purpose = "does not run"
+enabled = false
+cadence = "weekly"
+day = "monday"
+at = "09:00"
+model = "opus"
+mode = "read_only"
+tools = ["get_roster"]
+prompt = "{prompt}"
+""",
+        encoding="utf-8",
+    )
+    base = make_settings(tmp_path)
+    settings = base.model_copy(
+        update={"paths": base.paths.model_copy(update={"cowork_tasks": tasks_file})}
+    )
     synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverProcessHour": 10})
+
     payload = cowork.as_json(cowork.render(conn, settings))
 
     by_name = {entry["name"]: entry for entry in payload["tasks"]}
-    assert any(entry["enabled"] is False for entry in by_name.values())
+    assert by_name["on-task"]["enabled"] is True
+    assert by_name["off-task"]["enabled"] is False
 
 
 # --- the document ------------------------------------------------------------
@@ -688,3 +746,27 @@ def test_the_claim_run_still_lands_before_processing(conn, settings):
     assert submit < (DAY_ORDER.index(target.lower()), 11), (
         f"the claim run is {waivers.day} {waivers.at}, not before {target} 11:00"
     )
+
+
+def test_every_acting_prompt_checks_dependencies_before_it_acts(settings):
+    """A prompt that reports "skipped" must say how a skip arises.
+
+    `pending_actions` returns `dependencies_not_yet_done` for **every** action —
+    the payload has no kind-specific branches, and `actions.add` says outright
+    that a caller can hang a `depends_on` off any of them, claims included. The
+    rule also arrives at runtime in `PLAN_RULES`.
+
+    The waivers prompt nonetheless omitted the check while still telling the run
+    to report "the ones you skipped" — a category nothing in that prompt
+    produced. Relying on the model to correlate step 1's "follow those rules"
+    with a rule delivered separately is thinner than saying it inline, and the
+    dangling reference was the tell.
+    """
+    for task in cowork.load_tasks(settings):
+        if task.mode != "execute":
+            continue
+        lowered = task.prompt.lower()
+        assert "dependencies_not_yet_done" in lowered, (
+            f"{task.name} acts but never checks dependencies_not_yet_done"
+        )
+        assert "skipped" in lowered, f"{task.name} checks dependencies but defines no skip outcome"
