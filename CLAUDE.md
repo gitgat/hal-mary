@@ -76,18 +76,16 @@ uv run pytest tests/unit -x    # fast loop while developing
 uv run hal-mary serve          # web app + draft loop on the LAN; --reload for development
 uv run hal-mary sync           # pull league state and draft picks from ESPN
 uv run hal-mary espn-check     # are the cookies still good? exits nonzero when not
-uv run hal-mary job <name>     # run one job on demand (board_build)
 
+uv run hal-mary job <name>     # run one job on demand, by name
+uv run hal-mary jobs           # list the jobs, their cadence and their last run
 uv run hal-mary cowork-config  # Cowork's scheduled tasks, rendered for this league; --json
-uv run hal-mary job <name>     # run one job on demand
 
 uv run hal-mary doctor         # can this box run hal-mary? nonzero on a fatal problem
 uv run hal-mary migrate        # apply pending schema migrations
 uv run hal-mary backup         # snapshot the database, prune to backup.keep
 
 # the chat page is at /chat; it is the one job with web tools on the request path
-uv run hal-mary job <name>     # run one job on demand, by name
-uv run hal-mary jobs           # list the jobs, their cadence and their last run
 ```
 
 Deployment lives in `deploy/` — a systemd **user** unit, `install.sh` and `deploy.sh` — and the
@@ -168,13 +166,36 @@ empty for exactly that reason.
   badly (401, an outage, a nonsense value) returns `None`, because inventing a week from the
   calendar would move the bye check onto the wrong players, which is worse than not making it.
   Every caller handles `None`; `jobs/season.current_week` falls back to the database and then to
-  the week the model established.
-- **The ESPN fixtures in `tests/fixtures/espn/` are synthetic** until someone runs
-  `uv run python scripts/record_espn_fixtures.py` with real cookies — the one exception is
-  `draft_detail_prepopulated_real_league.json`, built field for field from the real pre-draft
-  payload. No test may reach the network; `tests/conftest.py` blocks all **three** HTTP stacks in
+  the week the model established. **Before kickoff ESPN reports `scoringPeriodId: 0`**, and `None`
+  is the right answer to that too — a `0` is the dangerous one, because it is a number, so it
+  propagates silently, reaches `season.bye_weeks` as a week, matches nobody's bye, and the lineup
+  card says nobody is on a bye.
+- **The ESPN fixtures in `tests/fixtures/espn/` are recorded from the real league**, by
+  `scripts/record_espn_fixtures.py`, and scrubbed on the way out — names, SWIDs, team names, logos
+  and **the league id** all become stable pseudonyms. Two facts about *when* they were recorded are
+  load-bearing: before the draft, so every roster is empty and the board is 96 unfilled slots; and
+  before the season, so `scoringPeriodId` is `0` and `current_week()` is correctly `None`. The
+  hand-built `draft_detail_partial.json` / `_full.json` remain, because a draft in progress cannot
+  be recorded from a league that has not drafted. When a recorded value disagrees with a test,
+  decide which kind it is before touching either — churn reads its expected value **out of the
+  fixture** (`conftest.fixture_player_name`), a real property of the league is pinned with the
+  reason written beside it, and a difference that reveals something about ESPN goes in
+  `docs/DECISIONS.md`. Pasting back whatever the code returns is `assert code == code`.
+  No test may reach the network; `tests/conftest.py` blocks all **three** HTTP stacks in
   play — `httpx` (our raw ESPN reads), `requests` (what `espn-api` uses) and `httpx2` (which arrives
   with the `mcp` SDK). Adding a dependency that brings a fourth means adding it there too.
+- **The league id is a secret and does not look like one.** `record_espn_fixtures` substitutes
+  `FIXTURE_LEAGUE_ID` for it, and `test_no_tracked_file_carries_the_real_league_id` refuses to let
+  the real one into a tracked file. That test exists because the *fix* leaked it: the test written
+  to prove the id gets replaced used the real id as its example. A run of digits reads as data, not
+  as a credential, so nobody flinches at the diff. The guard skips where no `LEAGUE_ID` is
+  configured — CI — and bites on every box that has one. See `docs/DECISIONS.md`.
+- **ESPN's team object carries `name`, not `location`/`nickname`**, and a team slot nobody has
+  claimed omits `owners` and `primaryOwner` **entirely** rather than sending them empty. This league
+  is sized for six and four people have joined, so two of the six arrive that way and
+  `client._owner_name` answers `None` for them. `espn_api`'s `Team` still falls back to
+  `location`+`nickname`, which is why the synthetic fixtures had them and why the scrubber still
+  covers them — a scrubber that drops a field ESPN might send fails open.
 - **`memory/league.md` is generated, gitignored, and contains real people.**
   `hal-mary sync` rewrites it from the live ESPN payload: real leaguemates' names and the league
   id. Only the placeholder `memory/league.example.md` is tracked. Never `git add -f` it, never

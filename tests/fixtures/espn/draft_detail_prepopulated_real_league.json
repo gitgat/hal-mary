@@ -1448,11 +1448,13 @@
   "gameId": 1,
   "id": 1234567,
   "scoringPeriodId": 0,
-  "seasonId": 2025,
+  "seasonId": 2026,
   "segmentId": 0,
   "settings": {
     "draftSettings": {
       "auctionBudget": 200,
+      "availableDate": 1788912000000,
+      "date": 1788915600000,
       "isTradingEnabled": false,
       "keeperCount": 0,
       "keeperCountFuture": 0,
@@ -1472,13 +1474,24 @@
     }
   },
   "status": {
+    "activatedDate": 1788787602433,
+    "createdAsLeagueType": 3,
+    "currentLeagueType": 3,
     "currentMatchupPeriod": 1,
     "finalScoringPeriod": 17,
     "firstScoringPeriod": 1,
     "isActive": true,
+    "isExpired": false,
     "isFull": false,
+    "isPlayoffMatchupEdited": false,
+    "isToBeDeleted": false,
+    "isViewable": false,
+    "isWaiverOrderEdited": false,
     "latestScoringPeriod": 0,
     "previousSeasons": [],
-    "teamsJoined": 4
+    "teamsJoined": 4,
+    "transactionScoringPeriod": 0,
+    "waiverLastExecutionDate": 1788787602433,
+    "waiverProcessStatus": {}
   }
 }

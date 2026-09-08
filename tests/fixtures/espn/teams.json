@@ -1,43 +1,1157 @@
 {
-  "id": 1234567,
-  "seasonId": 2025,
-  "segmentId": 0,
-  "gameId": 1,
-  "scoringPeriodId": 1,
-  "status": {
-    "currentMatchupPeriod": 1,
-    "firstScoringPeriod": 1,
-    "finalScoringPeriod": 17,
-    "latestScoringPeriod": 1,
-    "isActive": true,
-    "previousSeasons": [
-      2023,
-      2024
-    ],
-    "standingsUpdateDate": 1756166400000,
-    "teamsJoined": 4,
-    "waiverLastExecutionDate": 1756166400000
+  "draftDetail": {
+    "drafted": false,
+    "inProgress": false
   },
-  "settings": {
-    "name": "The Gridiron Gauntlet",
-    "size": 4,
-    "isPublic": false,
-    "restrictionType": "NONE",
-    "draftSettings": {
-      "type": "SNAKE",
-      "date": 1756166400000,
-      "timePerSelection": 90,
-      "pickOrder": [
-        3,
-        1,
-        4,
-        2
-      ],
-      "keeperCount": 0,
-      "auctionBudget": 200,
-      "isTradingEnabled": false
+  "gameId": 1,
+  "id": 1234567,
+  "members": [
+    {
+      "displayName": "Person 1",
+      "firstName": "Person 2",
+      "id": "{00000000-0000-0000-0000-000000000001}",
+      "lastName": "Person 3",
+      "notificationSettings": [
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000002}",
+          "type": "TEAM_PLAYER_INJURY"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000003}",
+          "type": "TEAM_PLAYER_AVAILABILITY"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000004}",
+          "type": "TEAM_PLAYER_NEWS"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000005}",
+          "type": "TEAM_PLAYER_STARTBENCH"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000006}",
+          "type": "TEAM_TRADE_OFFER"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000007}",
+          "type": "DRAFT"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000008}",
+          "type": "TEAM_MATCHUP_SCORE"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000009}",
+          "type": "KEY_PLAY"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000010}",
+          "type": "ACHIEVEMENT"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000011}",
+          "type": "REDZONE"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000012}",
+          "type": "ADD_DROP"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000013}",
+          "type": "WEEKLY_RECAP"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000014}",
+          "type": "WAIVERS"
+        },
+        {
+          "enabled": true,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000015}",
+          "type": "CELEBRATION_SHARE"
+        },
+        {
+          "enabled": false,
+          "forId": 4,
+          "id": "{00000000-0000-0000-0000-000000000016}",
+          "type": "TEAM_LIVE_ACTIVITY"
+        }
+      ]
     },
+    {
+      "displayName": "Person 4",
+      "firstName": "Person 5",
+      "id": "{00000000-0000-0000-0000-000000000017}",
+      "lastName": "Person 6",
+      "notificationSettings": [
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000018}",
+          "type": "TEAM_PLAYER_INJURY"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000019}",
+          "type": "TEAM_PLAYER_AVAILABILITY"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000020}",
+          "type": "TEAM_PLAYER_NEWS"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000021}",
+          "type": "TEAM_PLAYER_STARTBENCH"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000022}",
+          "type": "TEAM_TRADE_OFFER"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000023}",
+          "type": "DRAFT"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000024}",
+          "type": "TEAM_MATCHUP_SCORE"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000025}",
+          "type": "KEY_PLAY"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000026}",
+          "type": "ACHIEVEMENT"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000027}",
+          "type": "REDZONE"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000028}",
+          "type": "ADD_DROP"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000029}",
+          "type": "WEEKLY_RECAP"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000030}",
+          "type": "WAIVERS"
+        },
+        {
+          "enabled": true,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000031}",
+          "type": "CELEBRATION_SHARE"
+        },
+        {
+          "enabled": false,
+          "forId": 5,
+          "id": "{00000000-0000-0000-0000-000000000032}",
+          "type": "TEAM_LIVE_ACTIVITY"
+        }
+      ]
+    },
+    {
+      "displayName": "Person 7",
+      "firstName": "Person 8",
+      "id": "{00000000-0000-0000-0000-000000000033}",
+      "lastName": "Person 9",
+      "notificationSettings": [
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000034}",
+          "type": "TEAM_PLAYER_INJURY"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000035}",
+          "type": "TEAM_PLAYER_AVAILABILITY"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000036}",
+          "type": "TEAM_PLAYER_NEWS"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000037}",
+          "type": "TEAM_PLAYER_STARTBENCH"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000038}",
+          "type": "TEAM_TRADE_OFFER"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000039}",
+          "type": "DRAFT"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000040}",
+          "type": "TEAM_MATCHUP_SCORE"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000041}",
+          "type": "KEY_PLAY"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000042}",
+          "type": "ACHIEVEMENT"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000043}",
+          "type": "REDZONE"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000044}",
+          "type": "ADD_DROP"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000045}",
+          "type": "WEEKLY_RECAP"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000046}",
+          "type": "WAIVERS"
+        },
+        {
+          "enabled": true,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000047}",
+          "type": "CELEBRATION_SHARE"
+        },
+        {
+          "enabled": false,
+          "forId": 6,
+          "id": "{00000000-0000-0000-0000-000000000048}",
+          "type": "TEAM_LIVE_ACTIVITY"
+        }
+      ]
+    },
+    {
+      "displayName": "Person 10",
+      "firstName": "Person 11",
+      "id": "{00000000-0000-0000-0000-000000000049}",
+      "lastName": "Person 12",
+      "notificationSettings": [
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000050}",
+          "type": "TEAM_PLAYER_INJURY"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000051}",
+          "type": "TEAM_PLAYER_AVAILABILITY"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000052}",
+          "type": "TEAM_PLAYER_NEWS"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000053}",
+          "type": "TEAM_PLAYER_STARTBENCH"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000054}",
+          "type": "TEAM_TRADE_OFFER"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000055}",
+          "type": "DRAFT"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000056}",
+          "type": "TEAM_MATCHUP_SCORE"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000057}",
+          "type": "KEY_PLAY"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000058}",
+          "type": "ACHIEVEMENT"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000059}",
+          "type": "REDZONE"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000060}",
+          "type": "ADD_DROP"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000061}",
+          "type": "WEEKLY_RECAP"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000062}",
+          "type": "WAIVERS"
+        },
+        {
+          "enabled": true,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000063}",
+          "type": "CELEBRATION_SHARE"
+        },
+        {
+          "enabled": false,
+          "forId": 1,
+          "id": "{00000000-0000-0000-0000-000000000064}",
+          "type": "TEAM_LIVE_ACTIVITY"
+        }
+      ]
+    }
+  ],
+  "schedule": [
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "rosterForCurrentScoringPeriod": {
+          "entries": []
+        },
+        "rosterForMatchupPeriod": {
+          "entries": []
+        },
+        "rosterForMatchupPeriodDelayed": {
+          "entries": []
+        },
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "rosterForCurrentScoringPeriod": {
+          "entries": []
+        },
+        "rosterForMatchupPeriod": {
+          "entries": []
+        },
+        "rosterForMatchupPeriodDelayed": {
+          "entries": []
+        },
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "id": 1,
+      "matchupPeriodId": 1,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "rosterForCurrentScoringPeriod": {
+          "entries": []
+        },
+        "rosterForMatchupPeriod": {
+          "entries": []
+        },
+        "rosterForMatchupPeriodDelayed": {
+          "entries": []
+        },
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "rosterForCurrentScoringPeriod": {
+          "entries": []
+        },
+        "rosterForMatchupPeriod": {
+          "entries": []
+        },
+        "rosterForMatchupPeriodDelayed": {
+          "entries": []
+        },
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "id": 2,
+      "matchupPeriodId": 1,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "rosterForCurrentScoringPeriod": {
+          "entries": []
+        },
+        "rosterForMatchupPeriod": {
+          "entries": []
+        },
+        "rosterForMatchupPeriodDelayed": {
+          "entries": []
+        },
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "rosterForCurrentScoringPeriod": {
+          "entries": []
+        },
+        "rosterForMatchupPeriod": {
+          "entries": []
+        },
+        "rosterForMatchupPeriodDelayed": {
+          "entries": []
+        },
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "id": 3,
+      "matchupPeriodId": 1,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "id": 4,
+      "matchupPeriodId": 2,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "id": 5,
+      "matchupPeriodId": 2,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "id": 6,
+      "matchupPeriodId": 2,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "id": 7,
+      "matchupPeriodId": 3,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "id": 8,
+      "matchupPeriodId": 3,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "id": 9,
+      "matchupPeriodId": 3,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "id": 10,
+      "matchupPeriodId": 4,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "id": 11,
+      "matchupPeriodId": 4,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "id": 12,
+      "matchupPeriodId": 4,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "id": 13,
+      "matchupPeriodId": 5,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "id": 14,
+      "matchupPeriodId": 5,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "id": 15,
+      "matchupPeriodId": 5,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "id": 16,
+      "matchupPeriodId": 6,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "id": 17,
+      "matchupPeriodId": 6,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "id": 18,
+      "matchupPeriodId": 6,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "id": 19,
+      "matchupPeriodId": 7,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "id": 20,
+      "matchupPeriodId": 7,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "id": 21,
+      "matchupPeriodId": 7,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "id": 22,
+      "matchupPeriodId": 8,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "id": 23,
+      "matchupPeriodId": 8,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "id": 24,
+      "matchupPeriodId": 8,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "id": 25,
+      "matchupPeriodId": 9,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "id": 26,
+      "matchupPeriodId": 9,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "id": 27,
+      "matchupPeriodId": 9,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "id": 28,
+      "matchupPeriodId": 10,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "id": 29,
+      "matchupPeriodId": 10,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "id": 30,
+      "matchupPeriodId": 10,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "id": 31,
+      "matchupPeriodId": 11,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "id": 32,
+      "matchupPeriodId": 11,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "id": 33,
+      "matchupPeriodId": 11,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "id": 34,
+      "matchupPeriodId": 12,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "id": 35,
+      "matchupPeriodId": 12,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "id": 36,
+      "matchupPeriodId": 12,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "id": 37,
+      "matchupPeriodId": 13,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "id": 38,
+      "matchupPeriodId": 13,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "id": 39,
+      "matchupPeriodId": 13,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 5,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 4,
+        "totalPoints": 0.0
+      },
+      "id": 40,
+      "matchupPeriodId": 14,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 6,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 3,
+        "totalPoints": 0.0
+      },
+      "id": 41,
+      "matchupPeriodId": 14,
+      "winner": "UNDECIDED"
+    },
+    {
+      "away": {
+        "gamesPlayed": 0,
+        "teamId": 2,
+        "totalPoints": 0.0
+      },
+      "home": {
+        "gamesPlayed": 0,
+        "teamId": 1,
+        "totalPoints": 0.0
+      },
+      "id": 42,
+      "matchupPeriodId": 14,
+      "winner": "UNDECIDED"
+    }
+  ],
+  "scoringPeriodId": 0,
+  "seasonId": 2026,
+  "segmentId": 0,
+  "settings": {
+    "acquisitionSettings": {
+      "acquisitionBudget": 100,
+      "acquisitionLimit": -1,
+      "acquisitionType": "WAIVERS_TRADITIONAL",
+      "finalPlaceTransactionEligible": 0,
+      "isUsingAcquisitionBudget": false,
+      "matchupAcquisitionLimit": -1.0,
+      "matchupLimitPerScoringPeriod": true,
+      "minimumBid": 1,
+      "transactionLockingEnabled": false,
+      "waiverHours": 24,
+      "waiverOrderReset": true,
+      "waiverProcessDays": [
+        "MONDAY",
+        "WEDNESDAY",
+        "THURSDAY",
+        "FRIDAY",
+        "SATURDAY",
+        "SUNDAY"
+      ],
+      "waiverProcessHour": 11
+    },
+    "draftSettings": {
+      "auctionBudget": 200,
+      "availableDate": 1788912000000,
+      "date": 1788915600000,
+      "isTradingEnabled": false,
+      "keeperCount": 0,
+      "keeperCountFuture": 0,
+      "keeperOrderType": "TRADITIONAL",
+      "leagueSubType": "NONE",
+      "orderType": "DRAFT_START",
+      "pickOrder": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "timePerSelection": 90,
+      "type": "SNAKE"
+    },
+    "financeSettings": {
+      "entryFee": 0.0,
+      "miscFee": 0.0,
+      "perLoss": 0.0,
+      "perTrade": 0.0,
+      "playerAcquisition": 0.0,
+      "playerDrop": 0.0,
+      "playerMoveToActive": 0.0,
+      "playerMoveToIR": 0.0
+    },
+    "isAutoReactivate": false,
+    "isCustomizable": true,
+    "isPublic": false,
+    "name": "My 2026 League",
+    "restrictionType": "NONE",
     "rosterSettings": {
+      "autoPilotTypeSupported": "NONE",
+      "isBenchUnlimited": true,
+      "isUsingUndroppableList": true,
+      "lineupLocktimeType": "INDIVIDUAL_GAME",
       "lineupSlotCounts": {
         "0": 1,
         "1": 0,
@@ -46,336 +1160,1114 @@
         "4": 2,
         "5": 0,
         "6": 1,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "11": 0,
+        "12": 0,
+        "13": 0,
+        "14": 0,
+        "15": 0,
         "16": 1,
         "17": 1,
-        "20": 6,
+        "18": 0,
+        "19": 0,
+        "20": 7,
         "21": 1,
-        "23": 1
+        "22": 0,
+        "23": 1,
+        "24": 0
       },
-      "isBenchUnlimited": false,
-      "positionLimits": {},
-      "rosterLocktimeType": "INDIVIDUAL_GAME"
-    },
-    "scoringSettings": {
-      "scoringType": "H2H_POINTS",
-      "playerRankType": "PPR",
-      "matchupTieRule": "NONE",
-      "playoffMatchupTieRule": "NONE",
-      "scoringEnhancementType": null,
-      "homeTeamBonus": 0,
-      "scoringItems": [
-        {
-          "statId": 3,
-          "points": 0.04,
-          "pointsOverrides": {}
-        },
-        {
-          "statId": 4,
-          "points": 4.0,
-          "pointsOverrides": {}
-        },
-        {
-          "statId": 24,
-          "points": 0.1,
-          "pointsOverrides": {}
-        },
-        {
-          "statId": 42,
-          "points": 0.1,
-          "pointsOverrides": {}
-        },
-        {
-          "statId": 43,
-          "points": 6.0,
-          "pointsOverrides": {}
-        },
-        {
-          "statId": 53,
-          "points": 1.0,
-          "pointsOverrides": {}
-        }
+      "lineupSlotStatLimits": {},
+      "moveLimit": -1,
+      "positionLimits": {
+        "0": 0,
+        "1": 4,
+        "2": 8,
+        "3": 8,
+        "4": 3,
+        "5": 3,
+        "6": -1,
+        "7": -1,
+        "8": -1,
+        "9": -1,
+        "10": -1,
+        "11": -1,
+        "12": -1,
+        "13": -1,
+        "14": -1,
+        "15": -1,
+        "16": 3,
+        "17": -1
+      },
+      "rosterLocktimeType": "INDIVIDUAL_GAME",
+      "universeIds": [
+        0
       ]
     },
     "scheduleSettings": {
-      "matchupPeriodCount": 14,
-      "matchupPeriods": {
-        "1": [
-          1
-        ]
-      },
-      "matchupPeriodLength": 1,
-      "playoffTeamCount": 4,
-      "playoffMatchupPeriodLength": 1,
-      "playoffSeedingRule": "TOTAL_POINTS_SCORED",
-      "playoffSeedingRuleBy": 0,
+      "consolationLadderDisabled": false,
       "divisions": [
         {
           "id": 0,
-          "name": "Gauntlet",
-          "size": 4
+          "name": "League Standings",
+          "size": 6
         }
-      ]
-    },
-    "tradeSettings": {
-      "vetoVotesRequired": 2,
-      "deadlineDate": 1763424000000,
-      "allowOutOfUniverse": false,
-      "max": -1,
-      "revisionHours": 24
-    },
-    "acquisitionSettings": {
-      "isUsingAcquisitionBudget": true,
-      "acquisitionBudget": 100,
-      "acquisitionLimit": -1,
-      "acquisitionType": "WAIVERS_TRADITIONAL",
-      "waiverProcessDays": [
-        "WEDNESDAY"
       ],
-      "waiverHours": 24,
-      "waiverProcessHour": 10
+      "matchupPeriodCount": 14,
+      "matchupPeriodLength": 1,
+      "matchupPeriods": {
+        "1": [
+          1
+        ],
+        "2": [
+          2
+        ],
+        "3": [
+          3
+        ],
+        "4": [
+          4
+        ],
+        "5": [
+          5
+        ],
+        "6": [
+          6
+        ],
+        "7": [
+          7
+        ],
+        "8": [
+          8
+        ],
+        "9": [
+          9
+        ],
+        "10": [
+          10
+        ],
+        "11": [
+          11
+        ],
+        "12": [
+          12
+        ],
+        "13": [
+          13
+        ],
+        "14": [
+          14
+        ],
+        "15": [
+          15
+        ],
+        "16": [
+          16,
+          17
+        ]
+      },
+      "periodTypeId": 1,
+      "playoffMatchupPeriodLength": 0,
+      "playoffMatchupPeriodLengthByRound": {
+        "1": 1,
+        "2": 2
+      },
+      "playoffReseed": false,
+      "playoffSeedingRule": "TOTAL_POINTS_SCORED",
+      "playoffSeedingRuleBy": 0,
+      "playoffTeamCount": 4,
+      "variablePlayoffMatchupPeriodLength": true
     },
-    "financeSettings": {
-      "entryFee": 0
+    "scoringSettings": {
+      "allowOutOfPositionScoring": false,
+      "homeTeamBonus": 0,
+      "matchupTieRule": "NONE",
+      "matchupTieRuleBy": 0,
+      "playerRankType": "PPR",
+      "playoffHomeTeamBonus": 0,
+      "playoffMatchupTieRule": "NONE",
+      "playoffMatchupTieRuleBy": 0,
+      "scoringItems": [
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": -2.0,
+          "pointsOverrides": {},
+          "statId": 20
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": -2.0,
+          "pointsOverrides": {},
+          "statId": 72
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": -1.0,
+          "pointsOverrides": {},
+          "statId": 85
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": 5.0
+          },
+          "statId": 89
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": 4.0
+          },
+          "statId": 90
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": 3.0
+          },
+          "statId": 91
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": 1.0
+          },
+          "statId": 92
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": 2.0
+          },
+          "statId": 95
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": 2.0
+          },
+          "statId": 96
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": 2.0
+          },
+          "statId": 97
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": 2.0
+          },
+          "statId": 98
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": 1.0
+          },
+          "statId": 99
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": -1.0
+          },
+          "statId": 123
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": -3.0
+          },
+          "statId": 124
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": -5.0
+          },
+          "statId": 125
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": 5.0
+          },
+          "statId": 128
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": 3.0
+          },
+          "statId": 129
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": 2.0
+          },
+          "statId": 130
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": -1.0
+          },
+          "statId": 132
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": -3.0
+          },
+          "statId": 133
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": -5.0
+          },
+          "statId": 134
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": -6.0
+          },
+          "statId": 135
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.0,
+          "pointsOverrides": {
+            "16": -7.0
+          },
+          "statId": 136
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.04,
+          "pointsOverrides": {},
+          "statId": 3
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.1,
+          "pointsOverrides": {},
+          "statId": 24
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 0.1,
+          "pointsOverrides": {},
+          "statId": 42
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 1.0,
+          "pointsOverrides": {},
+          "statId": 53
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 1.0,
+          "pointsOverrides": {},
+          "statId": 86
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 1.0,
+          "pointsOverrides": {
+            "16": 1.0
+          },
+          "statId": 209
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 2.0,
+          "pointsOverrides": {},
+          "statId": 19
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 2.0,
+          "pointsOverrides": {},
+          "statId": 26
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 2.0,
+          "pointsOverrides": {},
+          "statId": 44
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 2.0,
+          "pointsOverrides": {
+            "16": 2.0
+          },
+          "statId": 206
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 3.0,
+          "pointsOverrides": {},
+          "statId": 80
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 4.0,
+          "pointsOverrides": {},
+          "statId": 4
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 4.0,
+          "pointsOverrides": {},
+          "statId": 77
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 5.0,
+          "pointsOverrides": {},
+          "statId": 198
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 6.0,
+          "pointsOverrides": {},
+          "statId": 25
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 6.0,
+          "pointsOverrides": {},
+          "statId": 43
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 6.0,
+          "pointsOverrides": {},
+          "statId": 63
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 6.0,
+          "pointsOverrides": {
+            "16": 6.0
+          },
+          "statId": 93
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 6.0,
+          "pointsOverrides": {
+            "16": 6.0
+          },
+          "statId": 101
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 6.0,
+          "pointsOverrides": {
+            "16": 6.0
+          },
+          "statId": 102
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 6.0,
+          "pointsOverrides": {
+            "16": 6.0
+          },
+          "statId": 103
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 6.0,
+          "pointsOverrides": {
+            "16": 6.0
+          },
+          "statId": 104
+        },
+        {
+          "isReverseItem": false,
+          "leagueRanking": 0.0,
+          "leagueTotal": 0.0,
+          "points": 6.0,
+          "pointsOverrides": {},
+          "statId": 201
+        }
+      ],
+      "scoringType": "H2H_POINTS"
+    },
+    "size": 6,
+    "tradeSettings": {
+      "allowOutOfUniverse": false,
+      "deadlineDate": 1796230800000,
+      "max": -1,
+      "revisionHours": 24,
+      "vetoVotesRequired": 2
     }
   },
-  "members": [
-    {
-      "id": "{00000000-0000-0000-0000-000000000001}",
-      "displayName": "caroline",
-      "firstName": "Caroline",
-      "lastName": "Reed",
-      "isLeagueManager": false
-    },
-    {
-      "id": "{00000000-0000-0000-0000-000000000002}",
-      "displayName": "dwhitlock",
-      "firstName": "Dana",
-      "lastName": "Whitlock",
-      "isLeagueManager": true
-    },
-    {
-      "id": "{00000000-0000-0000-0000-000000000003}",
-      "displayName": "mellis",
-      "firstName": "Marcus",
-      "lastName": "Ellis",
-      "isLeagueManager": false
-    },
-    {
-      "id": "{00000000-0000-0000-0000-000000000004}",
-      "displayName": "praman",
-      "firstName": "Priya",
-      "lastName": "Raman",
-      "isLeagueManager": false
-    }
-  ],
+  "status": {
+    "activatedDate": 1788787602433,
+    "createdAsLeagueType": 3,
+    "currentLeagueType": 3,
+    "currentMatchupPeriod": 1,
+    "finalScoringPeriod": 17,
+    "firstScoringPeriod": 1,
+    "isActive": true,
+    "isExpired": false,
+    "isFull": false,
+    "isPlayoffMatchupEdited": false,
+    "isToBeDeleted": false,
+    "isViewable": false,
+    "isWaiverOrderEdited": false,
+    "latestScoringPeriod": 0,
+    "previousSeasons": [],
+    "requestedMatchupPeriodId": 1,
+    "teamsJoined": 4,
+    "transactionScoringPeriod": 0,
+    "waiverLastExecutionDate": 1788787602433,
+    "waiverProcessStatus": {}
+  },
   "teams": [
     {
-      "id": 1,
-      "abbrev": "HAL",
-      "location": "Hail",
-      "nickname": "Mary",
-      "name": "Hail Mary",
+      "abbrev": "TM01",
+      "currentProjectedRank": 0,
       "divisionId": 0,
+      "draftDayProjectedRank": 0,
+      "eliminated": false,
+      "eliminationMatchupPeriod": 0,
+      "id": 1,
+      "isActive": false,
+      "isTransactionLocked": false,
+      "logo": "<scrubbed>",
+      "logoType": "VECTOR",
+      "name": "Team 1",
+      "owners": [
+        "{00000000-0000-0000-0000-000000000049}"
+      ],
+      "playoffSeed": 0,
+      "points": 0.0,
+      "pointsAdjusted": 0.0,
+      "pointsDelta": 0.0,
+      "primaryOwner": "{00000000-0000-0000-0000-000000000049}",
+      "rankCalculatedFinal": 0,
+      "rankFinal": 0,
+      "record": {
+        "away": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "division": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "home": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "overall": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        }
+      },
+      "roster": {
+        "entries": [],
+        "tradeReservedEntries": 0
+      },
+      "tradeBlock": {},
+      "transactionCounter": {
+        "acquisitionBudgetSpent": 0,
+        "acquisitions": 0,
+        "drops": 0,
+        "matchupAcquisitionTotals": {},
+        "misc": 0,
+        "moveToActive": 0,
+        "moveToIR": 0,
+        "paid": 0.0,
+        "teamCharges": 0.0,
+        "trades": 0
+      },
+      "waiverRank": 1
+    },
+    {
+      "abbrev": "TM02",
+      "currentProjectedRank": 0,
+      "divisionId": 0,
+      "draftDayProjectedRank": 0,
+      "eliminated": false,
+      "eliminationMatchupPeriod": 0,
+      "id": 2,
+      "isActive": false,
+      "isTransactionLocked": false,
+      "logo": "<scrubbed>",
+      "logoType": "VECTOR",
+      "name": "Team 2",
+      "playoffSeed": 0,
+      "points": 0.0,
+      "pointsAdjusted": 0.0,
+      "pointsDelta": 0.0,
+      "rankCalculatedFinal": 0,
+      "rankFinal": 0,
+      "record": {
+        "away": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "division": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "home": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "overall": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        }
+      },
+      "roster": {
+        "entries": [],
+        "tradeReservedEntries": 0
+      },
+      "tradeBlock": {},
+      "transactionCounter": {
+        "acquisitionBudgetSpent": 0,
+        "acquisitions": 0,
+        "drops": 0,
+        "matchupAcquisitionTotals": {},
+        "misc": 0,
+        "moveToActive": 0,
+        "moveToIR": 0,
+        "paid": 0.0,
+        "teamCharges": 0.0,
+        "trades": 0
+      },
+      "waiverRank": 2
+    },
+    {
+      "abbrev": "TM03",
+      "currentProjectedRank": 0,
+      "divisionId": 0,
+      "draftDayProjectedRank": 0,
+      "eliminated": false,
+      "eliminationMatchupPeriod": 0,
+      "id": 3,
+      "isActive": false,
+      "isTransactionLocked": false,
+      "logo": "<scrubbed>",
+      "logoType": "VECTOR",
+      "name": "Team 3",
+      "playoffSeed": 0,
+      "points": 0.0,
+      "pointsAdjusted": 0.0,
+      "pointsDelta": 0.0,
+      "rankCalculatedFinal": 0,
+      "rankFinal": 0,
+      "record": {
+        "away": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "division": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "home": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "overall": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        }
+      },
+      "roster": {
+        "entries": [],
+        "tradeReservedEntries": 0
+      },
+      "tradeBlock": {},
+      "transactionCounter": {
+        "acquisitionBudgetSpent": 0,
+        "acquisitions": 0,
+        "drops": 0,
+        "matchupAcquisitionTotals": {},
+        "misc": 0,
+        "moveToActive": 0,
+        "moveToIR": 0,
+        "paid": 0.0,
+        "teamCharges": 0.0,
+        "trades": 0
+      },
+      "waiverRank": 3
+    },
+    {
+      "abbrev": "TM04",
+      "currentProjectedRank": 0,
+      "divisionId": 0,
+      "draftDayProjectedRank": 0,
+      "eliminated": false,
+      "eliminationMatchupPeriod": 0,
+      "id": 4,
+      "isActive": false,
+      "isTransactionLocked": false,
+      "logo": "<scrubbed>",
+      "logoType": "CUSTOM_UPLOAD",
+      "name": "Team 4",
       "owners": [
         "{00000000-0000-0000-0000-000000000001}"
       ],
-      "playoffSeed": 1,
+      "playoffSeed": 0,
+      "points": 0.0,
+      "pointsAdjusted": 0.0,
+      "pointsDelta": 0.0,
+      "primaryOwner": "{00000000-0000-0000-0000-000000000001}",
       "rankCalculatedFinal": 0,
-      "waiverRank": 1,
-      "draftDayProjectedRank": 1,
-      "logo": "https://g.espncdn.com/lm-static/logo-packs/core/nfl.svg",
-      "currentProjectedRank": 1,
-      "currentSimulationResults": {
-        "playoffPct": 0.5
-      },
-      "transactionCounter": {
-        "acquisitions": 0,
-        "acquisitionBudgetSpent": 0,
-        "drops": 0,
-        "trades": 0,
-        "moveToIR": 0
-      },
-      "valuesByStat": {},
+      "rankFinal": 0,
       "record": {
-        "overall": {
-          "wins": 0,
+        "away": {
+          "gamesBack": 0.0,
           "losses": 0,
-          "ties": 0,
-          "pointsFor": 0.0,
-          "pointsAgainst": 0.0,
           "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
           "streakLength": 0,
           "streakType": "NONE",
-          "gamesBack": 0.0
+          "ties": 0,
+          "wins": 0
+        },
+        "division": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "home": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "overall": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
         }
       },
       "roster": {
-        "entries": []
-      }
+        "entries": [],
+        "tradeReservedEntries": 0
+      },
+      "tradeBlock": {},
+      "transactionCounter": {
+        "acquisitionBudgetSpent": 0,
+        "acquisitions": 0,
+        "drops": 0,
+        "matchupAcquisitionTotals": {},
+        "misc": 0,
+        "moveToActive": 0,
+        "moveToIR": 0,
+        "paid": 0.0,
+        "teamCharges": 0.0,
+        "trades": 0
+      },
+      "waiverRank": 4
     },
     {
-      "id": 2,
-      "abbrev": "BLZ",
-      "location": "Blitz",
-      "nickname": "Brigade",
-      "name": "Blitz Brigade",
+      "abbrev": "TM05",
+      "currentProjectedRank": 0,
       "divisionId": 0,
+      "draftDayProjectedRank": 0,
+      "eliminated": false,
+      "eliminationMatchupPeriod": 0,
+      "id": 5,
+      "isActive": false,
+      "isTransactionLocked": false,
+      "logo": "<scrubbed>",
+      "logoType": "VECTOR",
+      "name": "Team 5",
       "owners": [
-        "{00000000-0000-0000-0000-000000000002}"
+        "{00000000-0000-0000-0000-000000000017}"
       ],
-      "playoffSeed": 4,
+      "playoffSeed": 0,
+      "points": 0.0,
+      "pointsAdjusted": 0.0,
+      "pointsDelta": 0.0,
+      "primaryOwner": "{00000000-0000-0000-0000-000000000017}",
       "rankCalculatedFinal": 0,
-      "waiverRank": 4,
-      "draftDayProjectedRank": 4,
-      "logo": "https://g.espncdn.com/lm-static/logo-packs/core/nfl.svg",
-      "currentProjectedRank": 4,
-      "currentSimulationResults": {
-        "playoffPct": 0.5
-      },
-      "transactionCounter": {
-        "acquisitions": 0,
-        "acquisitionBudgetSpent": 0,
-        "drops": 0,
-        "trades": 0,
-        "moveToIR": 0
-      },
-      "valuesByStat": {},
+      "rankFinal": 0,
       "record": {
-        "overall": {
-          "wins": 0,
+        "away": {
+          "gamesBack": 0.0,
           "losses": 0,
-          "ties": 0,
-          "pointsFor": 0.0,
-          "pointsAgainst": 0.0,
           "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
           "streakLength": 0,
           "streakType": "NONE",
-          "gamesBack": 0.0
+          "ties": 0,
+          "wins": 0
+        },
+        "division": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "home": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "overall": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
         }
       },
       "roster": {
-        "entries": []
-      }
+        "entries": [],
+        "tradeReservedEntries": 0
+      },
+      "tradeBlock": {},
+      "transactionCounter": {
+        "acquisitionBudgetSpent": 0,
+        "acquisitions": 0,
+        "drops": 0,
+        "matchupAcquisitionTotals": {},
+        "misc": 0,
+        "moveToActive": 0,
+        "moveToIR": 0,
+        "paid": 0.0,
+        "teamCharges": 0.0,
+        "trades": 0
+      },
+      "waiverRank": 5
     },
     {
-      "id": 3,
-      "abbrev": "PLY",
-      "location": "Play Action",
-      "nickname": "Heroes",
-      "name": "Play Action Heroes",
+      "abbrev": "TM06",
+      "currentProjectedRank": 0,
       "divisionId": 0,
+      "draftDayProjectedRank": 0,
+      "draftStrategy": {},
+      "eliminated": false,
+      "eliminationMatchupPeriod": 0,
+      "id": 6,
+      "isActive": false,
+      "isTransactionLocked": false,
+      "logo": "<scrubbed>",
+      "logoType": "CUSTOM_UPLOAD",
+      "name": "Team 6",
       "owners": [
-        "{00000000-0000-0000-0000-000000000003}"
+        "{00000000-0000-0000-0000-000000000033}"
       ],
-      "playoffSeed": 3,
+      "playoffSeed": 0,
+      "points": 0.0,
+      "pointsAdjusted": 0.0,
+      "pointsDelta": 0.0,
+      "primaryOwner": "{00000000-0000-0000-0000-000000000033}",
       "rankCalculatedFinal": 0,
-      "waiverRank": 3,
-      "draftDayProjectedRank": 3,
-      "logo": "https://g.espncdn.com/lm-static/logo-packs/core/nfl.svg",
-      "currentProjectedRank": 3,
-      "currentSimulationResults": {
-        "playoffPct": 0.5
-      },
-      "transactionCounter": {
-        "acquisitions": 0,
-        "acquisitionBudgetSpent": 0,
-        "drops": 0,
-        "trades": 0,
-        "moveToIR": 0
-      },
-      "valuesByStat": {},
+      "rankFinal": 0,
       "record": {
-        "overall": {
-          "wins": 0,
+        "away": {
+          "gamesBack": 0.0,
           "losses": 0,
-          "ties": 0,
-          "pointsFor": 0.0,
-          "pointsAgainst": 0.0,
           "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
           "streakLength": 0,
           "streakType": "NONE",
-          "gamesBack": 0.0
+          "ties": 0,
+          "wins": 0
+        },
+        "division": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "home": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
+        },
+        "overall": {
+          "gamesBack": 0.0,
+          "losses": 0,
+          "percentage": 0.0,
+          "pointsAgainst": 0.0,
+          "pointsFor": 0.0,
+          "streakLength": 0,
+          "streakType": "NONE",
+          "ties": 0,
+          "wins": 0
         }
       },
       "roster": {
-        "entries": []
-      }
-    },
-    {
-      "id": 4,
-      "abbrev": "TDZ",
-      "location": "Touchdown",
-      "nickname": "Zone",
-      "name": "Touchdown Zone",
-      "divisionId": 0,
-      "owners": [
-        "{00000000-0000-0000-0000-000000000004}"
-      ],
-      "playoffSeed": 2,
-      "rankCalculatedFinal": 0,
-      "waiverRank": 2,
-      "draftDayProjectedRank": 2,
-      "logo": "https://g.espncdn.com/lm-static/logo-packs/core/nfl.svg",
-      "currentProjectedRank": 2,
-      "currentSimulationResults": {
-        "playoffPct": 0.5
+        "entries": [],
+        "tradeReservedEntries": 0
       },
+      "tradeBlock": {},
       "transactionCounter": {
-        "acquisitions": 0,
         "acquisitionBudgetSpent": 0,
+        "acquisitions": 0,
         "drops": 0,
-        "trades": 0,
-        "moveToIR": 0
+        "matchupAcquisitionTotals": {},
+        "misc": 0,
+        "moveToActive": 0,
+        "moveToIR": 0,
+        "paid": 0.0,
+        "teamCharges": 0.0,
+        "trades": 0
       },
-      "valuesByStat": {},
-      "record": {
-        "overall": {
-          "wins": 0,
-          "losses": 0,
-          "ties": 0,
-          "pointsFor": 0.0,
-          "pointsAgainst": 0.0,
-          "percentage": 0.0,
-          "streakLength": 0,
-          "streakType": "NONE",
-          "gamesBack": 0.0
-        }
-      },
-      "roster": {
-        "entries": []
-      }
+      "waiverRank": 6,
+      "watchList": []
     }
-  ],
-  "schedule": [
-    {
-      "id": 1,
-      "matchupPeriodId": 1,
-      "winner": "UNDECIDED",
-      "home": {
-        "teamId": 1,
-        "totalPoints": 0.0
-      },
-      "away": {
-        "teamId": 2,
-        "totalPoints": 0.0
-      }
-    },
-    {
-      "id": 2,
-      "matchupPeriodId": 1,
-      "winner": "UNDECIDED",
-      "home": {
-        "teamId": 3,
-        "totalPoints": 0.0
-      },
-      "away": {
-        "teamId": 4,
-        "totalPoints": 0.0
-      }
-    }
-  ],
-  "draftDetail": {
-    "drafted": false,
-    "inProgress": false
-  }
+  ]
 }

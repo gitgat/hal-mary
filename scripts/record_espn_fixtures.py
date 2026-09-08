@@ -3,11 +3,13 @@
 
     uv run python scripts/record_espn_fixtures.py
 
-The fixtures committed today are **synthetic**: hand-built to the shapes in the
-``espn_api`` source because there were no credentials when the ESPN client was
-written. They are good enough to pin the mapping and to keep the library honest,
-and they are not good enough to trust about ESPN's real vocabulary. Run this the
-first time cookies exist, read the diff, and commit it.
+The fixtures committed today are **recorded**, from Caroline's real league
+before its draft. They were synthetic before that — hand-built to the shapes in
+the ``espn_api`` source because there were no credentials when the ESPN client
+was written — and the first recording moved half a dozen fields: the team object
+carries ``name`` and no ``location``/``nickname``, an unclaimed team slot omits
+``owners`` entirely, and a pre-season league reports ``scoringPeriodId: 0``.
+Re-run this when the shape matters again, read the diff, and commit it.
 
 Credentials come from the environment (or ``.env``) via ``hal_mary.config`` and
 are **never written to a file**. Every payload goes through :func:`scrub` first,
@@ -44,6 +46,15 @@ DEFAULT_OUT_DIR = REPO_ROOT / "tests" / "fixtures" / "espn"
 
 REDACTED = "<scrubbed>"
 
+#: The league id every fixture claims to be. The real one is an identifier for a
+#: private league -- `CLAUDE.md` names it alongside leaguemates' names as a thing
+#: that must never reach git, which is why `memory/league.md` is gitignored. The
+#: pseudonymiser handled the names and left this number, so the first real
+#: recording would have committed the one value that lets a stranger look the
+#: league up. It matches the id the hand-built fixtures already use, so recorded
+#: and synthetic fixtures still agree with each other.
+FIXTURE_LEAGUE_ID = 1234567
+
 #: A value under a key matching any of these is redacted whatever it looks like.
 SECRET_KEY_RE = re.compile(
     r"espn_?s2|swid|cookie|token|auth|secret|password|passwd|session|credential|e?mail",
@@ -60,6 +71,12 @@ PERSON_NAME_KEYS = frozenset({"firstName", "lastName", "displayName", "nickName"
 #: often than not, so these are personal data too. ``location`` and ``nickname``
 #: are pseudonymised wherever they appear — over-scrubbing an NFL team's city
 #: costs nothing, because the library resolves pro teams by id.
+#:
+#: **Neither appears in a real 2026 league payload.** ESPN sends one ``name``
+#: field per team now, which is caught by the ``name``-in-a-team rule below;
+#: ``location``/``nickname`` is the older spelling ``espn_api``'s ``Team`` still
+#: falls back to. They stay on this list because a scrubber that stops covering
+#: a field ESPN might still send somewhere fails open, and this one must not.
 TEAM_NAME_KEYS = frozenset({"location", "nickname"})
 
 #: ``abbrev`` is not a separate fact: ESPN *derives* it from the team name, so
@@ -160,7 +177,11 @@ class _Pseudonyms:
         return self._seen[value]
 
 
-def scrub(payload: Any, secrets: list[str] | None = None) -> Any:
+def scrub(
+    payload: Any,
+    secrets: list[str] | None = None,
+    league_id: int | str | None = None,
+) -> Any:
     """Return ``payload`` with every credential-shaped thing removed.
 
     ``secrets`` are the live values read from the environment. Passing them is
@@ -168,6 +189,9 @@ def scrub(payload: Any, secrets: list[str] | None = None) -> Any:
     the only check that cannot be fooled by ESPN inventing a new field name.
     """
     live = [value for value in (secrets or []) if value]
+    # Matched exactly, never by shape: player ids are nine digits too, and
+    # collapsing those would break every fixture that maps a pick to a player.
+    real_league = str(league_id) if league_id not in (None, "") else None
     swids = _Pseudonyms("{{00000000-0000-0000-0000-{n:012d}}}")
     people = _Pseudonyms("Person {n}")
     team_names = _Pseudonyms("Team {n}")
@@ -187,6 +211,8 @@ def scrub(payload: Any, secrets: list[str] | None = None) -> Any:
             return REDACTED
         if OPAQUE_TOKEN_RE.match(value):
             return REDACTED
+        if real_league and real_league in value:
+            return value.replace(real_league, str(FIXTURE_LEAGUE_ID))
         return value
 
     def scrub_field(name: str, value: Any, is_team: bool) -> Any:
@@ -212,6 +238,10 @@ def scrub(payload: Any, secrets: list[str] | None = None) -> Any:
             return [walk(item, key, in_teams) for item in node]
         if isinstance(node, str):
             return scrub_string(node, key)
+        # `bool` is a subclass of `int`; without the guard, True would compare
+        # as 1 and a league id of 1 would turn every flag into a number.
+        if isinstance(node, int) and not isinstance(node, bool) and str(node) == real_league:
+            return FIXTURE_LEAGUE_ID
         return node
 
     return walk(payload)
@@ -404,9 +434,17 @@ def _player_ids(*payloads: Any) -> set[int]:
     return found
 
 
-def _write(out_dir: Path, filename: str, payload: Any, secrets: list[str] | None) -> Path:
+def _write(
+    out_dir: Path,
+    filename: str,
+    payload: Any,
+    secrets: list[str] | None,
+    league_id: int | str | None = None,
+) -> Path:
     path = out_dir / filename
-    path.write_text(json.dumps(scrub(payload, secrets), indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(scrub(payload, secrets, league_id), indent=2) + "\n", encoding="utf-8"
+    )
     return path
 
 
@@ -415,6 +453,7 @@ def record(
     out_dir: Path = DEFAULT_OUT_DIR,
     secrets: list[str] | None = None,
     specs: tuple[FixtureSpec, ...] = SPECS,
+    league_id: int | str | None = None,
 ) -> list[Path]:
     """Fetch every fixture, scrub it, write it. Returns the files written."""
     out_dir = Path(out_dir)
@@ -428,17 +467,17 @@ def record(
     payloads["players_wl"] = _reduce_pro_players(payloads["players_wl"], keep_ids)
 
     written = [
-        _write(out_dir, "league_settings.json", payloads["mSettings"], secrets),
-        _write(out_dir, "roster.json", league, secrets),
-        _write(out_dir, "teams.json", _strip_rosters(league), secrets),
-        _write(out_dir, "free_agents.json", payloads["kona_player_info"], secrets),
-        _write(out_dir, "pro_players.json", payloads["players_wl"], secrets),
-        _write(out_dir, "pro_schedule.json", payloads["proTeamSchedules_wl"], secrets),
-        _write(out_dir, "positional_ratings.json", payloads["mPositionalRatings"], secrets),
+        _write(out_dir, "league_settings.json", payloads["mSettings"], secrets, league_id),
+        _write(out_dir, "roster.json", league, secrets, league_id),
+        _write(out_dir, "teams.json", _strip_rosters(league), secrets, league_id),
+        _write(out_dir, "free_agents.json", payloads["kona_player_info"], secrets, league_id),
+        _write(out_dir, "pro_players.json", payloads["players_wl"], secrets, league_id),
+        _write(out_dir, "pro_schedule.json", payloads["proTeamSchedules_wl"], secrets, league_id),
+        _write(out_dir, "positional_ratings.json", payloads["mPositionalRatings"], secrets, league_id),
     ]
 
     draft_detail = (draft or {}).get("draftDetail", {}) or {}
-    written.append(_write(out_dir, _draft_filename(draft_detail), draft, secrets))
+    written.append(_write(out_dir, _draft_filename(draft_detail), draft, secrets, league_id))
     return written
 
 
@@ -478,6 +517,7 @@ def main() -> int:
         fetch,
         secrets=[settings.espn_s2 or "", settings.swid or ""],
         specs=_scoped_for_week(SPECS, week),
+        league_id=settings.league_id,
     )
     for path in written:
         print(f"wrote {path.relative_to(REPO_ROOT)}")

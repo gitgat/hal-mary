@@ -1,228 +1,60 @@
 {
+  "draftDetail": {
+    "drafted": false,
+    "inProgress": false
+  },
+  "gameId": 1,
+  "id": 1234567,
   "positionAgainstOpponent": {
     "positionalRatings": {
+      "16": {
+        "average": 0.0,
+        "ratingsByOpponent": {}
+      },
       "1": {
         "average": 0.0,
-        "ratingsByOpponent": {
-          "12": {
-            "rank": 14,
-            "average": 0.0
-          },
-          "1": {
-            "rank": 3,
-            "average": 0.0
-          },
-          "4": {
-            "rank": 6,
-            "average": 0.0
-          },
-          "8": {
-            "rank": 10,
-            "average": 0.0
-          },
-          "14": {
-            "rank": 16,
-            "average": 0.0
-          },
-          "33": {
-            "rank": 3,
-            "average": 0.0
-          },
-          "3": {
-            "rank": 5,
-            "average": 0.0
-          },
-          "25": {
-            "rank": 27,
-            "average": 0.0
-          }
-        }
+        "ratingsByOpponent": {}
       },
       "2": {
         "average": 0.0,
-        "ratingsByOpponent": {
-          "12": {
-            "rank": 15,
-            "average": 0.0
-          },
-          "1": {
-            "rank": 4,
-            "average": 0.0
-          },
-          "4": {
-            "rank": 7,
-            "average": 0.0
-          },
-          "8": {
-            "rank": 11,
-            "average": 0.0
-          },
-          "14": {
-            "rank": 17,
-            "average": 0.0
-          },
-          "33": {
-            "rank": 4,
-            "average": 0.0
-          },
-          "3": {
-            "rank": 6,
-            "average": 0.0
-          },
-          "25": {
-            "rank": 28,
-            "average": 0.0
-          }
-        }
+        "ratingsByOpponent": {}
       },
       "3": {
         "average": 0.0,
-        "ratingsByOpponent": {
-          "12": {
-            "rank": 16,
-            "average": 0.0
-          },
-          "1": {
-            "rank": 5,
-            "average": 0.0
-          },
-          "4": {
-            "rank": 8,
-            "average": 0.0
-          },
-          "8": {
-            "rank": 12,
-            "average": 0.0
-          },
-          "14": {
-            "rank": 18,
-            "average": 0.0
-          },
-          "33": {
-            "rank": 5,
-            "average": 0.0
-          },
-          "3": {
-            "rank": 7,
-            "average": 0.0
-          },
-          "25": {
-            "rank": 29,
-            "average": 0.0
-          }
-        }
+        "ratingsByOpponent": {}
       },
       "4": {
         "average": 0.0,
-        "ratingsByOpponent": {
-          "12": {
-            "rank": 17,
-            "average": 0.0
-          },
-          "1": {
-            "rank": 6,
-            "average": 0.0
-          },
-          "4": {
-            "rank": 9,
-            "average": 0.0
-          },
-          "8": {
-            "rank": 13,
-            "average": 0.0
-          },
-          "14": {
-            "rank": 19,
-            "average": 0.0
-          },
-          "33": {
-            "rank": 6,
-            "average": 0.0
-          },
-          "3": {
-            "rank": 8,
-            "average": 0.0
-          },
-          "25": {
-            "rank": 30,
-            "average": 0.0
-          }
-        }
+        "ratingsByOpponent": {}
       },
       "5": {
         "average": 0.0,
-        "ratingsByOpponent": {
-          "12": {
-            "rank": 18,
-            "average": 0.0
-          },
-          "1": {
-            "rank": 7,
-            "average": 0.0
-          },
-          "4": {
-            "rank": 10,
-            "average": 0.0
-          },
-          "8": {
-            "rank": 14,
-            "average": 0.0
-          },
-          "14": {
-            "rank": 20,
-            "average": 0.0
-          },
-          "33": {
-            "rank": 7,
-            "average": 0.0
-          },
-          "3": {
-            "rank": 9,
-            "average": 0.0
-          },
-          "25": {
-            "rank": 31,
-            "average": 0.0
-          }
-        }
-      },
-      "16": {
-        "average": 0.0,
-        "ratingsByOpponent": {
-          "12": {
-            "rank": 29,
-            "average": 0.0
-          },
-          "1": {
-            "rank": 18,
-            "average": 0.0
-          },
-          "4": {
-            "rank": 21,
-            "average": 0.0
-          },
-          "8": {
-            "rank": 25,
-            "average": 0.0
-          },
-          "14": {
-            "rank": 31,
-            "average": 0.0
-          },
-          "33": {
-            "rank": 18,
-            "average": 0.0
-          },
-          "3": {
-            "rank": 20,
-            "average": 0.0
-          },
-          "25": {
-            "rank": 10,
-            "average": 0.0
-          }
-        }
+        "ratingsByOpponent": {}
       }
     }
+  },
+  "scoringPeriodId": 0,
+  "seasonId": 2026,
+  "segmentId": 0,
+  "status": {
+    "activatedDate": 1788787602433,
+    "createdAsLeagueType": 3,
+    "currentLeagueType": 3,
+    "currentMatchupPeriod": 1,
+    "finalScoringPeriod": 17,
+    "firstScoringPeriod": 1,
+    "isActive": true,
+    "isExpired": false,
+    "isFull": false,
+    "isPlayoffMatchupEdited": false,
+    "isToBeDeleted": false,
+    "isViewable": false,
+    "isWaiverOrderEdited": false,
+    "latestScoringPeriod": 0,
+    "previousSeasons": [],
+    "teamsJoined": 4,
+    "transactionScoringPeriod": 0,
+    "waiverLastExecutionDate": 1788787602433,
+    "waiverProcessStatus": {}
   }
 }
