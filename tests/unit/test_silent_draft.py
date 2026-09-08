@@ -22,10 +22,9 @@ from pathlib import Path
 
 import pytest
 
+from conftest import FIXTURE_ENV
 from hal_mary.config import load_settings
 from hal_mary.draft.loop import PHASE_IDLE, PHASE_LIVE
-
-from conftest import FIXTURE_ENV
 
 
 @pytest.fixture

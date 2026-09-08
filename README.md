@@ -5,39 +5,158 @@ A Claude-powered fantasy football advisor for people who do not follow football.
 Caroline is in an ESPN fantasy league. She and Bryan know the rules of the game and nothing else —
 no players, no strategy, no idea how a draft works. `hal-mary` closes that gap: it watches the league
 on ESPN, researches the live internet through the local `claude` binary, and tells her what to do in
-plain English. She makes every click herself; the application never writes to ESPN.
+plain English, assuming no football knowledge at all.
+
+**hal-mary never writes to ESPN itself.** On draft night Caroline makes every click; hal-mary only
+tells her who to take. In season it is the front half of a split — hal-mary decides and emits an
+*action*, and Claude Cowork's browser performs it in ESPN's own interface through the MCP endpoint at
+`/mcp`. **hal-mary decides, Cowork executes, Cowork reports back; Cowork never chooses.** That is a
+security boundary, not a tidy separation: Cowork's browser reads pages five other league members
+write into, so an executor with no discretion gives injected text nothing to redirect. See
+[`docs/COWORK.md`](docs/COWORK.md).
 
 ## What it does
 
-- **Draft day.** Builds a tiered board ahead of time, follows the draft pick by pick, and when her
-  turn approaches, names who to take and why — in seconds, because the research already happened.
-- **In season.** Sweeps injury and role news, scans waivers on Tuesday, checks the lineup before
-  Sunday kickoff, and recaps what happened and what to learn from it.
-- **Any time.** A chat box wired to Claude with web access and the league's full history in memory,
-  so "should I trade this guy?" is a question she can just ask.
+- **Before the draft.** `board_build` researches the live internet every morning and writes a tiered
+  board of about 200 players, with a note and a source URL behind each one. This is the expensive
+  work, and it happens *before* the draft on purpose.
+- **On draft night.** The draft page follows the draft pick by pick. When Caroline is within a
+  couple of picks of her turn, a card appears naming who to take and why — in seconds, because the
+  research already happened and the on-the-clock call runs with web tools switched off.
+- **In season.** It sweeps injury and role news on Wednesday and Saturday, scans the waiver wire on
+  Tuesday before ESPN processes claims, checks the lineup before each of the three kickoff windows,
+  and recaps the week.
+- **Any time.** `/chat` is a chat box wired to Claude with web access and the league's full history
+  in memory, so "should I trade this guy?" is a question she can just ask.
 
-## Running it
+## How you actually use it
+
+hal-mary is a web app you open on a phone. There is nothing to install on the phone and no app
+store: it is a URL on the house network, protected by one shared password (`WEB_PASSWORD`).
+
+The pages, in the order they matter:
+
+| Page | What it is for |
+|---|---|
+| **Draft** (`/draft`, and the home page) | Draft night. The advice card, the board, and a box for entering a pick by hand. |
+| **Ask** (`/chat`) | Any question, answered by Claude with web access and the league's memory. |
+| **To do** (`/advice`) | The standing list of things hal-mary thinks she should do, each tickable off. |
+| **My team** (`/team`) | Her roster, by slot, in words rather than position codes. |
+| **League** (`/league`) | The other teams, the standings and the drawn draft order. |
+| **Status** (`/status`) | Whether anything is broken, what ran recently, and what Cowork did. |
+
+### Day to day, in season
+
+**Nothing.** The scheduler lives inside the `serve` process and runs the in-season jobs on their own
+cadence — see [§6](#6-what-runs-on-its-own-and-when). What Caroline does is open **To do** when it
+has something on it, and **Ask** when she has a question.
+
+The one recurring human job is the ESPN cookies, which expire every few weeks. `/status` says so in a
+red box when they go; [§3](#3-rotating-the-espn-cookies) is how to replace them.
+
+### Draft night
+
+This is the one evening the timing matters, and it has a short checklist.
+
+**A week before, or at least the night before:**
+
+```bash
+uv run hal-mary sync
+uv run hal-mary job board_build     # takes minutes; do not leave it to draft morning
+```
+
+The board is what all of draft night runs against. Without it the advice card falls back to
+arithmetic over whatever the database already knows, which is much worse than the researched board
+and much better than nothing.
+
+**The moment the draft room opens on ESPN:**
+
+1. Open `/draft` on a phone and log in.
+2. Tap **The draft has started** — it sits inside the note saying the pick numbers are provisional,
+   so there is nothing to hunt for.
+
+   That button is an **override, not the mechanism.** The loop finds a live draft on its own within
+   one idle interval of the first pick ESPN publishes. What the button buys is the window *before*
+   pick 1: ESPN draws the real order at the moment the draft opens (this league's `orderType` is
+   `DRAFT_START`), and hal-mary cannot read that order off ESPN's board until a real pick exists. If
+   Caroline is drawn first overall, the pre-draft placeholder puts her opening pick five away — past
+   `draft.advise_within_picks` — and no card is written for the pick she is actually on. The button
+   syncs and switches to the five-second cadence straight away, closing that window.
+3. Eyeball "on the clock" on the draft page against ESPN's own draft room for two picks.
+
+   Do this even when the numbers look plausible. A wrong draft order is a *silent* failure: the
+   page, the advice card and the loop all run the same snake arithmetic over the same list, so they
+   agree with each other while all three are wrong, and nothing raises a flag. A human comparing two
+   screens is the only thing that catches it.
+
+**During the draft**, the card appears on its own when she is within `draft.advise_within_picks` of
+her turn. She reads it, and she makes the pick in ESPN herself.
+
+**If ESPN is not cooperating** — no cookies, a loop that would not start (the page says so in a band
+across the top), or ESPN simply not publishing picks — the draft still works. Type each pick into
+**Mark him taken** on the draft page as it happens and hal-mary advises from that. With the
+commented-out `[league]` section of [`config.toml`](config.toml) filled in, hal-mary can run an
+entire draft with no ESPN access at all. In that mode nothing ever reads the drawn order, so step 2
+above is the *only* thing correcting it and step 3 is the only thing checking it — and the page keeps
+saying the numbers are provisional for exactly that reason.
+
+**Do not stop to rotate ESPN cookies mid-draft.** The advisor runs against a board built beforehand
+and picks can be entered by hand, so a dead cookie costs the automatic pick feed and nothing else.
+
+## Trying it on a laptop
+
+Everything below the runbook is about the production VM. To run it from a checkout:
 
 ```bash
 uv sync
-cp .env.example .env        # fill in ESPN cookies and league id
-uv run hal-mary doctor      # is this box able to run hal-mary at all?
-uv run hal-mary espn-check  # check the ESPN cookies work
-uv run hal-mary sync        # pull league state
-uv run hal-mary job board_build   # research the draft board (do this before the draft)
-uv run hal-mary jobs        # what runs on its own, when, and how it went last time
-uv run hal-mary serve       # web app, draft loop and scheduler; prints the URL for a phone
+cp .env.example .env         # then fill it in — see §9.1
+uv run hal-mary doctor       # can this box run hal-mary at all?
+uv run hal-mary espn-check   # do the ESPN cookies work?
+uv run hal-mary sync         # pull league state; writes memory/league.md
+uv run hal-mary serve        # prints the LAN URL to open on a phone
 ```
 
-In season nothing needs running by hand: the scheduler lives in the `serve` process and picks its
-jobs from the phase it is in — a nightly board build before the draft, then news, waivers, lineups
-and the weekly recap after it. `hal-mary job <name>` runs any one of them now, and the status page
-has the same button.
+`doctor` is the fastest answer to "what is still missing". It touches no network and spawns no
+process, so it is safe to run at any time, including during a draft.
 
-See [`docs/SETUP.md`](docs/SETUP.md) for first-time setup (ESPN credentials, league ids, the
-Claude login), the **runbook below** for running it as a service, [`CLAUDE.md`](CLAUDE.md) for
-conventions and commands, [`docs/superpowers/specs/`](docs/superpowers/specs/) for the design of
-record, and [`docs/DECISIONS.md`](docs/DECISIONS.md) for why it is built this way.
+**What "working" looks like at each step:**
+
+| Step | Working |
+|---|---|
+| `uv sync` | exits 0; `uv run hal-mary --help` lists nine subcommands |
+| `doctor` | every line `[ok ]`, and the last line says nothing fatal |
+| `espn-check` | exits 0 and prints a line naming the league |
+| `sync` | prints team, player, roster-slot and free-agent counts, and creates `memory/league.md` |
+| `job board_build` | prints something like `200 players on the board, 200 notes` |
+| `serve` | `curl -fsS http://127.0.0.1:8080/healthz` answers `{"status":"ok"}` |
+
+Development commands live in [`CLAUDE.md`](CLAUDE.md); `uv run pytest` and
+`uv run ruff check src tests scripts` are what CI runs on every push.
+
+## Where the documentation is
+
+| Document | What is in it |
+|---|---|
+| **This file**, below | The runbook: installing, deploying, logs, cookies, backups, MCP, configuration. |
+| [`docs/SETUP.md`](docs/SETUP.md) | The four things a human does by hand before hal-mary can see anything. |
+| [`docs/COWORK.md`](docs/COWORK.md) | Connecting Claude Cowork as hal-mary's hands, and the exact scheduled prompts. |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Why it is built this way. Read the entry before re-opening a decision. |
+| [`docs/superpowers/specs/2026-09-07-hal-mary-design.md`](docs/superpowers/specs/2026-09-07-hal-mary-design.md) | The design of record. |
+| [`docs/superpowers/specs/2026-09-07-cowork-manager-design.md`](docs/superpowers/specs/2026-09-07-cowork-manager-design.md) | The decide/execute split, and why it is a security boundary. |
+| [`CLAUDE.md`](CLAUDE.md) | Conventions, hard rules and gotchas for anyone changing the code. |
+
+## Contents
+
+- [Runbook](#runbook) — [where everything is](#where-everything-is)
+- [1. First install, from nothing](#1-first-install-from-nothing)
+- [2. Is it broken, and which kind of broken?](#2-is-it-broken-and-which-kind-of-broken)
+- [3. Rotating the ESPN cookies](#3-rotating-the-espn-cookies)
+- [4. Deploying a change](#4-deploying-a-change)
+- [5. Backups, and restoring from one](#5-backups-and-restoring-from-one)
+- [6. What runs on its own, and when](#6-what-runs-on-its-own-and-when)
+- [7. Connecting Claude to hal-mary over MCP](#7-connecting-claude-to-hal-mary-over-mcp)
+- [8. Command reference](#8-command-reference)
+- [9. Configuration reference](#9-configuration-reference) — [the `.env` file](#91-the-env-file), [config.toml](#92-configtoml-section-by-section)
 
 ---
 
@@ -60,7 +179,8 @@ hal-mary runs on its own VM as a **systemd user service**. Everything below is d
 | The unit files | `~/.config/systemd/user/hal-mary*.{service,timer}` |
 | Their source | `~/hal-mary/deploy/` — edited there, copied across by `install.sh` |
 | Logs | the systemd journal; there is no log file |
-| The web app | `http://192.168.1.205:8080`, from a phone on the LAN |
+| The web app | `https://chaos-theory.thehalf.io` (Traefik, LAN-only) or `http://192.168.1.205:8080` direct |
+| The MCP endpoint | `https://mcp.thehalf.io/mcp` — a different door with a different key; see §7 |
 
 ### Always use the FQDN or the IP. Never `ssh bryan@hal-mary`.
 
@@ -80,6 +200,8 @@ and look at the answer.)
 ---
 
 ## 1. First install, from nothing
+
+Seven steps, in order. Steps 1.3 and 1.5 are the two no script can do for you.
 
 ### 1.1 Create the VM
 
@@ -108,6 +230,9 @@ Deliberately no Docker and no Claude Code plugins — hal-mary invokes `claude` 
 `--setting-sources "" --strict-mcp-config`, so every call ignores installed plugins and MCP servers
 by design.
 
+**Working:** `ssh bryan@hal-mary.thehalf.io 'ls ~/hal-mary-data && ~/.local/bin/uv --version'`
+answers without error.
+
 ### 1.3 Log `claude` in — the one step no script can do
 
 ```bash
@@ -121,8 +246,9 @@ which is the whole reason hal-mary is a systemd *user* unit rather than a system
 it is not in a container.
 
 Until this is done, hal-mary serves every page and produces **no advice at all**. `install.sh`
-refuses to proceed without it. Confirm with `claude -p hello`; "Not logged in · Please run /login"
-means it is not done.
+refuses to proceed without it.
+
+**Working:** `claude -p hello` answers. "Not logged in · Please run /login" means it is not done.
 
 ### 1.4 Get the code onto the box
 
@@ -136,14 +262,21 @@ with a remote it can fast-forward from.
 
 ### 1.5 Fill in `.env`
 
+Every key, what it is and where it comes from, is in [§9.1](#91-the-env-file). The fast path:
+
 ```bash
 cd ~/hal-mary
 python3 scripts/espn-auth.py     # asks for the cookies, verifies them, finds the team id
 ```
 
 That script writes `~/hal-mary/.env` at mode 0600 and **merges** — it leaves keys it did not ask
-about alone. Or copy `.env.example` and fill it in by hand; [`docs/SETUP.md`](docs/SETUP.md) says
-where each value comes from.
+about alone. It prompts for `ESPN_S2`, `SWID`, `LEAGUE_ID`, `TEAM_ID`, `SEASON` and (if it is not
+already set) `WEB_PASSWORD`, and it writes nothing if ESPN rejects the cookies, so a bad paste costs
+nothing. Or copy `.env.example` and fill it in by hand.
+
+**`MCP_TOKEN` is not one of the keys it asks for.** Add it by hand if Claude Cowork or Claude Desktop
+is going to connect — [§7](#7-connecting-claude-to-hal-mary-over-mcp). Leave it out and `/mcp`
+answers 503 to everything, which is the correct closed state.
 
 **`DB_PATH` may be left empty.** It then defaults to `~/hal-mary-data/hal.db`, which is where it
 belongs. Writing it out explicitly is still clearer:
@@ -162,6 +295,8 @@ The other rule is the filesystem: `~/hal-mary-data` is on the VM's **own disk**.
 every machine in this homelab is a TrueNAS NFS export, and **SQLite on NFS corrupts**. Doctor checks
 that too and refuses an install onto a network mount.
 
+**Working:** `uv run hal-mary doctor` reports `environment  every required key is set in .env`.
+
 ### 1.6 Install
 
 ```bash
@@ -170,8 +305,8 @@ that too and refuses an install onto a network mount.
 
 It checks everything before it installs anything — `uv`, the checkout, a populated `.env`, a
 writable data directory, and then `hal-mary doctor`, which is where "claude is not logged in" is
-caught. If any of that fails, the box is left exactly as it was. Then it copies the three unit files
-into `~/.config/systemd/user/`, enables linger, starts `hal-mary.service` and
+caught. If any of that fails, the box is left exactly as it was. Then it applies migrations, copies
+the three unit files into `~/.config/systemd/user/`, enables linger, starts `hal-mary.service` and
 `hal-mary-backup.timer`, and waits for `/healthz` to answer before claiming success.
 
 If `doctor` refuses and you are certain it is wrong — the `claude` login check reads an undocumented
@@ -187,32 +322,46 @@ path in as it installs; when it is the default the installed file is byte-identi
 ### 1.7 Verify
 
 ```bash
-systemctl --user status hal-mary
+systemctl --user status hal-mary                      # active (running)
 curl -fsS http://127.0.0.1:8080/healthz               # {"status":"ok"}
-systemctl --user list-timers hal-mary-backup.timer
+systemctl --user list-timers hal-mary-backup.timer    # a NEXT time, not a blank
 ```
 
-Then open `http://192.168.1.205:8080` on a phone on the LAN, log in with `WEB_PASSWORD`, and press
-**Sync** on the status page.
+Then open `https://chaos-theory.thehalf.io` on a phone on the LAN — or
+`http://192.168.1.205:8080` if Traefik is not up — log in with `WEB_PASSWORD`, and press
+**Sync** on the status page. The problems box at the top of `/status` should be empty afterwards.
+
+Last, seed the board so there is something to advise from:
+
+```bash
+ssh bryan@hal-mary.thehalf.io 'cd ~/hal-mary && uv run hal-mary job board_build'
+```
 
 ---
 
 ## 2. Is it broken, and which kind of broken?
 
-There are two completely different failures with two different answers, and getting this backwards
-costs an hour.
+There are several completely different failures with different answers, and getting this backwards
+costs an hour. Find the symptom first.
 
 | Symptom | The question | Where to look |
 |---|---|---|
-| The page will not load at all | Is the **service** running? | `systemctl --user status hal-mary` |
-| Pages load; ESPN data is stale, sync fails, a red box mentions 401 | Have the **ESPN cookies** expired? | the **`/status`** page in the app |
-| Pages load; advice is generic or never arrives | Is **`claude`** working? | `/status` has a Claude row — then `journalctl` |
+| The page will not load at all | Is the **service** running? | `systemctl --user status hal-mary` — then [restarting](#restarting) |
+| `HAL_MARY_ENV points at ... which is not a file` in the journal | Has `.env` been moved or deleted? | [below](#hal_mary_env-names-a-file-that-is-not-there) |
+| Pages load; ESPN data is stale, sync fails, a red box mentions 401 | Have the **ESPN cookies** expired? | `/status`, then [§3](#3-rotating-the-espn-cookies) |
+| Pages load; advice is generic, thin, or never arrives | Is **`claude`** working? | `/status` has a Claude row — then `journalctl` |
+| `claude: command not found` in the journal | Is the unit's **PATH** right? | [below](#claude-command-not-found-in-the-journal) |
 | Advice reads as if it has forgotten who Caroline is | Are the **paths** right? | the "Where the files are" card on `/status` |
+| Nothing recurring has run for days | Did the **scheduler** start, and what phase does it think it is? | the "What runs on its own" card on `/status`; `uv run hal-mary jobs` |
+| The draft page shows frozen picks | Did the **draft loop** start? | a band across the top of `/draft` says why, if not |
+| The draft page says the pick numbers are provisional, all night | Has the drawn order ever been read? | expected with hand-entered picks — see [draft night](#draft-night) |
+| A Claude connector says 503, 401 or 404 on `/mcp` | Is `MCP_TOKEN` set, and is the route right? | [§7](#7-connecting-claude-to-hal-mary-over-mcp) |
+| The nightly backup has not run | Is the **timer** enabled? | `systemctl --user list-timers hal-mary-backup.timer` — [§5](#5-backups-and-restoring-from-one) |
 
 **`systemctl` answers "is the process up". `/status` answers everything else.** That page is built
 for exactly this: every problem it can detect goes in a red box at the top — missing `.env` keys, an
 ESPN 401, a missing `claude`, a missing memory directory, a sync that failed — and it lists every
-resolved path with whether it exists.
+resolved path with whether it exists, what has run recently, and what Cowork did.
 
 That is also why the service **boots even when something is wrong**. A unit that refused to start
 because the memory directory had gone missing would be down at 2am with nobody watching, and the one
@@ -251,7 +400,7 @@ systemctl --user reset-failed hal-mary
 systemctl --user start hal-mary
 ```
 
-### `HAL_MARY_ENV points at ... which is not a file`
+### `HAL_MARY_ENV` names a file that is not there
 
 The unit names `~/hal-mary/.env` explicitly, and the config loader refuses to start when a path it
 was *told* to use is not there — a typo'd path that silently loaded no secrets is the failure that
@@ -274,6 +423,12 @@ systemctl --user show hal-mary -p Environment
 If `.npm-global/bin` is missing from it, the installed unit is out of date with
 `~/hal-mary/deploy/hal-mary.service`. Re-run `install.sh` (or fix it by hand and
 `systemctl --user daemon-reload && systemctl --user restart hal-mary`).
+
+### `cannot serve: WEB_PASSWORD not set`
+
+`serve` refuses to start without it, and this is the only thing it refuses over. The app binds every
+interface on the house network and the database it serves holds live ESPN session cookies, so
+"start anyway with no password" is not an option it offers. Set `WEB_PASSWORD` in `.env` and restart.
 
 ---
 
@@ -371,7 +526,7 @@ changed nothing that matters, if:
 
 It prints the previous commit at the top and again at the end. That is the SHA to roll back to.
 
-Two things worth knowing:
+Three things worth knowing:
 
 - **`memory/league.md` is generated and gitignored.** A checkout that still tracks it receives a
   deletion on pull, and git refuses when the local copy differs. That refusal is correct — the file
@@ -440,7 +595,7 @@ systemctl --user stop hal-mary                                 # 1. stop the wri
 cd ~/hal-mary-data
 mv hal.db hal.db.broken && rm -f hal.db-wal hal.db-shm         # 2. the bad one aside, and its
                                                                #    sidecars with it
-cp backups/hal-20261103T041700Z.db hal.db                      # 3. the snapshot you want
+cp backups/hal-<timestamp>.db hal.db                           # 3. the snapshot you want
 sqlite3 hal.db "PRAGMA integrity_check; SELECT count(*) FROM notes;"
 systemctl --user start hal-mary                                # 4.
 ```
@@ -457,59 +612,339 @@ for copies. It is only running the live database from there that corrupts.
 
 ---
 
-## 6. What is and is not running
+## 6. What runs on its own, and when
 
-`hal-mary serve` is the whole service. It runs:
+`hal-mary serve` is the whole service. One process, three things inside it:
 
-- the **web app** — status, team, league, and the draft page;
-- the **draft loop**, on its own thread, when a draft is live. If it cannot start — no ESPN
-  credentials, for instance — that is logged as a warning and the app serves anyway, because picks
-  can be entered by hand and a page that renders beats a page that does not.
+- the **web app** — the draft page, chat, to-do list, team, league and status;
+- the **job scheduler** (APScheduler, on the app's own event loop);
+- the **draft loop**, on its own thread with its own database connection.
 
-**There is no scheduler yet.** Nothing recurring runs on its own: no nightly news sweep, no Tuesday
-waiver scan. The in-season jobs exist as prompts and as `hal-mary job <name>`, and are run by hand:
+Ask the running build rather than trusting this table:
 
 ```bash
-cd ~/hal-mary
-uv run hal-mary job board_build     # the day before a draft; takes minutes
-uv run hal-mary sync
+uv run hal-mary jobs        # every job, its cadence, its phase, and how it went last time
 ```
 
-When the scheduler lands it runs inside the same `serve` process, and this unit does not change.
+### The scheduler, and the phase
 
-### The MCP endpoint and a Cloudflare tunnel
+Which jobs are scheduled at all depends on which **phase** hal-mary thinks it is in. The phase is
+re-evaluated daily (`scheduler.phase_cron`, 04:20), so a process started the week before the draft
+becomes an in-season process by itself rather than at the next restart someone remembers.
 
-Not built yet. When it lands it adds an `MCP_TOKEN` to `.env`, and it is the one surface that would
-be exposed through a Cloudflare tunnel so that Claude elsewhere can reach hal-mary's memory.
+| Phase | When | Jobs registered |
+|---|---|---|
+| `pre_draft` | before the draft, less `scheduler.draft_window_before_hours` | `board_build` |
+| `draft_live` | the window around the draft | none scheduled — the draft loop is what is working |
+| `in_season` | after the draft, for `scheduler.season_days` | `news_sweep`, `waiver_scan`, `lineup_check`, `weekly_recap` |
+| `off_season` | after that | none |
 
-**The dashboard stays LAN-only.** It is protected by a single shared password and it renders live
-ESPN session state; it does not go on the public internet. If the MCP endpoint is tunnelled, the
-tunnel maps the MCP path *only*, and `MCP_TOKEN` is what authenticates it.
+With no draft date known, the phase falls back to the only other evidence there is: a real draft
+pick means the draft has happened.
 
-Configuring that tunnel is a human job — `cloudflared` on the box plus a DNS route — and nothing in
-this repo does it or should.
+| Job | Cadence (`scheduler.timezone`, `America/Los_Angeles`) | Why then |
+|---|---|---|
+| `board_build` | `0 6 * * *` | every morning before the draft, so the board is never a day old |
+| `news_sweep` | `0 7 * * wed,sat` | first in the week, then once the weekend's news has landed |
+| `waiver_scan` | `0 8 * * tue` | before ESPN processes claims on Wednesday |
+| `lineup_check` | `0 8 * * sun`, `0 15 * * thu`, `0 15 * * mon` | ESPN locks each player at *his own* kickoff, so one Sunday check would lose a Thursday starter |
+| `weekly_recap` | `0 10 * * tue` | after the week has finished |
+
+A late fire still runs: `scheduler.misfire_grace_time_s` is an hour, because APScheduler's default of
+one second drops a fire missed while the loop was busy, in silence. A job never overlaps with itself
+(`max_instances=1`), and a failing job is recorded and never reaches the scheduler — hal-mary with a
+broken waiver scan is worth a great deal; hal-mary not running is worth nothing.
+
+`hal-mary job <name>` runs any one of them now, and the status page has the same button. A job with
+`enabled = false` is kept off the schedule but still runs when asked for by name — that is the whole
+point of the flag.
+
+Three `[jobs.*]` entries are **not** scheduled jobs and will not appear in `hal-mary jobs`:
+`draft_advice`, `draft_advice_retry` and `chat`. They are the model configuration for calls made on
+the request path.
+
+### The draft loop
+
+Its own thread, its own connection, three cadences chosen from ESPN's own draft board — how many
+slots the board has, and how many hold a real player:
+
+| Board says | Cadence |
+|---|---|
+| no picks yet | `draft.idle_poll_seconds`, 5 minutes |
+| some picks, not all | `draft.poll_seconds`, 5 seconds |
+| every slot filled | stopped |
+
+Five seconds around the clock would be 2,073,600 requests a season against an unofficial API on one
+household's cookies, for a job that needs about 2,160 of them once.
+
+ESPN's `drafted` and `inProgress` flags decide nothing: `drafted` is set late, and `inProgress`
+describes the lobby rather than picks. **The draft has started** (`POST /draft/started`) is an
+override that holds the fast cadence for `draft.live_override_seconds`; it is never the mechanism.
+
+A loop that will not start — no ESPN credentials, for instance — is logged as a warning and the app
+serves anyway, with a band across the draft page saying why. Picks can be entered by hand and a page
+that renders beats a page that does not.
+
+### The nightly backup
+
+A separate systemd timer, not the scheduler: `hal-mary-backup.timer` at 04:17 UTC. See
+[§5](#5-backups-and-restoring-from-one).
+
+### What is *not* running here
+
+**Claude Cowork's scheduled tasks run at claude.ai, not on this box.** They are saved prompts on a
+cadence in Cowork's own scheduler, and they reach hal-mary through `/mcp`. `uv run hal-mary
+cowork-config` prints the schedule rendered for this league — including the waiver time, which is
+derived from the league's own processing day rather than assumed. [`docs/COWORK.md`](docs/COWORK.md)
+is the setup.
+
+**The Cloudflare tunnel is a human job.** `cloudflared` on the swarm plus a DNS route; nothing in
+this repo does it or should. The tunnel maps the MCP path *only* — see
+[§7](#7-connecting-claude-to-hal-mary-over-mcp). **The dashboard stays LAN-only.** It is protected by
+a single shared password and it renders live ESPN session state; it does not go on the public
+internet.
 
 ---
 
-## 7. Command reference
+## 7. Connecting Claude to hal-mary over MCP
 
-Run from `~/hal-mary` on the box.
+hal-mary exposes an MCP endpoint at `/mcp` so Claude can read the roster, the board and the advice,
+and can report back what it did. **It is a different door from the dashboard**, with a different key:
+`MCP_TOKEN`, never `WEB_PASSWORD`. One shared credential would put a live ESPN session on the public
+side of that boundary. With `MCP_TOKEN` unset the endpoint answers **503** — absent never means open.
+
+### The two URLs, and which to use
+
+| From | URL | Path |
+|---|---|---|
+| Anywhere, including outside the house | `https://mcp.thehalf.io/mcp` | Cloudflare tunnel → `traefik-public` |
+| On the LAN | the same URL | UniFi wildcard → the internal Traefik |
+
+Both are routed with `PathPrefix(/mcp)` and nothing else, so `/draft`, `/chat` and the dashboard
+**404 on that hostname even with a valid token**. That scoping is the whole boundary: hal-mary serves
+the dashboard from the same port, so a router matching the bare host would publish it to the internet.
+
+Read the token (it is never printed into a doc, a commit, or a log):
 
 ```bash
-uv run hal-mary doctor        # can this box run hal-mary? nonzero on a fatal problem
-uv run hal-mary espn-check    # are the ESPN cookies still good? nonzero when they are not
-uv run hal-mary sync          # pull league state and draft picks from ESPN
-uv run hal-mary migrate       # apply pending schema migrations
-uv run hal-mary backup        # snapshot the database now, and prune old ones
-uv run hal-mary job <name>    # run one job on demand (board_build)
-uv run hal-mary serve         # what the service runs
+ssh bryan@hal-mary.thehalf.io "grep '^MCP_TOKEN=' ~/hal-mary/.env | cut -d= -f2-"
 ```
 
-`hal-mary doctor` is the fastest answer to "is this box set up correctly": it checks the `.env`
-keys, `claude` on `PATH` and logged in, the prompts and memory directories, and whether the database
-directory is writable and on local disk rather than NFS. It touches no network and spawns nothing,
-so it is safe to run at any time, including during a draft.
+### Claude Code
+
+Claude Code speaks HTTP natively, so it needs no bridge:
+
+```bash
+claude mcp add --transport http hal-mary https://mcp.thehalf.io/mcp \
+  --header "Authorization: Bearer <MCP_TOKEN>"
+```
+
+### Claude Desktop
+
+**Claude Desktop cannot use the command above, and its "Add custom connector" UI cannot do this
+either.** Two separate reasons, both worth knowing before you spend an evening on it:
+
+1. Desktop's `mcpServers` entries are **stdio-only** — the schema is `{command, args, env,
+   extensionId}`. There is no `url` and no `headers` key. An HTTP entry is valid JSON, fails
+   validation, and shows up only as *"Some MCP servers couldn't be loaded"* at launch.
+2. The **Add custom connector** dialog takes a URL and then expects OAuth. It has no field for a
+   static `Authorization` header, which is what hal-mary uses.
+
+So Desktop reaches a remote server through the `mcp-remote` bridge. Edit
+`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or
+`%APPDATA%\Claude\claude_desktop_config.json` on Windows:
+
+```json
+{
+  "mcpServers": {
+    "hal-mary": {
+      "command": "/opt/homebrew/bin/npx",
+      "args": [
+        "-y", "mcp-remote", "https://mcp.thehalf.io/mcp",
+        "--header", "Authorization:${HAL_MARY_AUTH}"
+      ],
+      "env": {
+        "HAL_MARY_AUTH": "Bearer <MCP_TOKEN>",
+        "PATH": "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      }
+    }
+  }
+}
+```
+
+Three details that are each a wasted hour if you get them wrong:
+
+- **`Authorization:${HAL_MARY_AUTH}` has no space after the colon, and the token lives in `env`.**
+  Desktop mangles arguments that contain spaces, so the natural
+  `"Authorization: Bearer abc..."` arrives corrupted. `mcp-remote` does the substitution itself.
+- **Use an absolute path to `npx`.** Desktop launched from Finder does not get a login shell, so an
+  `nvm`-managed node is invisible to it and the server fails with `ENOENT`. `which npx` in a normal
+  terminal gives you the path to paste.
+- **Quit Desktop completely and reopen it.** Config is read at launch; closing the window is not
+  enough.
+
+Then check it: the connector list should show `hal-mary` with eight tools — `get_roster`,
+`get_board`, `get_advice`, `get_league`, `pending_actions`, `report_action`, `report_observation`
+and `cowork_schedule`.
+
+### When it does not connect
+
+```bash
+# Does the endpoint answer at all? 401 here is CORRECT — it means it is reachable and gated.
+curl -s -o /dev/null -w '%{http_code}\n' https://mcp.thehalf.io/mcp
+
+# Does the token work? A 200 and a JSON result means the server is fine and the problem is client-side.
+curl -s -X POST https://mcp.thehalf.io/mcp \
+  -H "Authorization: Bearer <MCP_TOKEN>" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}'
+
+# Desktop's own logs name the failure:
+tail -n 50 ~/Library/Logs/Claude/mcp*.log        # macOS
+```
+
+| Symptom | Cause |
+|---|---|
+| `503` | `MCP_TOKEN` is not set in `.env` on the VM. Set it and restart the service. |
+| `401` with a token you believe in | The header was mangled — check there is no space after `Authorization:` |
+| `404` on `/mcp` | You reached something other than hal-mary. From the LAN this means the internal Traefik route is missing. |
+| `404` on `/draft` | **Correct.** Only `/mcp` is routed on that hostname. |
+| "Some MCP servers couldn't be loaded" | An HTTP-style entry in Desktop's config. It only takes the stdio form above. |
+| `ENOENT` / server never starts | Bare `npx` with an `nvm` node. Use the absolute path. |
+
+### Rotating the MCP token
+
+The token ends up in plaintext in the Desktop config, so rotate it if that file is ever shared or
+if it has been pasted anywhere:
+
+```bash
+ssh bryan@hal-mary.thehalf.io "cd ~/hal-mary && \
+  sed -i \"s|^MCP_TOKEN=.*|MCP_TOKEN=\$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 40)|\" .env && \
+  systemctl --user restart hal-mary"
+```
+
+Then update the client config with the new value. Every existing connection breaks until you do —
+that is the point of rotating it.
+
+---
+
+## 8. Command reference
+
+Run from `~/hal-mary` on the box, or from a checkout on a laptop.
+
+```bash
+uv run hal-mary doctor          # can this box run hal-mary? nonzero on a fatal problem
+uv run hal-mary espn-check      # are the ESPN cookies still good? nonzero when they are not
+uv run hal-mary sync            # pull league state and draft picks from ESPN
+uv run hal-mary jobs            # every job, its cadence, its phase, and how it went last time
+uv run hal-mary job <name>      # run one job now, by name
+uv run hal-mary cowork-config   # Cowork's scheduled tasks, rendered for this league; --json
+uv run hal-mary migrate         # apply pending schema migrations
+uv run hal-mary backup          # snapshot the database now, and prune to backup.keep
+uv run hal-mary serve           # what the service runs; --reload for development
+```
+
+The job names, as of this build: `board_build`, `news_sweep`, `waiver_scan`, `lineup_check`,
+`weekly_recap`. `hal-mary job <typo>` answers with the list rather than a traceback, so the CLI is
+always the authority.
+
+**Exit codes**, because `espn-check` and `doctor` are read by scripts:
+
+| Code | Means |
+|---|---|
+| `0` | fine. For `doctor`, warnings only — a warning never blocks a deploy. |
+| `1` | it did not work: ESPN refused, the job failed, `doctor` found something fatal, the backup could not be written. |
+| `2` | not configured: a required `.env` key is missing, or an unknown job name. |
+
+**Safe to run at any time, including during a draft:** `doctor`, `jobs`, `cowork-config`, `--help`.
+None of them touch the network or spawn `claude`.
+
+**Not safe during a draft:** `job board_build` (minutes of paid Claude calls) and anything that
+restarts the service.
+
+Two environment variables move the configuration itself, and are set by the systemd unit:
+
+| Variable | Effect |
+|---|---|
+| `HAL_MARY_CONFIG` | path to `config.toml`. **Every other path is anchored to its directory.** |
+| `HAL_MARY_ENV` | path to the `.env` file. Naming a file that does not exist stops the process. |
+| `HAL_MARY_SKIP_DOCTOR=1` | `install.sh` / `deploy.sh` print doctor's findings but do not refuse over them. |
+
+---
+
+## 9. Configuration reference
+
+Two files, with a hard split between them:
+
+- **`.env`** holds secrets and the identity of the league. Gitignored, mode 0600, never in git.
+- **`config.toml`** holds every tunable — models, cadences, tool allowlists, timeouts and budgets.
+  Tracked in git. Nothing in `src/` hardcodes a model name, a timeout or a cadence.
+
+**Every path in either file is resolved against the directory holding the `config.toml` that was
+actually loaded** — never the working directory, which is the checkout for a developer and something
+else entirely under systemd. Absolute values are used exactly as given. Resolved against the working
+directory instead, a service started anywhere but the checkout would find no `memory/`, and every
+prompt would go out without the standing context that says who Caroline is — no crash, no error,
+just worse advice. `Settings.resolved_paths()` is what the "Where the files are" card on `/status`
+renders.
+
+### 9.1 The .env file
+
+Copy [`.env.example`](.env.example), which carries key names and nothing else.
+
+| Key | Required | What it is, and where it comes from |
+|---|---|---|
+| `ESPN_S2` | yes | The `espn_s2` browser cookie from a desktop signed in to `fantasy.espn.com` **as an account that is in the league**. A few hundred characters with `%` escapes in it; copy it exactly. Expires every few weeks — [§3](#3-rotating-the-espn-cookies). |
+| `SWID` | yes | The `SWID` cookie, `{XXXXXXXX-…}`. **Keep the braces.** Stripping them is the single most common cause of a 401. |
+| `LEAGUE_ID` | yes | The number in any league URL: `…/league?leagueId=<your-league-id>`. Treat it as an identifier for a private league, not as public information. |
+| `TEAM_ID` | yes | Caroline's team id within the league, from her team page URL (`teamId=`). `scripts/espn-auth.py` finds it for you. |
+| `SEASON` | yes | The season year, e.g. `2026`. |
+| `WEB_PASSWORD` | yes | The one shared password for the web app. Any long random string. `serve` **refuses to start** without it: the app binds every interface on the house network and the database holds live ESPN session cookies. |
+| `MCP_TOKEN` | no | Bearer token for `/mcp`. Deliberately **not** the same string as `WEB_PASSWORD` — two doors, two keys, because `/mcp` is reachable from the internet through the tunnel and the dashboard is not. `openssl rand -hex 32`. Unset means `/mcp` answers 503 to everything; absent never means open. |
+| `DB_PATH` | no | Where the SQLite file lives. Empty defaults to `~/hal-mary-data/hal.db`, which is correct: local disk, outside the checkout. A **relative** value is anchored to `config.toml`'s directory and so lands inside the checkout — the one directory a deploy replaces and a rollback moves — and the `backups/` directory follows it there. Must not be on NFS; SQLite on NFS corrupts. `doctor` checks both. |
+
+`hal-mary doctor` reports every missing required key by name. `scripts/espn-auth.py` fills in all of
+them except `MCP_TOKEN`, verifying the cookies against ESPN before it writes anything, and merging
+rather than replacing so it never clobbers a key it did not ask about.
+
+Not every command needs every key. `sync` needs `ESPN_S2`, `SWID`, `LEAGUE_ID` and `SEASON`. `serve`
+needs `WEB_PASSWORD` and nothing else — it starts, degraded and honest, on a box with no ESPN
+credentials at all, because picks can be entered by hand.
+
+### 9.2 config.toml, section by section
+
+Read [`config.toml`](config.toml) itself for the reasoning; every value carries a comment saying what
+it costs to get wrong. This is the map.
+
+| Section | What it decides |
+|---|---|
+| `[claude]` | Which binary, the default model (`opus`), the permission mode, the scratch directory the `claude` subprocess runs in, and the system prompt file. |
+| `[paths]` | `prompts_dir` and `memory_dir`. Football reasoning lives in Markdown under `prompts/`, not in Python. |
+| `[draft]` | The three loop cadences, how close to her turn a card is written (`advise_within_picks`), how long "the draft has started" holds, how big the board is, how much of it each prompt sees, and the wall-clock budget one tick may spend. Also the commented-out `[league]` block — the manual fallback for the league's own settings when there is no ESPN at all. |
+| `[research]` | How much live state the four in-season jobs put in front of Claude, and the two recency windows. Recency is the *main* filter on research, not a tie-breaker: the season is live and the model's training cutoff is not. |
+| `[scheduler]` | The phase windows, the season length, the daily phase check, the timezone every cron below is read in, and the misfire grace. |
+| `[espn]` | Connect and read timeouts for the raw ESPN reads. Bounded by the pick clock: a read that outlives its poll interval silently stops the draft loop. |
+| `[backup]` | How many snapshots to keep (`keep = 14`), and where. `dir` is deliberately unset, which means "a `backups/` directory beside the database". |
+| `[web]` | Host, port, cookie names, session lifetime, the SSE heartbeat, login rate limiting, how stale the draft page may get before it warns, and `shutdown_timeout_s` — which is what makes `SIGTERM` work at all while a phone has `/events` open. `forwarded_allow_ips` must name the proxy when behind Traefik, or the session cookie is silently issued without `Secure`. |
+| `[chat]` | How much memory a chat question gets. Larger than the draft's, and with no age cutoff, because a chat question has no pick clock and "how has my season gone" is about months ago. |
+| `[jobs.<name>]` | Per job: `model`, `tools`, `timeout_s`, `max_budget_usd`, `enabled`, and `cron` (a string or a list). **`jobs.draft_advice.tools` must stay empty** — that call runs on a 90-second pick clock and a web search takes 30 to 120 seconds. A test asserts it. |
+| `[cowork]` | The timezone Cowork's own scheduling form is filled in with (the operator's, not the server's), and how far ahead of waiver processing a claim run happens. It must match `[scheduler].timezone`; a test refuses a config where it does not. |
+| `[actions]` | When an NFL week rolls over, in UTC. Every emitted action expires at that boundary, and emission equivalence is scoped by it — the same bench twice on a Sunday is one click, the same bench next Saturday is a new decision. |
+
+**The tunables most likely to be worth changing**, and what happens if you do:
+
+| Value | Default | Raising it |
+|---|---|---|
+| `draft.advise_within_picks` | `2` | A card appears earlier, against a board with more unknowns still in it. |
+| `draft.advice_budget_s` | `60` | More time for the on-the-clock call, against a 90-second pick clock. Bounds only what the advisor *starts*, not an ESPN read already in flight. |
+| `draft.max_source_share` | `0.25` | Lets one website decide more of the board. At `0.25` no outlet may decide more than 50 of 200 — the first real build cited one ranking article for 103 of them, which is a board every other manager can already read for free. |
+| `research.note_shelf_life_days` | `14` | Older notes stay in prompts. In a live season that is usually wrong. |
+| `backup.keep` | `14` | More nights of snapshots, more disk. A count of files rather than days, because the timer can miss a night. |
+| `web.session_max_age_days` | `30` | Set so she is never logged out mid-draft. |
 
 ## Status
 
-Under active construction against a draft deadline. This repository is entirely AI-authored.
+Under active construction against a draft deadline. This repository is entirely AI-authored: Bryan
+owns judgment and outcomes, the agent owns mechanism. See [`CLAUDE.md`](CLAUDE.md) for the rules that
+autonomy is paid for with.
