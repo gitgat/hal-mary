@@ -1593,6 +1593,77 @@ async def test_the_chat_stream_delivers_the_reply_and_saves_it(
     )
 
 
+async def test_the_finished_stream_carries_the_answer_rendered_as_markdown(
+    db_path: Path, tmp_path: Path, session_cookie: str
+):
+    """The `done` frame carries server-rendered HTML.
+
+    The chunks arrive as plain text and the page appends them with textContent.
+    Rendering the Markdown in the browser instead would mean a second renderer
+    with its own escaping, and only one of the two would ever be audited.
+    """
+    from hal_mary import chat
+
+    settings = chat_settings(db_path, tmp_path)
+    conn = open_conn(db_path)
+    try:
+        session_id = chat.start_session(conn)
+        chat.record_question(conn, session_id, "What does PPR mean?")
+    finally:
+        conn.close()
+
+    app = build_app(db_path, settings=settings)
+    delivered = ""
+    async with EventProbe(app, session_cookie, path=f"/chat/stream/{session_id}") as probe:
+        while "event: done" not in delivered:
+            delivered += await probe.frame()
+
+    done = [line for line in delivered.splitlines() if line.startswith("data: {\"html\"")]
+    assert done, f"the done frame carried no rendered answer:\n{delivered}"
+    payload = json.loads(done[-1][len("data: ") :])
+    assert payload["html"] == "<p>First chunk. Second chunk. Third chunk.</p>"
+
+
+def test_a_chat_answer_is_rendered_as_markdown_not_as_markup(
+    db_path: Path, tmp_path: Path, session_cookie: str
+):
+    """Bold becomes bold; a script tag stays four visible characters wide."""
+    from hal_mary import chat
+
+    conn = open_conn(db_path)
+    try:
+        session_id = chat.start_session(conn)
+        chat.record_question(conn, session_id, "Who do I start?")
+        chat._persist_reply(
+            conn,
+            session_id,
+            "**Start Gibbs.**\n\n- He catches passes\n- <script>alert(1)</script>",
+        )
+    finally:
+        conn.close()
+
+    settings = chat_settings(db_path, tmp_path)
+    app = build_app(db_path, settings=settings)
+    with TestClient(app) as client:
+        # The fixture hands back a whole `name=value` Cookie header, not a bare
+        # value, so it goes in as a header rather than through the cookie jar.
+        response = client.get(
+            f"/chat?session={session_id}", headers={"Cookie": session_cookie}
+        )
+        assert response.status_code == 200
+        body = response.text
+    # The login page also returns 200, and it contains none of the answer, so a
+    # wrong cookie name would fail every assertion below for the wrong reason.
+    assert "Start Gibbs" in body, "not signed in: the chat page never rendered"
+
+    assert "<strong>Start Gibbs.</strong>" in body
+    assert "<li>He catches passes</li>" in body
+    # The payload is shown, never run. If this ever fails, the escape-first
+    # ordering in `markdown_safe.render` has been inverted.
+    assert "<script>alert(1)</script>" not in body
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
+
+
 async def test_a_stream_with_nothing_to_answer_ends_without_asking_claude(
     db_path: Path, tmp_path: Path, session_cookie: str
 ):
@@ -1980,3 +2051,57 @@ def test_a_scheduler_that_will_not_build_does_not_stop_the_app_serving(db_path: 
     with TestClient(app) as client:
         login(client)
         assert client.get("/status").status_code == 200
+
+
+# --- behind a TLS-terminating proxy ------------------------------------------
+
+
+def test_run_server_passes_the_trusted_proxies_through_to_uvicorn(monkeypatch):
+    """Behind Traefik the app must be told whose forwarded headers to believe.
+
+    uvicorn trusts only 127.0.0.1 by default and ignores `X-Forwarded-Proto`
+    from anywhere else *without saying so*. The app then sees scheme "http" on
+    an https site and sets the session cookie without Secure — a working page
+    with a downgraded cookie, which is the kind of defect that is only ever
+    found deliberately.
+    """
+    from hal_mary.web import serve as serve_mod
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        serve_mod.uvicorn if hasattr(serve_mod, "uvicorn") else serve_mod,
+        "uvicorn",
+        None,
+        raising=False,
+    )
+    import uvicorn as _uvicorn
+
+    monkeypatch.setattr(_uvicorn, "run", lambda *a, **k: seen.update(k))
+
+    serve_mod.run_server(
+        host="0.0.0.0",
+        port=8080,
+        reload=False,
+        shutdown_timeout_s=5,
+        forwarded_allow_ips="10.0.0.0/8",
+    )
+
+    assert seen["proxy_headers"] is True
+    assert seen["forwarded_allow_ips"] == "10.0.0.0/8"
+
+
+def test_run_server_does_not_trust_anyone_when_nothing_is_configured(monkeypatch):
+    """The LAN default: no proxy in front, so no forwarded header is believed."""
+    import uvicorn as _uvicorn
+
+    from hal_mary.web import serve as serve_mod
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(_uvicorn, "run", lambda *a, **k: seen.update(k))
+
+    serve_mod.run_server(host="0.0.0.0", port=8080, reload=False, shutdown_timeout_s=5)
+
+    assert seen["proxy_headers"] is False, (
+        "with no proxy configured the app must not believe a forwarded scheme "
+        "from whoever happens to connect"
+    )

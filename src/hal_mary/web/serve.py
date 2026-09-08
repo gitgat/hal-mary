@@ -185,7 +185,14 @@ def app_from_env() -> Any:
     return app
 
 
-def run_server(*, host: str, port: int, reload: bool, shutdown_timeout_s: int) -> None:
+def run_server(
+    *,
+    host: str,
+    port: int,
+    reload: bool,
+    shutdown_timeout_s: int,
+    forwarded_allow_ips: str = "",
+) -> None:
     """Hand off to uvicorn. Separated so the CLI is testable without a server.
 
     ``timeout_graceful_shutdown`` is not optional politeness. uvicorn waits for
@@ -206,6 +213,13 @@ def run_server(*, host: str, port: int, reload: bool, shutdown_timeout_s: int) -
         port=port,
         reload=reload,
         timeout_graceful_shutdown=shutdown_timeout_s,
+        # Only believe a forwarded scheme when a proxy is actually configured.
+        # uvicorn defaults proxy_headers on but trusts 127.0.0.1 alone, so
+        # behind Traefik the headers are dropped in silence and `request.url
+        # .scheme` reads "http" on an https site -- which is what decides
+        # whether the session cookie gets its Secure flag.
+        proxy_headers=bool(forwarded_allow_ips),
+        forwarded_allow_ips=forwarded_allow_ips or "127.0.0.1",
     )
 
 
@@ -228,5 +242,6 @@ def serve(settings: Any, *, reload: bool = False) -> int:
         port=port,
         reload=reload,
         shutdown_timeout_s=settings.web.shutdown_timeout_s,
+        forwarded_allow_ips=settings.web.forwarded_allow_ips,
     )
     return 0

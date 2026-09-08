@@ -118,10 +118,18 @@
       say(JSON.parse(event.data).message);
     });
 
-    source.addEventListener('done', function () {
+    source.addEventListener('done', function (event) {
       /* Closed here, before the server drops the connection: an EventSource
        * reconnects on its own otherwise, and every reconnect is another call. */
       source.close();
+      /* The server sends the finished answer rendered as Markdown. It escaped
+       * the whole string before emitting a tag, which is why this can be
+       * innerHTML; the chunks above stay textContent, so a dropped connection
+       * leaves readable text rather than half a rendered document. */
+      try {
+        var done = JSON.parse(event.data || '{}');
+        if (done.html) { text.innerHTML = done.html; }
+      } catch (e) { /* keep the streamed text */ }
       bubble.classList.remove('pending');
       if (got) {
         if (state) { state.hidden = true; }
