@@ -426,6 +426,18 @@ class WebConfig(_Frozen):
     #: which stops the draft loop — runs only once uvicorn stops waiting.
     #: Defaulted so an older ``config.toml`` without it still loads.
     shutdown_timeout_s: int = 5
+    #: Which upstream addresses may set ``X-Forwarded-Proto`` / ``-For``.
+    #:
+    #: Empty means "nothing is in front of us", which is the LAN default. Behind
+    #: the homelab's Traefik it must name the proxy, because uvicorn only trusts
+    #: 127.0.0.1 otherwise and *silently ignores* the headers: the app then sees
+    #: scheme "http" on an https site and sets the session cookie **without**
+    #: Secure, so a cookie for an https origin becomes sendable over plaintext.
+    #: The page still works, which is why this has to be a setting somebody can
+    #: see rather than something noticed the day it matters. "*" is accepted and
+    #: is only safe when nothing but the proxy can reach the port.
+    forwarded_allow_ips: str = ""
+
 
 
 class JobConfig(_Frozen):

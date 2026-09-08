@@ -1,6 +1,20 @@
-{# One message. `content` is rendered as text, never as markup: it holds whatever
-   she typed and whatever a model wrote from pages it read on the internet. #}
+{# One message.
+
+   Her words are shown as typed. hal-mary's answer goes through the Markdown
+   renderer, which escapes the whole string before it emits a single tag — the
+   answer is written by a model that has just read pages off the internet, so it
+   is untrusted in the way `hal_mary.prompt_text` describes. `markdown` returns
+   Markup, so Jinja does not escape it twice.
+
+   Only the answer is rendered: she is typing prose, and silently eating the
+   asterisks out of what she just wrote would be the page arguing with her. #}
 <div class="msg {{ 'mine' if message.role == 'user' else 'theirs' }}">
   <p class="msg-who">{{ 'You' if message.role == 'user' else 'hal-mary' }}</p>
-  <div class="msg-text">{{ message.content }}</div>
+  <div class="msg-text">
+    {%- if message.role == 'user' -%}
+      {{ message.content }}
+    {%- else -%}
+      {{ message.content | markdown }}
+    {%- endif -%}
+  </div>
 </div>
