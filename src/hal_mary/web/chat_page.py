@@ -128,6 +128,18 @@ async def chat_event_stream(
 
     A stream with nothing outstanding ends immediately. That is what a reload
     after the answer landed does, and it must not cost another Claude call.
+
+    **What a live stream costs the thread pool.** Two of anyio's threads: one
+    running ``consume`` for the whole call, and one parked in ``out.get`` for up
+    to ``heartbeat_s`` at a time. The default limiter is 40, so about twenty
+    simultaneous answers would exhaust it — and the pool is shared, so the next
+    thing to starve is ``/sync``, which is ``asyncio.to_thread`` on the same
+    limiter. There is one reader on one phone and a tools-on call is bounded by
+    ``jobs.chat.timeout_s``, so this is arithmetic rather than a risk; it is
+    written down because the number is not obvious from the code, and because
+    the symptom (a sync button that hangs) would point at the wrong module. If
+    it ever matters, the lever is a dedicated ``anyio.CapacityLimiter`` for chat
+    rather than a bigger default.
     """
     out: queue.Queue = queue.Queue()
     stop = threading.Event()

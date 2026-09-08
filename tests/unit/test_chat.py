@@ -476,3 +476,26 @@ def test_remember_touches_the_session_so_the_list_shows_the_activity(
         "SELECT updated_at FROM chat_sessions WHERE id = ?", (session_id,)
     ).fetchone()
     assert row["updated_at"] is not None
+
+
+def test_a_question_may_contain_anything_she_can_type(harness: ChatHarness):
+    """Braces are characters, not template syntax.
+
+    The prompt loader used to re-scan the *filled* template, so a question
+    carrying ``{{...}}`` came back as an unfilled placeholder and the call never
+    ran. It failed out loud, which was something — but it failed identically
+    every time she retyped it, and nothing on the page said which characters
+    were the problem.
+    """
+    session_id = chat.start_session(harness.conn)
+    question = "What does {{PPR}} mean?"
+    chunks = list(
+        chat.send(harness.conn, harness.settings, harness.runner, session_id, question)
+    )
+
+    assert chunks[-1].kind == "done"
+    assert question in harness.stdin
+    assert harness.messages(session_id) == [
+        ("user", question),
+        ("assistant", "First chunk. Second chunk. Third chunk."),
+    ]
