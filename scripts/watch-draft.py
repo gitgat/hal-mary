@@ -65,6 +65,35 @@ def made(pick: dict) -> bool:
     return isinstance(pid, int) and pid > 0
 
 
+def read_verdict(made_count: int, rostered: int, in_progress: object) -> str | None:
+    """The one line the operator actually wants, in plain words.
+
+    `picks` alone cannot answer the question this script exists for. An empty
+    board means either "no draft yet" or "a draft nobody can see", and those are
+    opposite problems. Rosters break the tie: a drafted player is on somebody's
+    roster whether or not the board says so.
+
+    `inProgress` decides nothing here — it describes the lobby, not the picks.
+    A full room with a drawn order reported True for the whole of one mock
+    draft that produced no picks at all, so it is printed for the record and
+    never reasoned from.
+    """
+    if made_count > 0:
+        return "ANSWER: ESPN publishes picks live. The draft loop can rely on the board."
+    if rostered > 0:
+        return (
+            "ANSWER: players are on rosters but the board is empty -- ESPN is NOT "
+            "publishing picks live. Enter picks by hand on the draft page."
+        )
+    if in_progress:
+        return (
+            "waiting: the lobby is open and nothing has been picked yet. If this "
+            "persists well past the first pick, ESPN is not publishing and picks "
+            "should go in by hand."
+        )
+    return None
+
+
 def main() -> int:
     env = load_env()
     league = sys.argv[1] if len(sys.argv) > 1 else env.get("LEAGUE_ID")
@@ -73,16 +102,23 @@ def main() -> int:
         sys.exit("no league id: pass one as an argument or set LEAGUE_ID in .env")
 
     cookies = {"espn_s2": env.get("ESPN_S2", ""), "SWID": env.get("SWID", "")}
-    url = f"{BASE}/seasons/{season}/segments/0/leagues/{league}?" + urllib.parse.urlencode(
-        {"view": "mDraftDetail"}
+    # mRoster alongside mDraftDetail, because on its own an empty board is
+    # ambiguous. See the verdict logic below.
+    url = (
+        f"{BASE}/seasons/{season}/segments/0/leagues/{league}"
+        "?view=mDraftDetail&view=mRoster"
     )
 
     print(f"watching league {league}, season {season} — one request a second, Ctrl-C to stop")
     print("looking for: does the number of MADE picks go up while the draft runs?\n")
-    print(f"{'time':<10} {'http':<5} {'inProg':<7} {'drafted':<8} {'slots':<6} {'MADE':<5} latest")
-    print("-" * 78)
+    print(
+        f"{'time':<10} {'http':<5} {'inProg':<7} {'drafted':<8} "
+        f"{'slots':<6} {'MADE':<5} {'rostered':<9} latest"
+    )
+    print("-" * 92)
 
     last_made = -1
+    last_verdict = None
     while True:
         status, payload = fetch(url, cookies)
         stamp = time.strftime("%H:%M:%S")
@@ -98,6 +134,15 @@ def main() -> int:
         detail = payload.get("draftDetail") or {}
         picks = detail.get("picks") or []
         real = [p for p in picks if made(p)]
+        # Every player on every team's roster. A drafted player lands on a roster
+        # even if the board is not published, so this is what tells "the draft
+        # has not started" apart from "the draft is running and ESPN is not
+        # saying who went" — the two look identical on `picks` alone, and they
+        # want opposite things done about them.
+        rostered = sum(
+            len((team.get("roster") or {}).get("entries") or [])
+            for team in (payload.get("teams") or [])
+        )
         latest = ""
         if real:
             last = max(real, key=lambda p: p.get("overallPickNumber") or 0)
@@ -108,12 +153,17 @@ def main() -> int:
 
         line = (
             f"{stamp:<10} {status:<5} {detail.get('inProgress')!s:<7} "
-            f"{detail.get('drafted')!s:<8} {len(picks):<6} {len(real):<5} {latest}"
+            f"{detail.get('drafted')!s:<8} {len(picks):<6} {len(real):<5} "
+            f"{rostered:<9} {latest}"
         )
         if len(real) != last_made:
             line += "   <-- CHANGED"
             last_made = len(real)
         print(line)
+        verdict = read_verdict(len(real), rostered, detail.get("inProgress"))
+        if verdict and verdict != last_verdict:
+            print(f"           {verdict}")
+            last_verdict = verdict
         time.sleep(1)
 
 
