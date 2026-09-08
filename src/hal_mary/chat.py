@@ -51,6 +51,7 @@ from hal_mary.config import Settings
 from hal_mary.draft import store
 from hal_mary.draft.board import roster_needs
 from hal_mary.league import LeagueContext, load_league_context
+from hal_mary.recency import recency_block
 
 # Slot and position wording lives in exactly one place, and this is a reader of
 # it rather than a second copy. web/positions.py imports nothing from the web
@@ -453,7 +454,7 @@ def build_prompt(
     hurt" and wrong for "how has my season gone".
     """
     prompt = prompts.render_prompt(
-        settings, PROMPT_FILE, {"question": question, "today": _today()}
+        settings, PROMPT_FILE, {"question": question, "today": _today(), "recency": recency_block(settings)}
     )
     context = memory.build_context(
         conn,

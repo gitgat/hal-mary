@@ -1697,3 +1697,32 @@ nothing reads yet.
 **Would revisit if:** the cap starts binding on a player everyone genuinely agrees about, and the
 research spends its budget hunting a fourth opinion nobody needed. The dial is in `config.toml` for
 that reason.
+
+## 2026-09-08 — Research prompts are anchored to today, in Python
+
+Bryan: "for our agents that are doing research and answering questions and performing web searches,
+we need to make sure they're heavily recency biased. more recent news matters WAAY more than old
+news."
+
+The defect was worse than weak emphasis. **No research prompt had ever been told what day it was.**
+`board_build.md` asked for "recent sources", `news_sweep.md` warned that "a stale claim is worse
+than silence", and neither gave the model any way to know what recent meant. A model whose training
+has a cutoff, with no anchor, treats that cutoff as the present — and answers about this week from
+last season with exactly the same confidence. Only `chat.py` passed a date, and only to one prompt.
+
+`hal_mary.recency.recency_block` now renders the date and two windows from `[research]`:
+`recency_current_days` (3) is what counts as news, `recency_stale_days` (14) is the point past
+which a source may not decide a ranking on its own. It also states the thing that actually goes
+wrong — that training data is not a source and the web wins any disagreement — and requires every
+claim about health, role or team to carry the date it was reported, so staleness is auditable in
+the `notes` table afterwards.
+
+Python owns it for the usual reason: the wording is prose, but the date and the arithmetic are
+testable, and a window in `config.toml` can be widened in the off-season without editing six prompt
+files.
+
+Enforced twice, because "remember to add it" is not enforcement. `prompts.render` already raises on
+an unfilled placeholder, so a job that forgets `{{recency}}` fails loudly instead of sending
+undated research. And a test reads `config.toml`, finds every job carrying a `Web*` tool, and
+asserts it is in the recency list — so the **next** research job fails a test rather than quietly
+researching with no idea what today is.

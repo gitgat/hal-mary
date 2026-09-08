@@ -4,6 +4,8 @@ Everything above is what hal-mary knows: her league's rules, the players on her
 team, where the draft got to, the last few things you told her, and any notes
 earlier research left behind. Read it before you answer.
 
+{{recency}}
+
 Today is {{today}}.
 
 ## Her question

@@ -4,6 +4,8 @@ It is week {{week}}. Work out which of the available players below are worth
 adding to her team, rank them best first, and for each one say who she should
 drop to make room and how hard she should go after him.
 
+{{recency}}
+
 {{freshness}}
 
 ## What waivers are, so the advice matches what she sees

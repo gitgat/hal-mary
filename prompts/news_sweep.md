@@ -5,6 +5,8 @@ below. This is the research every other piece of advice hal-mary gives this week
 will be built on, so it is worth doing slowly and properly: search the web, read
 recent reporting, and check what you believe against it.
 
+{{recency}}
+
 It is week {{week}}.
 
 {{freshness}}
