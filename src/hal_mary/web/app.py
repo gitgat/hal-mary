@@ -709,13 +709,30 @@ def create_app(
             return None
         return getattr(thread, "error", None)
 
+    def loop_watching(request: Request) -> dict[str, Any] | None:
+        """The running loop's own cadence, or ``None`` when there is no loop.
+
+        Asked rather than derived, because the loop is the only thing that knows
+        about the "The draft has started" override: between the draft opening
+        and pick 1 it is on draft-night cadence and the board says nothing yet.
+        """
+        thread = getattr(request.app.state, "draft_loop", None)
+        reader = getattr(thread, "watching", None)
+        return reader() if reader is not None else None
+
+    def page_context(request: Request, position: str = "") -> dict[str, Any]:
+        with database() as conn:
+            return draft_context(
+                conn,
+                settings,
+                position=position,
+                loop_error=loop_error(request),
+                watching=loop_watching(request),
+            )
+
     @private.get("/draft", response_class=HTMLResponse)
     async def draft(request: Request, position: str = "") -> HTMLResponse:
-        with database() as conn:
-            context = draft_context(
-                conn, settings, position=position, loop_error=loop_error(request)
-            )
-        return page(request, "draft.html", **context)
+        return page(request, "draft.html", **page_context(request, position))
 
     @private.get("/draft/live", response_class=HTMLResponse)
     async def draft_live(request: Request, position: str = "") -> HTMLResponse:
@@ -725,11 +742,9 @@ def create_app(
         which on a phone mid-draft is genuinely disruptive. The event listener
         and the ten-second fallback poll both land here.
         """
-        with database() as conn:
-            context = draft_context(
-                conn, settings, position=position, loop_error=loop_error(request)
-            )
-        return _fragment(request, "partials/draft_live.html", **context)
+        return _fragment(
+            request, "partials/draft_live.html", **page_context(request, position)
+        )
 
     @private.post("/draft/pick")
     async def draft_pick(
@@ -780,6 +795,81 @@ def create_app(
             # he is off a list that does not exist.
             board_missing=bool(outcome.get("board_missing")),
         )
+
+    @private.post("/draft/started")
+    async def draft_has_started(request: Request) -> Any:
+        """"The draft has started" — the override, from the draft page.
+
+        Three things, in this order, because the first is instant and the second
+        is seconds of blocking HTTP:
+
+        1. the draft loop goes to draft-night cadence *now* rather than at the
+           end of an idle interval it may have just begun;
+        2. a sync runs, which is what re-reads the order ESPN draws when the
+           draft opens — the step ``docs/SETUP.md`` makes unconditional;
+        3. it reports what it found: whether the drawn order has been read, and
+           who it now believes is on the clock.
+
+        **An override, not the mechanism.** The loop reaches draft-night cadence
+        on its own from the first pick ESPN reports, so a night nobody presses
+        this costs one idle interval rather than the draft. That is the whole
+        reason it is safe for this to be a button.
+
+        A failed sync is a sentence, not a 500, and it does not undo step 1:
+        ESPN being briefly unreachable is the moment to be *more* attentive, not
+        less.
+        """
+        switched = _tell_the_loop(request)
+
+        summary: dict[str, Any] | None = None
+        error: str | None = None
+        notice: str | None = None
+        if sync_lock.locked():
+            # Not an error: a sync she started a moment ago is already doing the
+            # one thing this button needed it for.
+            notice = "A sync is already running — give it a moment."
+        else:
+            try:
+                async with sync_lock:
+                    summary = await asyncio.to_thread(run_sync)
+            except Exception as exc:  # noqa: BLE001 - a failed sync is a message
+                error = f"{type(exc).__name__}: {exc}"
+            else:
+                bus.publish("synced", dict(summary or {}))
+
+        if not request.headers.get("hx-request"):
+            return RedirectResponse("/draft", status_code=303)
+        with database() as conn:
+            context = draft_context(
+                conn,
+                settings,
+                loop_error=loop_error(request),
+                watching=loop_watching(request),
+            )
+        return _fragment(
+            request,
+            "partials/draft_started.html",
+            switched=switched,
+            error=error,
+            notice=notice,
+            **context,
+        )
+
+    def _tell_the_loop(request: Request) -> dict[str, Any] | None:
+        """Put the draft loop on draft-night cadence. ``None`` when none runs.
+
+        A box with no ESPN credentials has no loop at all, and the page has to
+        say that rather than report a switch that did not happen.
+        """
+        thread = getattr(request.app.state, "draft_loop", None)
+        starter = getattr(thread, "draft_started", None)
+        if starter is None:
+            return None
+        try:
+            return starter()
+        except Exception:
+            logger.exception("could not tell the draft loop the draft has started")
+            return None
 
     @private.post("/draft/unmatched/resolve")
     async def resolve_unmatched(request: Request, unmatched_id: str = Form("")) -> Any:

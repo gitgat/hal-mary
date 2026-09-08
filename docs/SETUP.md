@@ -126,9 +126,17 @@ first pick lands, and this is what to do about it:
 
 **Do this every draft, not only when something looks wrong:**
 
-1. Hit **Sync from ESPN now** (status page) **once, the moment the draft opens.** A sync re-reads
-   `pickOrder`, which ESPN has drawn for real by then, so it closes the window before pick 1.
+1. Tap **The draft has started** on the draft page **once, the moment the draft room opens.** It
+   sits in the note that says the pick numbers are provisional, so there is nothing to go and find.
+   It syncs — re-reading `pickOrder`, which ESPN has drawn for real by then, closing the window
+   before pick 1 — and it puts the loop on its draft-night five-second cadence straight away instead
+   of at the end of the current five-minute check. Then it tells you what it found.
 2. Then eyeball "on the clock" on the draft page against ESPN's draft room for two picks.
+
+That button is an **override, not the mechanism**. Forgetting it costs at most one five-minute
+interval: the loop switches to draft-night cadence on its own from the first pick ESPN reports, and
+the draft page says which cadence it is on ("watching ESPN every 5 seconds" / "checking ESPN every 5
+minutes"). What the button buys is the gap before pick 1, which is the window described above.
 
 **If the loop is not running** — no ESPN credentials, a loop that failed to start (the page says so
 in a band across the top), or picks being entered by hand — nothing ever reads the drawn board, so

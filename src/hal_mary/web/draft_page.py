@@ -46,6 +46,7 @@ from typing import Any
 from hal_mary.config import Settings
 from hal_mary.draft import board as board_math
 from hal_mary.draft import store
+from hal_mary.draft.loop import PHASE_DONE, PHASE_LIVE, cadence_words, draft_phase
 from hal_mary.espn.sync import last_sync
 from hal_mary.league import LeagueContext, LeagueUnknown, load_league_context
 from hal_mary.web.positions import (
@@ -476,6 +477,51 @@ def _staleness(
     return {"seconds": int(seconds), "age": spell_out_age(seconds)}
 
 
+def _watching(
+    settings: Settings,
+    league: LeagueContext | None,
+    next_pick: int,
+    loop_error: str | None,
+    reported: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """How often hal-mary is reading ESPN, in a sentence she can check.
+
+    "Was it watching?" is the first question anybody asks afterwards, and until
+    now the only place to find the answer was a log file. Three phases with three
+    cadences make that answer worth showing: watching every five seconds is a
+    different promise from checking every five minutes.
+
+    ``reported`` is the running loop's own answer, which is preferred because it
+    is the only thing that knows about the "The draft has started" override —
+    between the draft opening and pick 1 the loop is on draft-night cadence and
+    the board this would otherwise be derived from still shows nothing at all.
+    With no loop to ask, the same rule the loop uses is applied to the same
+    board, so the fallback is the loop's answer by construction rather than by
+    coincidence.
+
+    ``None`` — no line at all — when nothing is polling, or when the draft is
+    over. The page already bands itself for the first and says so plainly for the
+    second, and a cadence beside either would be a claim that is not true.
+    """
+    if loop_error:
+        return None
+    if reported is not None:
+        phase, seconds = reported.get("phase"), reported.get("poll_seconds")
+    else:
+        phase = draft_phase(
+            picks_made=next_pick - 1,
+            total_slots=league.total_picks if league is not None else None,
+        )
+        seconds = (
+            settings.draft.poll_seconds
+            if phase == PHASE_LIVE
+            else settings.draft.idle_poll_seconds
+        )
+    if phase == PHASE_DONE or seconds is None:
+        return None
+    return {"phase": phase, "seconds": seconds, "cadence": cadence_words(seconds)}
+
+
 # --- the whole page ----------------------------------------------------------
 
 
@@ -485,6 +531,7 @@ def draft_context(
     *,
     position: str | None = None,
     loop_error: str | None = None,
+    watching: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the draft page. Never raises on a database in any state."""
     code = (position or "").strip().upper() or None
@@ -524,6 +571,7 @@ def draft_context(
 
     return {
         "turn": turn,
+        "watching": _watching(settings, league, next_pick, loop_error, watching),
         "league_problem": league_problem,
         "advice": advice,
         "advising": advising,

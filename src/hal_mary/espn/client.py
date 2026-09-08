@@ -162,6 +162,15 @@ def pick_is_made(raw: dict[str, Any]) -> bool:
     return isinstance(player_id, int) and not isinstance(player_id, bool) and player_id > 0
 
 
+def _flag(value: Any) -> bool | None:
+    """One of ESPN's own booleans, or ``None`` when it said nothing.
+
+    Absent and false are different: "ESPN did not tell us" must not read as
+    "ESPN said no" in a log line someone is using to work out what happened.
+    """
+    return value if isinstance(value, bool) else None
+
+
 def _overall_pick_order(raw: dict[str, Any]) -> tuple[bool, int]:
     """Sort key that puts a row with no ``overallPickNumber`` last without raising."""
     overall = raw.get("overallPickNumber")
@@ -220,6 +229,9 @@ class EspnClient:
         self._name_map: dict[int, str] | None = None
         # monotonic deadline before which a failed name-map build is not retried
         self._name_map_retry_after = 0.0
+        # What the last mDraftDetail read said about the draft itself. Recorded
+        # off that read rather than fetched, so draft_status() costs nothing.
+        self._draft_status: dict[str, Any] | None = None
 
     # -- plumbing ----------------------------------------------------------
 
@@ -518,10 +530,44 @@ class EspnClient:
         is useless.
         """
         payload = self._get(DRAFT_VIEW)
-        rows = (payload.get("draftDetail", {}) or {}).get("picks") or []
+        detail = payload.get("draftDetail", {}) or {}
+        rows = detail.get("picks") or []
         rows = [row for row in rows if isinstance(row, dict)]
         rows.sort(key=_overall_pick_order)
+        self._draft_status = {
+            "in_progress": _flag(detail.get("inProgress")),
+            "drafted": _flag(detail.get("drafted")),
+            "slots": len(rows),
+            "picks_made": sum(1 for row in rows if pick_is_made(row)),
+            "read_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
         return rows
+
+    def draft_status(self) -> dict[str, Any] | None:
+        """What the last draft read said about the draft itself, or ``None``.
+
+        **This makes no request.** It is recorded by :meth:`_raw_draft_rows`, so
+        the draft loop — which calls :meth:`draft_picks` every poll anyway — can
+        ask how far along the draft is without a second GET on the pick clock.
+        ``None`` means nothing has been read yet, which is the honest answer and
+        not the same as "no draft".
+
+        Four fields, and the two that decide anything are the counts:
+
+        ``slots``
+            how many rows ESPN's board has. It pre-populates every slot of the
+            draft, so this is 96 for a 6-team, 16-round league from the day the
+            league exists.
+        ``picks_made``
+            how many of those rows have a real player attached
+            (:func:`pick_is_made`).
+        ``in_progress`` / ``drafted``
+            ``draftDetail``'s own booleans, reported for corroboration and for
+            the log. **Neither is trustworthy on its own** — see
+            :func:`hal_mary.draft.loop.draft_phase`, which is where the rule
+            lives — so they are carried, not obeyed.
+        """
+        return dict(self._draft_status) if self._draft_status is not None else None
 
     def draft_picks(self) -> list[dict[str, Any]]:
         """Picks that have actually happened, sorted by overall pick number.

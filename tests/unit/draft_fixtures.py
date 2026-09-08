@@ -448,7 +448,21 @@ class FakeEspnClient:
         schedule: list[dict[str, Any]] | None = None,
         clock: FakeClock | None = None,
         slow_by: float = 0.0,
+        slots: int = REAL_TEAM_COUNT * 16,
+        in_progress: bool | None = None,
+        drafted: bool | None = None,
     ) -> None:
+        #: What ``draftDetail`` says about itself, as
+        #: :meth:`EspnClient.draft_status` reports it. ``slots`` is the number of
+        #: rows ESPN pre-populated — 96 for this league — and is what "every slot
+        #: is filled" is measured against. The two booleans default to ``None``
+        #: because a client that has not read yet knows neither, and because a
+        #: phase that changed when a test set one would be a phase trusting a
+        #: flag.
+        self.slots = slots
+        self.in_progress = in_progress
+        self.drafted = drafted
+        self.draft_status_calls = 0
         #: With a ``clock``, ``draft_picks`` advances it by ``slow_by`` seconds —
         #: a slow ESPN read, which is the thing that eats the tick's budget
         #: before the advisor is ever reached.
@@ -462,6 +476,27 @@ class FakeEspnClient:
         self.draft_picks_calls = 0
         self.draft_schedule_calls = 0
         self.call_order: list[str] = []
+
+    def draft_status(self) -> dict[str, Any]:
+        """What the last ``mDraftDetail`` read said about the draft itself.
+
+        Answered from the read that already happened — the real client caches it
+        off ``draft_picks``\'s own GET — so consulting it costs no request.
+        """
+        self.draft_status_calls += 1
+        self.call_order.append("draft_status")
+        return {
+            "in_progress": self.in_progress,
+            "drafted": self.drafted,
+            "slots": self.slots,
+            # The same rule the real client applies: a slot is a pick only once
+            # a real player is attached to it. A test that hands this fake
+            # ESPN's pre-populated placeholder rows must get the same answer
+            # from here that ESPN's own board would give — zero.
+            "picks_made": sum(
+                1 for pick in self.picks if (pick.get("player_id") or 0) > 0 or pick.get("player_name")
+            ),
+        }
 
     def draft_schedule(self) -> list[dict[str, Any]]:
         """Task 12's contract: every slot on the board, filled or not."""

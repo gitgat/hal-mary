@@ -95,6 +95,36 @@ class DraftLoopThread:
     def alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
+    # -- what the page asks the loop --------------------------------------
+
+    def watching(self) -> dict[str, Any] | None:
+        """The loop's own cadence, or ``None`` when there is no loop.
+
+        Read from the web app's thread. Nothing here mutates anything and the
+        values are a string and an int, so the read is safe without a lock — and
+        the alternative, publishing the cadence into the database on every phase
+        change, would put a write on the pick-clock path to say something the
+        loop already knows.
+        """
+        return self._ask("watching")
+
+    def draft_started(self) -> dict[str, Any] | None:
+        """"The draft has started", forwarded to the loop. ``None`` if none runs."""
+        return self._ask("draft_started")
+
+    def _ask(self, name: str) -> dict[str, Any] | None:
+        loop = self._loop
+        if loop is None or not self.alive:
+            return None
+        method = getattr(loop, name, None)
+        if method is None:  # pragma: no cover - every real loop has both
+            return None
+        try:
+            return method()
+        except Exception:
+            log.exception("the draft loop would not answer %s()", name)
+            return None
+
     def start(self, timeout: float = START_TIMEOUT_S) -> bool:
         """Start the thread and report whether the loop got off the ground.
 
@@ -161,7 +191,22 @@ class DraftLoopThread:
             log.debug("the draft loop's connection would not close", exc_info=True)
 
     def stop(self, timeout: float = JOIN_TIMEOUT_S) -> None:
-        """Ask the loop to finish its tick, then wait for the thread."""
+        """Ask the loop to finish its tick, then wait for the thread.
+
+        Wired to the app's shutdown, so this is what a ``systemd`` restart runs:
+        ``SIGTERM`` -> uvicorn's lifespan shutdown -> here. It has to be both
+        **effective** and **bounded**. Effective because the deploy unit sends
+        that signal on every release and a loop that survived it would leave a
+        thread polling ESPN behind, one more on each deploy, all of them
+        invisible and each one behaving perfectly. Bounded because the process
+        is going away regardless: the thread is a daemon, so a tick that will
+        not end is logged and abandoned rather than holding the shutdown open.
+
+        ``DraftLoop.stop`` is thread-safe and wakes the loop out of its wait, so
+        the join normally returns in milliseconds even on the five-minute idle
+        cadence — a wait that had to time out first would put an idle interval
+        between every ``systemctl restart`` and the process actually going.
+        """
         loop = self._loop
         if loop is not None:
             try:
@@ -171,5 +216,15 @@ class DraftLoopThread:
         thread = self._thread
         if thread is not None:
             thread.join(timeout=timeout)
-            if not thread.is_alive():
+            if thread.is_alive():
+                # Worth a line: the process still exits (daemon thread), but a
+                # tick that outlives its shutdown is how a Claude call or an
+                # ESPN read gets cut off mid-write, and this is the only record
+                # that it happened.
+                log.warning(
+                    "the draft loop did not stop within %ss and is still running; the "
+                    "process is exiting anyway",
+                    timeout,
+                )
+            else:
                 self._thread = None
