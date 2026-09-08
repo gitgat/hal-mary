@@ -319,6 +319,14 @@ empty for exactly that reason.
   `draft.silent_after_seconds` the page stops reassuring and points at **Enter a pick by hand**. Only
   the loop can answer this: the board alone cannot tell "no picks because it has not started" from
   "no picks because ESPN is not saying", and those want opposite things said.
+- **`scripts/watch-draft.py` reads rosters as well as the board, because the board alone cannot
+  answer the question it exists for.** An empty `draftDetail.picks` means either "no draft yet" or
+  "a draft nobody can see", and those want opposite things done. A drafted player lands on a team's
+  roster whether or not the board is published, so `mRoster` breaks the tie and the script prints a
+  verdict in words. `inProgress` decides nothing and is printed only for the record: a full 12-team
+  room with a drawn order reported it `True` for the whole of a mock draft that produced no picks
+  and no rostered players. `tests/unit/test_watch_draft.py` pins the verdict, including that the
+  flag cannot move it.
 - **This league's flex slot is spelled `RB/WR/TE`, not `FLEX`.** Prose that explains "a FLEX slot"
   defines a term that appears nowhere on Caroline's screen.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export
