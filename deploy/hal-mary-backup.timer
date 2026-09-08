@@ -1,0 +1,25 @@
+# Nightly, at a time nobody is drafting.
+#
+# Persistent=true is the point of using a timer rather than cron: if the VM was
+# off at 04:17 — a Proxmox host reboot, a power cut — the backup runs once when
+# the machine comes back, instead of the night simply being skipped. A backup
+# regime that quietly misses the nights the box was unhealthy is insuring the
+# wrong thing.
+
+[Unit]
+Description=Nightly hal-mary database backup
+Documentation=https://github.com/gitgat/hal-mary
+
+[Timer]
+# UTC is pinned, not assumed. Without it the schedule follows the box's local
+# time, so the runbook's "04:17 UTC" would be true only for as long as nobody
+# runs timedatectl — and the backup would move without anything saying so.
+OnCalendar=*-*-* 04:17:00 UTC
+Persistent=true
+# So a fleet of boxes would not all wake at once, and so the snapshot is never
+# taken at exactly the same instant as anything else scheduled on the hour.
+RandomizedDelaySec=600
+Unit=hal-mary-backup.service
+
+[Install]
+WantedBy=timers.target

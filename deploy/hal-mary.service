@@ -1,0 +1,62 @@
+# hal-mary, as a systemd **user** service.
+#
+# Install to ~/.config/systemd/user/hal-mary.service — deploy/install.sh does it.
+# A user unit rather than a system one because the `claude` binary carries a
+# subscription login tied to a user account (~/.claude.json), and a system unit
+# running as root or a service account has no such login and cannot make a single
+# model call. `loginctl enable-linger` is what makes a user unit survive logout
+# and start at boot; install.sh runs that too.
+#
+# Two things this file exists to get right, both of which fail silently:
+#
+#   * Environment=PATH. A systemd user unit does NOT inherit the interactive
+#     shell's PATH, and both `uv` and `claude` live in per-user directories that
+#     .bashrc puts there. Without the line below the service starts, serves every
+#     page, and every Claude call fails with "claude: not found". This is the
+#     single most likely reason hal-mary is up and giving no advice.
+#
+#   * HAL_MARY_CONFIG / HAL_MARY_ENV. Every configured path — the database, the
+#     memory directory, the prompts — is anchored to the directory holding the
+#     config.toml that was actually loaded. Naming it explicitly means the
+#     service opens the same database and reads the same memory as a developer
+#     standing in the checkout, rather than quietly creating an empty one.
+
+[Unit]
+Description=hal-mary — a Claude-powered fantasy football advisor
+Documentation=https://github.com/gitgat/hal-mary
+# The ESPN sync and every Claude call need a routable network. network.target is
+# not enough: it means "networking has been configured", not "an address exists".
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/hal-mary
+
+# See the note above. %h is the service user's home; systemd expands it.
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HAL_MARY_CONFIG=%h/hal-mary/config.toml
+Environment=HAL_MARY_ENV=%h/hal-mary/.env
+# Unbuffered, so a line reaches the journal when it is written rather than when
+# the buffer fills. `journalctl --user -u hal-mary -f` is useless otherwise.
+Environment=PYTHONUNBUFFERED=1
+
+# Absolute: systemd does not search PATH for ExecStart. --frozen so a boot never
+# re-resolves the lockfile; deploy.sh is what updates dependencies.
+ExecStart=%h/.local/bin/uv run --frozen hal-mary serve
+
+# A crash mid-season recovers itself. Ten seconds is long enough that a boot-time
+# dependency has a chance to appear and short enough that nobody notices.
+Restart=on-failure
+RestartSec=10
+# The draft loop finishes its tick on SIGTERM rather than being cut in half.
+TimeoutStopSec=30
+
+# Logs go to the journal. There is deliberately no log file: one place to look,
+# rotated by systemd, and `journalctl --user -u hal-mary` is in the runbook.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hal-mary
+
+[Install]
+WantedBy=default.target

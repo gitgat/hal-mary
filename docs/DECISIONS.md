@@ -1031,3 +1031,126 @@ docstring carries the history so the reason survives the next refactor.
 **Would revisit if:** a second *trusted* writer appears — add it to `TRUSTED_SOURCE_JOBS` rather than
 inventing a second mechanism. An untrusted one needs no change at all, which is the point of the
 direction.
+
+---
+
+## 2026-09-07 — `serve` boots degraded; `hal-mary doctor` is what refuses
+
+**Decision.** There is no startup preflight in `serve`. A separate command, `hal-mary doctor`,
+answers "could this box actually run hal-mary" and exits nonzero for a fatal problem;
+`deploy/install.sh` and `deploy/deploy.sh` both run it and stop on that. The service itself starts
+whatever it finds, and the running application reports the same facts on `/status`.
+
+Task 11 deferred this decision to the deployment unit because the boot-or-degrade policy belongs
+with whoever owns the service, not with the code that loads the config.
+
+**Why.** The two failure modes are not symmetric, and the asymmetry runs the opposite way from
+intuition. A service that refuses to start because the memory directory is missing is *down* — at
+2am, with nobody watching, and with the one page that would have explained why now unreachable,
+because that page is served by the process that refused to start. A service that starts and says on
+`/status` that its memory directory is missing is still serving the draft page, still accepting
+hand-entered picks, and is telling the truth in the place someone would actually look. Refusing to
+boot converts a degradation into an outage, and it does so precisely when the degradation is
+cheapest to tolerate.
+
+The other half is that refusing has a *right* moment: install and deploy, when a human is at a
+terminal watching the output and a refusal costs nothing but their next thirty seconds. Putting a
+unit on the box that cannot make a single model call — because `claude` was never logged in — is a
+real and silent failure, and that is exactly what `install.sh` now stops.
+
+**Consequences.**
+
+* `Check.fatal` in `src/hal_mary/doctor.py` is a policy dial, not a severity label: it means "should
+  install.sh or deploy.sh stop over this". Missing `.env` keys, a missing or logged-out `claude`, an
+  unwritable database directory and a database on NFS are fatal. A missing memory directory or a
+  pending migration is a warning, printed and passed over. Nothing in doctor ever stops `serve`.
+* Doctor touches no network and spawns no process. `espn-check` is the command that asks ESPN
+  whether the cookies still work, deliberately kept separate: expired cookies must not block a deploy
+  that is fixing something else, and a preflight that costs a Claude call is one people learn to
+  skip. The `claude` login check therefore reads Claude Code's own `~/.claude.json` and says in its
+  output that it is a heuristic.
+* `/status` and doctor overlap on purpose. They are the same facts for two different people: whoever
+  has a browser and a running service, and whoever has a shell and no service yet. Both read through
+  `Settings` — `missing_secrets()`, `resolved_paths()` — so a check cannot drift from what the
+  application actually resolves.
+* `deploy.sh` has `HAL_MARY_SKIP_DOCTOR=1` for the one case the rule gets wrong: deploying the fix
+  that makes a not-yet-ready box ready.
+
+---
+
+## 2026-09-07 — The database backup is a subcommand using SQLite's online API, not `cp` in a script
+
+**Decision.** `hal-mary backup` (`src/hal_mary/backup.py`) snapshots the database through
+`sqlite3.Connection.backup`, writes to a temporary name and renames into place, and prunes to
+`backup.keep` files. `deploy/hal-mary-backup.timer` runs it nightly. There is no backup shell script.
+
+**Why, on the copy.** The database is opened in WAL mode so the web app can read while a job writes.
+In WAL mode a committed row can live entirely in `hal.db-wal` with nothing of it in `hal.db`, so
+`cp hal.db` produces a snapshot that opens cleanly, passes `PRAGMA integrity_check`, and is missing
+the most recent writes — the ones the season is actually made of. Copying all three files is no
+better: they are copied at different instants, so the `-wal` can be newer than the `-shm` header it
+is validated against. SQLite's online backup API reads through the same WAL the writers use and
+produces one self-contained file.
+
+**Why, on the subcommand.** `DB_PATH` is anchored to the directory holding the resolved
+`config.toml`, and `HAL_MARY_CONFIG` can move that. A shell script would have to re-implement that
+resolution, and the failure when it got it wrong would be a backup of a file that does not exist —
+silently, at 4am, discovered during a restore. Reading the path through `Settings` is the only way
+to be certain the backup is of the database the service opens.
+
+**Consequences.** Backing up a database that does not exist raises rather than succeeding quietly:
+"backed up nothing, successfully" is the report that hides a misconfigured `DB_PATH` for a season.
+Retention matches only files named `<stem>-<timestamp><suffix>`, because a backup directory is a
+directory on someone's disk and deleting a file we did not write is not a mistake anyone gets to
+make twice. `keep` is a count of files rather than days, because a timer can miss a night and "the
+last fourteen" is the window someone reasons about while restoring.
+
+---
+
+## 2026-09-08 — `DB_PATH` defaults outside the checkout, and doctor checks where it landed
+
+**Decision.** `config.DEFAULT_DB_PATH` is `~/hal-mary-data/hal.db`, not `./hal.db`. `hal-mary
+doctor` gained a `database location` check: a database under the directory holding `config.toml` is
+a warning, and fatal once `~/hal-mary-data` exists.
+
+**Why.** These two are the same bug seen from either end, and the combination was silent. Task 11
+made every configured path anchor to `config.toml`'s directory — correct, and it quietly changed
+what `./hal.db` *means*: no longer "wherever you started the process", but "inside the checkout".
+`.env.example` ships `DB_PATH=` empty, empty falls through to the default, and the default was
+relative. So the path of least resistance put `hal.db` — and the `backups/` directory that follows
+the database — inside the one directory `git pull` rewrites, `git checkout <sha>` moves, and a
+re-clone loses. `install.sh` meanwhile created and blessed `~/hal-mary-data`, which nothing then
+used, and doctor reported nine checks and zero failures over the whole arrangement.
+
+The runbook said to set it absolutely. A runbook instruction with nothing enforcing it is a
+comment.
+
+**Consequences.** The default is now correct with no `.env` at all, which is the state a box set up
+in a hurry is in. Two tests in `test_config.py` pin it, and the tests that were exercising
+*anchoring* through the default now pass an explicit relative `DB_PATH`, because those two things
+had been conflated. The location check is fatal only when `~/hal-mary-data` exists, because that
+directory is `install.sh`'s own artifact: if it is there and the database is not in it, someone
+skipped a step in the runbook — whereas a developer's checkout has no such directory and no
+deployment to break.
+
+---
+
+## 2026-09-08 — doctor resolves `claude` against the unit's PATH, not the caller's
+
+**Decision.** `hal_mary.doctor.UNIT_PATH` mirrors `Environment=PATH=` in
+`deploy/hal-mary.service`, and the binary check searches both that and the caller's `PATH`,
+reporting disagreement as fatal. `tests/unit/test_deploy.py` asserts the constant and the unit file
+are identical.
+
+**Why.** `shutil.which` asks about the PATH of whoever is running doctor, and the only PATH that
+matters is the one the service will have. The two differ in practice: `claude` installs into
+`~/.npm-global/bin`, which Ubuntu's `.bashrc` adds — and `.bashrc` returns early for a
+non-interactive shell, so that directory is absent under `ssh host 'command'`. Checking only
+`os.environ` therefore fails a perfectly healthy box every time `install.sh` is run
+non-interactively, and — the worse direction — passes a box where `claude` sits somewhere the
+unit's fixed PATH will never look. That second case is precisely the silent failure the unit file's
+own comment warns about: the service starts, serves every page, and fails every model call.
+
+**Consequences.** The check reports *where* it found the binary and against which PATH, so a
+disagreement names both. Two files now encode one fact, which is why the drift guard is a test
+rather than a comment.

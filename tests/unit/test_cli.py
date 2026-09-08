@@ -95,3 +95,54 @@ def test_job_appears_in_the_help(capsys):
     with _pytest.raises(SystemExit):
         main(["--help"])
     assert "job" in capsys.readouterr().out
+
+
+# --- hal-mary migrate -------------------------------------------------------
+#
+# `serve` migrates on startup as well. This command exists so `deploy.sh` fails
+# at the step called "migrate", with the SQL error in front of the person who
+# ran it, rather than inside a restarted service that then crash-loops.
+
+
+def test_migrate_applies_and_names_the_migrations(tmp_path, monkeypatch, capsys):
+    from hal_mary import cli
+    from hal_mary.config import load_settings
+
+    settings = load_settings(env={"DB_PATH": str(tmp_path / "hal.db")})
+    monkeypatch.setattr(cli, "load_cli_settings", lambda: settings)
+
+    assert main(["migrate"]) == 0
+
+    out = capsys.readouterr().out
+    assert "001_initial.sql" in out
+    assert str(tmp_path / "hal.db") in out
+
+
+def test_migrate_is_idempotent_and_says_so(tmp_path, monkeypatch, capsys):
+    from hal_mary import cli
+    from hal_mary.config import load_settings
+
+    settings = load_settings(env={"DB_PATH": str(tmp_path / "hal.db")})
+    monkeypatch.setattr(cli, "load_cli_settings", lambda: settings)
+
+    assert main(["migrate"]) == 0
+    capsys.readouterr()
+    assert main(["migrate"]) == 0
+    assert "already current" in capsys.readouterr().out
+
+
+def test_a_failing_migration_exits_nonzero(tmp_path, monkeypatch, capsys):
+    """A red migration must stop a deploy before it restarts anything."""
+    import sqlite3
+
+    from hal_mary import cli, db
+    from hal_mary.config import load_settings
+
+    settings = load_settings(env={"DB_PATH": str(tmp_path / "hal.db")})
+    monkeypatch.setattr(cli, "load_cli_settings", lambda: settings)
+    monkeypatch.setattr(
+        db, "migrate", lambda conn: (_ for _ in ()).throw(sqlite3.OperationalError("near AS"))
+    )
+
+    assert main(["migrate"]) != 0
+    assert "near AS" in capsys.readouterr().err

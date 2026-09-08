@@ -144,10 +144,12 @@ def test_missing_secrets_lists_only_the_absent_keys(minimal_config):
 
 
 def test_db_path_defaults_when_unset(minimal_config):
+    """Absolute, and outside the checkout. See the block near the end of this
+    file for why the default is not ``./hal.db`` any more."""
     settings = load_settings(config_path=minimal_config, env={})
-    # Anchored like every other path: a cwd-relative default under systemd
-    # creates a second, empty database beside the unit's working directory.
-    assert settings.db_path == minimal_config.parent / "hal.db"
+
+    assert settings.db_path.is_absolute()
+    assert settings.db_path == Path.home() / "hal-mary-data" / "hal.db"
     assert "DB_PATH" not in settings.missing_secrets()
 
 
@@ -412,10 +414,12 @@ def test_a_relative_config_path_still_yields_absolute_paths(tmp_path, monkeypatc
     (tmp_path / "config.toml").write_text(textwrap.dedent(MINIMAL_TOML))
     monkeypatch.chdir(tmp_path)
 
-    loaded = load_settings(config_path=tmp_path / "config.toml", env={})
+    loaded = load_settings(config_path=tmp_path / "config.toml", env={"DB_PATH": "hal.db"})
     # model_validate is the route a future loader would take; the relative
     # config_path is what it might plausibly hand over.
-    settings = Settings.model_validate({**loaded.model_dump(), "config_path": "config.toml"})
+    settings = Settings.model_validate(
+        {**loaded.model_dump(), "config_path": "config.toml", "db_path": "hal.db"}
+    )
 
     assert settings.config_path.is_absolute()
     assert settings.paths.memory_dir == tmp_path / "memory"
@@ -441,8 +445,45 @@ def test_settings_constructed_directly_with_a_relative_config_path_anchors_absol
         draft=DraftConfig(poll_seconds=5, advise_within_picks=2),
         web=WebConfig(host="127.0.0.1", port=8080, session_cookie="c"),
         jobs={},
+        db_path=Path("hal.db"),
     )
 
     assert settings.paths.memory_dir == tmp_path / "deploy" / "memory"
     assert settings.claude.system_prompt_file == tmp_path / "deploy" / "prompts" / "system.md"
     assert settings.db_path == tmp_path / "deploy" / "hal.db"
+
+
+# --- the default DB_PATH ------------------------------------------------------
+#
+# Empty is the shipped value in .env.example, so the default is what a box that
+# was set up in a hurry actually runs on. It has to be somewhere that survives a
+# deploy.
+
+
+def test_an_unset_db_path_defaults_outside_the_checkout(minimal_config, monkeypatch, tmp_path):
+    """The checkout is what a deploy replaces, so the database must not live in it.
+
+    Anchoring made ``./hal.db`` resolve beside ``config.toml`` — which is inside
+    the checkout, and beside the backups directory that follows the database.
+    """
+    # Outside tmp_path, because tmp_path *is* the checkout in this fixture and
+    # the whole point is that the database lands somewhere else.
+    home = tmp_path.parent / "fake-home-unset"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+
+    settings = load_settings(config_path=minimal_config, env={})
+
+    assert settings.db_path == home / "hal-mary-data" / "hal.db"
+    assert minimal_config.parent not in settings.db_path.parents
+
+
+def test_an_empty_db_path_is_the_same_as_unset(minimal_config, monkeypatch, tmp_path):
+    """``DB_PATH=`` is what .env.example ships and what a half-filled .env has."""
+    home = tmp_path.parent / "fake-home-empty"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+
+    settings = load_settings(config_path=minimal_config, env={"DB_PATH": ""})
+
+    assert settings.db_path == home / "hal-mary-data" / "hal.db"
