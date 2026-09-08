@@ -186,6 +186,18 @@ empty for exactly that reason.
   section of `config.toml`. `hal_mary.league.load_league_context` applies the precedence — a synced
   row wins field by field — and is the *only* way `board_build` and the advisor read league
   settings. Do not add a second path.
+- **The board's research is capped per source, and the league's shape is Python's job.** The first
+  real board cited *one* ESPN ranking article for 103 of its 200 players and correlated 0.879 with
+  that article's published top 40 — real research, but one outlet's order with corrections applied.
+  `draft.max_source_share` caps how much of the board any one website may be the deciding source
+  for, and `board_build` renders it as a **player count** rather than a fraction the model would
+  have to multiply out. Three facts a published ranking cannot carry are computed and handed over
+  rather than asked for: how many players are drafted in total, how many of each kind start
+  league-wide each week (`_shape_lines`), and what the season is a race for
+  (`LeagueContext.playoff_summary`, from `scheduleSettings`). None of this changes `BOARD_SCHEMA` —
+  `source_url` is still one link, redefined by the prompt as *the page that decided this player's
+  place*, which is what makes the cap auditable afterwards from the `notes` table. See
+  `docs/DECISIONS.md`.
 - **A pick that names nobody is ignored downstream too.** `EspnClient` already filters ESPN's
   pre-populated slots, and `draft/store.py` and the draft loop ignore any recorded pick with no name
   and no positive player id — counting one puts the next pick at 97, which reads as "the draft is
