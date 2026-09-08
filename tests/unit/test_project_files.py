@@ -158,7 +158,13 @@ def test_no_build_artifact_is_tracked():
         for name in tracked
         if name == ".venv"
         or name.startswith((".venv/", ".playwright-mcp/", "node_modules/"))
-        or name.endswith((".pyc", ".png"))
+        # Screenshots under docs/ are deliberate: the README shows the app, and
+        # a picture of it is the one thing prose cannot do. They are generated
+        # by `scripts/demo_seed.py` + a headless browser against DEMO data, so
+        # no real league member appears in one. A .png anywhere else is still a
+        # stray artifact.
+        or (name.endswith(".png") and not name.startswith("docs/screenshots/"))
+        or name.endswith(".pyc")
     ]
     assert not forbidden, f"build artifacts are tracked: {forbidden}"
 

@@ -1,162 +1,153 @@
 # hal-mary
 
-A Claude-powered fantasy football advisor for people who do not follow football.
+**A Claude-powered fantasy football manager for people who do not follow football.**
 
-Caroline is in an ESPN fantasy league. She and Bryan know the rules of the game and nothing else —
-no players, no strategy, no idea how a draft works. `hal-mary` closes that gap: it watches the league
-on ESPN, researches the live internet through the local `claude` binary, and tells her what to do in
-plain English, assuming no football knowledge at all.
+[![tests](https://img.shields.io/badge/tests-1493%20passing-brightgreen)](#testing)
+[![python](https://img.shields.io/badge/python-3.12-blue)](pyproject.toml)
 
-**hal-mary never writes to ESPN itself.** On draft night Caroline makes every click; hal-mary only
-tells her who to take. In season it is the front half of a split — hal-mary decides and emits an
-*action*, and Claude Cowork's browser performs it in ESPN's own interface through the MCP endpoint at
-`/mcp`. **hal-mary decides, Cowork executes, Cowork reports back; Cowork never chooses.** That is a
-security boundary, not a tidy separation: Cowork's browser reads pages five other league members
-write into, so an executor with no discretion gives injected text nothing to redirect. See
-[`docs/COWORK.md`](docs/COWORK.md).
+Caroline joined an ESPN fantasy league knowing the rules of football and nothing else — no players,
+no strategy, no idea how a draft works. hal-mary closes that gap. It watches her league, researches
+the live internet through the local `claude` binary, and tells her what to do in plain English,
+assuming zero football knowledge.
 
-## What it does
+It runs full time on a small VM: a phone-friendly web app, a draft-night advisor on a 90-second pick
+clock, a scheduler for the in-season jobs, and an MCP endpoint that lets Claude act on her team
+without ever letting Claude *decide* on her team.
 
-- **Before the draft.** `board_build` researches the live internet every morning and writes a tiered
-  board of about 200 players, with a note and a source URL behind each one. This is the expensive
-  work, and it happens *before* the draft on purpose.
-- **On draft night.** The draft page follows the draft pick by pick. When Caroline is within a
-  couple of picks of her turn, a card appears naming who to take and why — in seconds, because the
-  research already happened and the on-the-clock call runs with web tools switched off.
-- **In season.** It sweeps injury and role news on Wednesday and Saturday, scans the waiver wire on
-  Tuesday before ESPN processes claims, checks the lineup before each of the three kickoff windows,
-  and recaps the week.
-- **Any time.** `/chat` is a chat box wired to Claude with web access and the league's full history
-  in memory, so "should I trade this guy?" is a question she can just ask.
+<p align="center">
+  <img src="docs/screenshots/draft.png" width="330" alt="The draft page: an advice card, whose turn it is, the roster so far, and the ranked board">
+</p>
 
-## How you actually use it
+<p align="center"><em>Draft night. The card names one player and says why, in words that assume nothing.</em></p>
 
-hal-mary is a web app you open on a phone. There is nothing to install on the phone and no app
-store: it is a URL on the house network, protected by one shared password (`WEB_PASSWORD`).
+---
 
-The pages, in the order they matter:
+## The interesting parts
 
-| Page | What it is for |
-|---|---|
-| **Draft** (`/draft`, and the home page) | Draft night. The advice card, the board, and a box for entering a pick by hand. |
-| **Ask** (`/chat`) | Any question, answered by Claude with web access and the league's memory. |
-| **To do** (`/advice`) | The standing list of things hal-mary thinks she should do, each tickable off. |
-| **My team** (`/team`) | Her roster, by slot, in words rather than position codes. |
-| **League** (`/league`) | The other teams, the standings and the drawn draft order. |
-| **Status** (`/status`) | Whether anything is broken, what ran recently, and what Cowork did. |
+**It never guesses about football.** The model's training has a cutoff and the season does not, so
+every football fact comes from a Claude call with web tools on and is stored with the URL it came
+from. Every research prompt is handed today's date and two windows — what counts as news, and the
+point past which a source cannot decide a ranking on its own — because a model with no anchor
+treats its own cutoff as the present and says so confidently.
 
-### Day to day, in season
+**It works when ESPN does not.** Whether ESPN publishes picks live is genuinely unverified — two
+full mock drafts showed zero picks on the read API for as long as they were watched. So picks have a
+hand-entry path that needs no ESPN at all, and if the draft is running while ESPN stays quiet the
+page stops saying "watching every 5 seconds" and tells her to type them in.
 
-**Nothing.** The scheduler lives inside the `serve` process and runs the in-season jobs on their own
-cadence — see [§6](#6-what-runs-on-its-own-and-when). What Caroline does is open **To do** when it
-has something on it, and **Ask** when she has a question.
+**The advisor cannot make a slow call.** A `claude -p` call with web search takes 30–120 seconds and
+this league's pick clock is 90. So research happens *before* the draft and on-the-clock advice runs
+with web tools **off**, against a board already built. A test asserts the advice job's tool list is
+empty, for exactly that reason.
 
-The one recurring human job is the ESPN cookies, which expire every few weeks. `/status` says so in a
-red box when they go; [§3](#3-rotating-the-espn-cookies) is how to replace them.
+**Claude executes but never chooses.** In season hal-mary emits an *action*; Claude Cowork's browser
+performs it in ESPN's own interface. Cowork's browser reads pages five other league members write
+into, so an executor with no discretion gives injected text nothing to redirect. Notes from that
+browser are quarantined in the prompt, under their own heading, with their own budget.
 
-### Draft night
+**Two doors, two keys.** The dashboard is LAN-only behind a session password. `/mcp` carries a
+separate bearer token and is path-scoped at the edge, so a valid MCP token still 404s on `/draft`.
+With the token unset the endpoint answers 503 — absent never means open.
 
-This is the one evening the timing matters, and it has a short checklist.
+---
 
-**A week before, or at least the night before:**
+## See it without credentials
 
-```bash
-uv run hal-mary sync
-uv run hal-mary job board_build     # takes minutes; do not leave it to draft morning
-```
-
-The board is what all of draft night runs against. Without it the advice card falls back to
-arithmetic over whatever the database already knows, which is much worse than the researched board
-and much better than nothing.
-
-**The moment the draft room opens on ESPN:**
-
-1. Open `/draft` on a phone and log in.
-2. Tap **The draft has started** — it sits inside the note saying the pick numbers are provisional,
-   so there is nothing to hunt for.
-
-   That button is an **override, not the mechanism.** The loop finds a live draft on its own within
-   one idle interval of the first pick ESPN publishes. What the button buys is the window *before*
-   pick 1: ESPN draws the real order at the moment the draft opens (this league's `orderType` is
-   `DRAFT_START`), and hal-mary cannot read that order off ESPN's board until a real pick exists. If
-   Caroline is drawn first overall, the pre-draft placeholder puts her opening pick five away — past
-   `draft.advise_within_picks` — and no card is written for the pick she is actually on. The button
-   syncs and switches to the five-second cadence straight away, closing that window.
-3. Eyeball "on the clock" on the draft page against ESPN's own draft room for two picks.
-
-   Do this even when the numbers look plausible. A wrong draft order is a *silent* failure: the
-   page, the advice card and the loop all run the same snake arithmetic over the same list, so they
-   agree with each other while all three are wrong, and nothing raises a flag. A human comparing two
-   screens is the only thing that catches it.
-
-**During the draft**, the card appears on its own when she is within `draft.advise_within_picks` of
-her turn. She reads it, and she makes the pick in ESPN herself.
-
-**If ESPN is not cooperating** — no cookies, a loop that would not start (the page says so in a band
-across the top), or ESPN simply not publishing picks — the draft still works. Type each pick into
-**Mark him taken** on the draft page as it happens and hal-mary advises from that. With the
-commented-out `[league]` section of [`config.toml`](config.toml) filled in, hal-mary can run an
-entire draft with no ESPN access at all. In that mode nothing ever reads the drawn order, so step 2
-above is the *only* thing correcting it and step 3 is the only thing checking it — and the page keeps
-saying the numbers are provisional for exactly that reason.
-
-**Do not stop to rotate ESPN cookies mid-draft.** The advisor runs against a board built beforehand
-and picks can be entered by hand, so a dead cookie costs the automatic pick feed and nothing else.
-
-## Trying it on a laptop
-
-Everything below the runbook is about the production VM. To run it from a checkout:
+The app is dull when empty and the real one needs ESPN cookies, a league id and a Claude
+subscription. So there is a demo:
 
 ```bash
 uv sync
-cp .env.example .env         # then fill it in — see §9.1
-uv run hal-mary doctor       # can this box run hal-mary at all?
-uv run hal-mary espn-check   # do the ESPN cookies work?
-uv run hal-mary sync         # pull league state; writes memory/league.md
-uv run hal-mary serve        # prints the LAN URL to open on a phone
+uv run python scripts/demo_seed.py /tmp/demo/hal.db   # writes the db and an env file beside it
+HAL_MARY_ENV=/tmp/demo/env uv run hal-mary serve      # then open the URL it prints; password: demo
 ```
 
-`doctor` is the fastest answer to "what is still missing". It touches no network and spawns no
-process, so it is safe to run at any time, including during a draft.
+Six teams called `Team 1`..`Team 6`, owned by `Person 1`..`Person 6`, and a small board of real NFL
+players. **Every screenshot in this README is taken against that demo**, because the live league
+contains four real people and a public README cannot.
 
-**What "working" looks like at each step:**
+---
 
-| Step | Working |
+## What it looks like
+
+### Draft night
+
+| | |
 |---|---|
-| `uv sync` | exits 0; `uv run hal-mary --help` lists nine subcommands |
-| `doctor` | every line `[ok ]`, and the last line says nothing fatal |
-| `espn-check` | exits 0 and prints a line naming the league |
-| `sync` | prints team, player, roster-slot and free-agent counts, and creates `memory/league.md` |
-| `job board_build` | prints something like `200 players on the board, 200 notes` |
-| `serve` | `curl -fsS http://127.0.0.1:8080/healthz` answers `{"status":"ok"}` |
+| <img src="docs/screenshots/advice.png" width="300" alt="An advice card naming one player"> | **One card, one player, one reason.** Written when her turn is a couple of picks away, against a board built the night before. It names the fallback if someone takes him first, and what to worry about. |
 
-Development commands live in [`CLAUDE.md`](CLAUDE.md); `uv run pytest` and
-`uv run ruff check src tests scripts` are what CI runs on every push.
+### The rest of the app
 
-## Where the documentation is
-
-| Document | What is in it |
+| | |
 |---|---|
-| **This file**, below | The runbook: installing, deploying, logs, cookies, backups, MCP, configuration. |
-| [`docs/SETUP.md`](docs/SETUP.md) | The four things a human does by hand before hal-mary can see anything. |
-| [`docs/COWORK.md`](docs/COWORK.md) | Connecting Claude Cowork as hal-mary's hands, and the exact scheduled prompts. |
-| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Why it is built this way. Read the entry before re-opening a decision. |
-| [`docs/superpowers/specs/2026-09-07-hal-mary-design.md`](docs/superpowers/specs/2026-09-07-hal-mary-design.md) | The design of record. |
-| [`docs/superpowers/specs/2026-09-07-cowork-manager-design.md`](docs/superpowers/specs/2026-09-07-cowork-manager-design.md) | The decide/execute split, and why it is a security boundary. |
-| [`CLAUDE.md`](CLAUDE.md) | Conventions, hard rules and gotchas for anyone changing the code. |
+| <img src="docs/screenshots/team.png" width="240" alt="The team page with roster slots named in plain English"> | **My team.** Slots are named, never coded: the flex reads *"another running back, receiver or tight end"*, because "FLEX" is not a word she has any reason to know. |
+| <img src="docs/screenshots/chat.png" width="240" alt="The chat page"> | **Ask.** The one place with web tools on the request path. It already knows her league, her roster and where the draft got to, so she can ask "why him?" and get a real answer. |
+| <img src="docs/screenshots/league.png" width="240" alt="The league page showing the draft order"> | **League.** The draft order, and an honest note that ESPN draws the real one when the draft opens — so the numbers are a placeholder until the first pick lands. |
 
-## Contents
+### Diagnostics
 
-- [Runbook](#runbook) — [where everything is](#where-everything-is)
-- [1. First install, from nothing](#1-first-install-from-nothing)
-- [2. Is it broken, and which kind of broken?](#2-is-it-broken-and-which-kind-of-broken)
-- [3. Rotating the ESPN cookies](#3-rotating-the-espn-cookies)
-- [4. Deploying a change](#4-deploying-a-change)
-- [5. Backups, and restoring from one](#5-backups-and-restoring-from-one)
-- [6. What runs on its own, and when](#6-what-runs-on-its-own-and-when)
-- [7. Connecting Claude to hal-mary over MCP](#7-connecting-claude-to-hal-mary-over-mcp)
-- [8. Command reference](#8-command-reference)
-- [9. Configuration reference](#9-configuration-reference) — [the `.env` file](#91-the-env-file), [config.toml](#92-configtoml-section-by-section)
+<img src="docs/screenshots/status-health.png" width="420" alt="The status page listing problems in plain English">
+
+**Problems first, in words.** ESPN cookies expire every few weeks and the failure is silent, so the
+status page leads with what is broken and what it means — not a green tick that is only true because
+nothing has been checked.
+
+<img src="docs/screenshots/status-jobs.png" width="420" alt="The status page listing scheduled jobs and their cadences">
+
+**What runs on its own, and when.** Each job with its real cadence, the phase it belongs to, and a
+button to run it now.
+
+---
+
+## How it works
+
+```
+                    ESPN (read-only)          the live internet
+                          |                          |
+                          v                          v
+                   espn/client.py            claude_runner.py  ── the only module
+                          |                          |            that spawns `claude`
+                          +------------+-------------+
+                                       v
+                           SQLite  (board · notes · actions
+                                    picks · chat · advice)
+                                       |
+              +------------------------+------------------------+
+              v                        v                        v
+     FastAPI + HTMX + SSE      APScheduler jobs          MCP endpoint /mcp
+     phone-first dashboard     board · news · waivers    8 tools, bearer token
+              |                lineups · recap                  |
+              v                                                 v
+          Caroline                                      Claude Cowork
+        (every draft click)                        (executes, never chooses)
+```
+
+**Football reasoning lives in Markdown**, not in Python. `prompts/*.md` is the strategy and can be
+edited without touching code; Python does the bookkeeping — which players are gone, which slots are
+open, how many picks until her turn. An unfilled placeholder raises rather than reaching the model,
+because a prompt that silently says "there are {{team_count}} teams" produces advice for a league
+that does not exist.
+
+**Everything tunable is in `config.toml`**, keyed per job: models, timeouts, cadences, budgets,
+poll intervals. No model name is hardcoded anywhere.
+
+---
+
+## Testing
+
+```bash
+uv run pytest            # 1493 tests
+uv run ruff check .
+```
+
+Tests never reach the network — `tests/conftest.py` blocks all three HTTP stacks in play — and never
+spawn the real `claude` binary except one live integration test that skips when the binary or its
+auth is missing.
+
+The suite leans hard on **sabotage**: a guard is not trusted until breaking the thing it guards has
+been shown to turn it red. Several tests exist because a previous version passed against broken
+code — the fixture encoded the author's belief, so it could not contradict the belief that caused
+the bug. `docs/DECISIONS.md` records those, and why.
 
 ---
 
