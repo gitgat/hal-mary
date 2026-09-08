@@ -239,10 +239,62 @@ def test_every_unit_parses(unit: Path):
     assert parser.sections()
 
 
-@pytest.mark.skipif(shutil.which("systemd-analyze") is None, reason="no systemd-analyze")
+def _exec_start_programs() -> list[Path]:
+    """The programs the units run, ``%h`` expanded against this user's home.
+
+    Read out of the unit files rather than written down here, so the
+    precondition below cannot drift away from what ``verify`` actually goes
+    looking for.
+    """
+    programs: list[Path] = []
+    for unit in UNITS:
+        parser = _unit_parser()
+        parser.read_string(unit.read_text(encoding="utf-8"))
+        for section in parser.sections():
+            exec_start = parser[section].get("ExecStart")
+            if exec_start:
+                programs.append(Path(exec_start.split()[0].replace("%h", str(Path.home()))))
+    return programs
+
+
+def _why_systemd_verify_cannot_run() -> str | None:
+    """What this box is missing for ``systemd-analyze verify --user``, or None.
+
+    A **precondition**, not a softened assertion, and the distinction is the
+    point: a test skipped because its precondition is absent still runs, and
+    still bites, everywhere the precondition holds — this workstation and the
+    VM. A test whose assertion had been loosened to tolerate a runner would
+    pass everywhere and check nothing anywhere. If you are tempted to relax
+    the two asserts below instead of extending this function, that is the line
+    you would be crossing.
+
+    Three things are needed, not one. The binary is only the first, and it is
+    the one a CI runner *does* have — which is exactly why checking it alone
+    produced a red build that said nothing about this repository.
+    """
+    if shutil.which("systemd-analyze") is None:
+        return "needs systemd-analyze"
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if not runtime or not Path(runtime).is_dir():
+        # verify --user starts a user manager, which needs a runtime directory.
+        # Without one it dies with "Failed to initialize manager" before it has
+        # read a single unit.
+        return "needs XDG_RUNTIME_DIR: `systemd-analyze verify --user` starts a user manager"
+    for program in _exec_start_programs():
+        if not os.access(program, os.X_OK):
+            # verify resolves ExecStart and fails when the program is missing.
+            # On a CI runner uv lives in the actions tool cache, not ~/.local/bin.
+            return f"needs an executable at every ExecStart; {program} is not one here"
+    return None
+
+
 def test_systemd_accepts_every_unit(tmp_path: Path):
     """The real parser, not ours. A unit that only configparser likes is a unit
     that fails at ``systemctl --user daemon-reload`` on the box."""
+    blocked = _why_systemd_verify_cannot_run()
+    if blocked is not None:
+        pytest.skip(blocked)
+
     staged = tmp_path / "units"
     staged.mkdir()
     for unit in UNITS:
