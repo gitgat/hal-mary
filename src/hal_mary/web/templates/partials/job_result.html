@@ -1,0 +1,10 @@
+{# The answer to "run it now". A failed job is a sentence, never a 500: this is
+   the button somebody presses because something is already broken. #}
+<p class="result {{ 'ok' if outcome.ok else 'bad' }}">
+  {% if outcome.ok %}
+    {{ outcome.name }}: {{ outcome.summary }}
+  {% else %}
+    {{ outcome.name }} failed: {{ outcome.error }}
+  {% endif %}
+</p>
+<p class="small muted">Finished {{ when }}.</p>

@@ -33,9 +33,10 @@ from hal_mary import db, memory, prompts
 from hal_mary.config import Settings
 from hal_mary.draft import store
 from hal_mary.draft.board import normalize_name
+from hal_mary.jobs.registry import JobFailed, register
 from hal_mary.league import LeagueContext, load_league_context
 
-__all__ = ["BOARD_SCHEMA", "JOB_NAME", "PROMPT_FILE", "build_board"]
+__all__ = ["BOARD_SCHEMA", "JOB_NAME", "PROMPT_FILE", "build_board", "run"]
 
 log = logging.getLogger(__name__)
 
@@ -108,25 +109,44 @@ BOARD_SCHEMA: dict[str, Any] = {
 }
 
 
+@register(
+    JOB_NAME,
+    phases=("pre_draft",),
+    summary="Research and rebuild the ranked draft board.",
+)
+def run(
+    conn: sqlite3.Connection, settings: Settings, runner: Any, client: Any = None
+) -> str:
+    """The registry entry point: build the board, or say why not.
+
+    ``client`` is unused — the board is built from research and from what is
+    already in the database, and the pre-draft ESPN state it needs arrives
+    through ``hal-mary sync``. It is in the signature because every job has the
+    same one, which is what lets the scheduler and the CLI treat them alike.
+
+    The ``job_runs`` row is opened and closed by
+    :func:`hal_mary.jobs.registry.run_job`, not here. There is exactly one place
+    a run is recorded, so a job can never be reported as having started twice.
+    """
+    outcome = build_board(conn, settings, runner)
+    if not outcome["ok"]:
+        raise JobFailed(outcome["error"] or "the board build produced nothing usable")
+    return outcome["summary"]
+
+
 def build_board(conn: sqlite3.Connection, settings: Settings, runner: Any) -> dict[str, Any]:
-    """Research the board and replace it. Returns a summary; never raises.
+    """Research the board and replace it. Returns a summary dict; never raises.
 
     Never raising is the point: this runs on a scheduler, and a job that throws
     on a bad night is a job whose failure is discovered by its absence. Every
-    outcome comes back as a dict and is recorded on the ``job_runs`` row.
+    outcome comes back as a dict, and :func:`run` turns a failed one into the
+    :class:`~hal_mary.jobs.registry.JobFailed` the registry records.
     """
-    run_id = db.job_run_started(conn, JOB_NAME)
     try:
-        outcome = _build(conn, settings, runner)
+        return _build(conn, settings, runner)
     except Exception as exc:
         log.exception("board build failed")
-        outcome = {"ok": False, "players": 0, "notes": 0, "error": str(exc)}
-
-    if outcome["ok"]:
-        db.job_run_finished(conn, run_id, "ok", summary=outcome["summary"])
-    else:
-        db.job_run_finished(conn, run_id, "error", error=outcome["error"])
-    return outcome
+        return {"ok": False, "players": 0, "notes": 0, "error": str(exc)}
 
 
 def _build(conn: sqlite3.Connection, settings: Settings, runner: Any) -> dict[str, Any]:

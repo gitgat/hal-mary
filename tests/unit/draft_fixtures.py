@@ -179,9 +179,16 @@ def write_config(
         ("prompts_dir", "prompts"),
         ("memory_dir", "memory"),
         ("system_prompt_file", "prompts/system.md"),
+        # cowork/tasks.toml is a deliverable too, and a test that read a stub
+        # instead would not notice it going missing.
+        ("cowork_tasks", "cowork/tasks.toml"),
     ):
         line = f'{key} = "{relative}"'
-        assert line in text, f"config.toml no longer contains {line!r}"
+        if line not in text:
+            # A defaulted path that config.toml does not spell out. Pin it
+            # explicitly so this copy does not resolve it against tmp_path.
+            text = text.replace("[paths]\n", f'[paths]\n{key} = "{REPO / relative}"\n', 1)
+            continue
         text = text.replace(line, f'{key} = "{REPO / relative}"', 1)
     for old, new in (replace or {}).items():
         assert old in text, f"config.toml no longer contains {old!r}"
@@ -223,15 +230,19 @@ def seed_synced_league(conn, *, raw: dict[str, Any] | None = None, **overrides: 
         "draft_date": None,
         "roster_slots_json": json.dumps(REAL_ROSTER_SLOTS),
         "raw_json": json.dumps(raw_settings, sort_keys=True),
+        # NULL unless a test says otherwise, which is the state before the first
+        # in-season sync — and the state in which the bye check has no week.
+        "current_week": None,
     }
     row.update(overrides)
     conn.execute(
         """
         INSERT OR REPLACE INTO league_settings
             (id, season, league_id, name, team_count, scoring_type, draft_type,
-             draft_date, roster_slots_json, raw_json, updated_at)
+             draft_date, roster_slots_json, raw_json, updated_at, current_week)
         VALUES (1, :season, :league_id, :name, :team_count, :scoring_type, :draft_type,
-                :draft_date, :roster_slots_json, :raw_json, '2026-09-07T00:00:00+00:00')
+                :draft_date, :roster_slots_json, :raw_json, '2026-09-07T00:00:00+00:00',
+                :current_week)
         """,
         row,
     )
@@ -555,3 +566,43 @@ class RecordingBus:
 
     def publish(self, event: str, payload: dict) -> None:
         self.published.append((event, payload))
+
+
+def seed_roster(conn, players: list[dict[str, Any]], team_id: int = REAL_MY_TEAM_ID) -> None:
+    """Write ``teams``, ``players`` and ``roster_slots`` rows for one roster.
+
+    In that order, because the foreign keys on ``roster_slots`` are real: a
+    roster row for a player nobody has inserted raises ``IntegrityError``.
+    ``week`` is NULL, which is what ``espn.sync`` writes for "the current
+    snapshot" — see ``CURRENT_ROSTER_WEEK``.
+    """
+    conn.execute(
+        "INSERT OR REPLACE INTO teams (team_id, name, owner, abbrev, draft_slot, updated_at) "
+        "VALUES (?, 'Chaos Theory', 'Caroline', 'CHAO', 6, '2026-09-07T00:00:00+00:00')",
+        (team_id,),
+    )
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO players
+            (player_id, name, position, pro_team, injury_status, updated_at)
+        VALUES (:player_id, :name, :position, :pro_team, :injury_status,
+                '2026-09-07T00:00:00+00:00')
+        """,
+        [
+            {
+                "player_id": row["player_id"],
+                "name": row["name"],
+                "position": row.get("position"),
+                "pro_team": row.get("pro_team"),
+                "injury_status": row.get("injury_status"),
+            }
+            for row in players
+        ],
+    )
+    conn.execute("DELETE FROM roster_slots WHERE team_id = ?", (team_id,))
+    conn.executemany(
+        "INSERT INTO roster_slots (team_id, player_id, slot, week, updated_at) "
+        "VALUES (?, ?, ?, NULL, '2026-09-07T00:00:00+00:00')",
+        [(team_id, row["player_id"], row.get("slot")) for row in players],
+    )
+    conn.commit()

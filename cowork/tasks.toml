@@ -18,6 +18,14 @@
 #   enabled       ship the whole menu, run only what matters on day one
 #   cadence       hourly | daily | weekdays | weekly | manual (Cowork's own list)
 #   day, at       weekday name and 24-hour HH:MM, in [cowork].timezone
+#
+# Every `at` below is local time in [cowork].timezone, and each lineup run is
+# placed deliberately: AFTER hal-mary's own lineup_check on that day, which is
+# what queues the actions this run performs, and BEFORE the kickoff that locks
+# them. ESPN locks each player at his own game, so the Sunday run is sized
+# against the 10:00 early window and the Thursday and Monday runs against the
+# 17:15 night games. Moving one without moving the other is how this run finds
+# an empty queue and reports, correctly, that there was nothing to do.
 #   derive        "waivers" takes day/at from the league's own processing time
 #   lead_minutes  how far ahead of a derived time to run
 #   model         which model the Cowork task uses
@@ -38,7 +46,7 @@ purpose = "Perform hal-mary's queued lineup changes before the Sunday games star
 enabled = true
 cadence = "weekly"
 day = "sunday"
-at = "10:30"
+at = "09:00"
 model = "opus"
 mode = "execute"
 tools = ["pending_actions", "report_action", "report_observation"]
@@ -63,7 +71,7 @@ purpose = "The same run before Thursday night, which the Sunday run cannot cover
 enabled = true
 cadence = "weekly"
 day = "thursday"
-at = "17:30"
+at = "16:00"
 model = "opus"
 mode = "execute"
 tools = ["pending_actions", "report_action", "report_observation"]
@@ -139,7 +147,7 @@ purpose = "A last lineup run for Monday night, which the Sunday run cannot cover
 enabled = false
 cadence = "weekly"
 day = "monday"
-at = "16:30"
+at = "16:00"
 model = "opus"
 mode = "execute"
 tools = ["pending_actions", "report_action", "report_observation"]

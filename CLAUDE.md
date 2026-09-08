@@ -86,6 +86,8 @@ uv run hal-mary migrate        # apply pending schema migrations
 uv run hal-mary backup         # snapshot the database, prune to backup.keep
 
 # the chat page is at /chat; it is the one job with web tools on the request path
+uv run hal-mary job <name>     # run one job on demand, by name
+uv run hal-mary jobs           # list the jobs, their cadence and their last run
 ```
 
 Deployment lives in `deploy/` — a systemd **user** unit, `install.sh` and `deploy.sh` — and the
@@ -95,7 +97,9 @@ which drives them against a fabricated box; `shellcheck --severity=style deploy/
 ## Architecture in one paragraph
 
 FastAPI serves a phone-friendly web app (Jinja + HTMX + Server-Sent Events) backed by SQLite.
-APScheduler runs research jobs inside the same process. `hal_mary.claude_runner` is the **only**
+APScheduler runs research jobs inside the same process, started from `web.serve.start_scheduler` on
+lifespan startup; `hal_mary.jobs.registry` is the one table of jobs and the one place a `job_runs`
+row is written. `hal_mary.claude_runner` is the **only**
 module that spawns the `claude` binary; everything else calls through it. Football reasoning lives in
 Markdown prompt files under `prompts/`, not in Python — Python does bookkeeping (which players are
 gone, which roster slots are open, how many picks until her turn). Memory is SQLite tables plus an
@@ -159,6 +163,12 @@ empty for exactly that reason.
   in the constructor, and `_fetch_draft` returns early unless `draftDetail.drafted` is true — a flag
   that may only be set once the draft is over. `hal_mary.espn.client.draft_picks()` reads the raw
   `mDraftDetail` endpoint and ignores that flag; see `docs/DECISIONS.md`.
+- **`EspnClient.current_week()` distinguishes two failures.** No cookies at all raises
+  `EspnAuthError` — that is a configuration problem the status page must report. ESPN answering
+  badly (401, an outage, a nonsense value) returns `None`, because inventing a week from the
+  calendar would move the bye check onto the wrong players, which is worse than not making it.
+  Every caller handles `None`; `jobs/season.current_week` falls back to the database and then to
+  the week the model established.
 - **The ESPN fixtures in `tests/fixtures/espn/` are synthetic** until someone runs
   `uv run python scripts/record_espn_fixtures.py` with real cookies — the one exception is
   `draft_detail_prepopulated_real_league.json`, built field for field from the real pre-draft
@@ -363,6 +373,65 @@ empty for exactly that reason.
 - **A chat question is recorded by the POST and answered by the GET**, and which question a stream
   answers is derived (`chat.pending_question`), never stored. Anything that changes when the reply is
   persisted changes what the page believes is outstanding.
+- **Every job has one shape, and `run_job` is the only thing that records a run.**
+  `run(conn, settings, runner, client) -> str`, registered with
+  `@registry.register(name, phases=(...))`. `registry.run_job` opens and closes the `job_runs` row,
+  catches `BaseException` (not just `Exception`) and **never re-raises** — a failing job must not
+  take the web process down. The two exceptions: `KeyboardInterrupt` / `asyncio.CancelledError` are
+  re-raised, and `UnknownJob` is raised *before* a row is opened. A job that does its own
+  bookkeeping writes a second row and the status page reports a run that started twice; see
+  `docs/DECISIONS.md`.
+- **The job modules are imported lazily, from `registry.JOB_MODULES`.** They import `register` from
+  the registry, so the registry must not import them at module level. Adding a job means adding its
+  module to that tuple; forgetting to is why `hal-mary job <name>` says the name does not exist.
+- **A started player on a bye scores zero, and the alarm for it is arithmetic.**
+  `jobs/lineup_check.py` computes it in Python from the roster and the week, writes it as its own
+  `advice` row, and writes it **even when the Claude call fails**. Either source saying bye is
+  enough — over-flagging costs ten seconds, under-flagging costs the week. Do not make it depend on
+  a model call.
+- **There is no bye week in `players`.** `season.bye_weeks` reads `board.bye_week` and keys it by
+  **normalised name**, because a board row researched before the first sync carries a synthetic
+  negative id that will never join to a roster row.
+- **Name the weekday in a cron, never number it.** APScheduler's
+  `CronTrigger.from_crontab` counts `day_of_week` from **Monday**; crontab(5) counts from Sunday.
+  So `0 9 * * 0` — the obvious spelling of "Sunday morning" — fires on **Monday**, after every
+  Sunday game has been played. Use `sun`/`tue`/`wed,sat`. `tests/unit/test_scheduler.py` refuses a
+  digit in that field and asserts the computed `get_next_fire_time`, because asserting the cron
+  *string* renders somewhere catches none of this.
+- **Cadences are read in `scheduler.timezone`, not UTC.** These jobs are timed against NFL
+  kickoffs; "Sunday morning" in UTC is 02:00 Pacific. `scheduler_timezone(settings)` is the one
+  reader, and `misfire_grace_time_s` is set because APScheduler's default grace is *one second* — a
+  fire missed while the loop was blocked is otherwise dropped in silence.
+- **There are two schedules and they have to interleave.** hal-mary's own jobs run in-process in
+  `[scheduler].timezone`; Cowork's run in Cowork at times pasted from `hal-mary cowork-config`, in
+  `[cowork].timezone`. hal-mary *decides* and queues the actions, Cowork *performs* them, so every
+  Cowork lineup run must sit **after** that day's `lineup_check` and **before** kickoff. The two
+  zones must match: `tests/unit/test_schedule_agreement.py` refuses a config where they do not, and
+  `cowork.render` warns in the rendered output. Move one `at` in `cowork/tasks.toml` without
+  checking the other schedule and the Cowork run finds an empty queue and correctly reports that
+  there was nothing to do — forever.
+- **A job may have several cadences.** `JobConfig.cron` takes a string or a list; use
+  `config.crons` / `config.cadence`, never `config.cron`. `lineup_check` has three, because ESPN
+  locks each player at **his own kickoff**: a Thursday starter ruled out on Wednesday is lost by
+  Sunday morning. Each cadence is its own APScheduler id — `lineup_check`, `lineup_check#2` — so
+  `max_instances=1` still means one copy of each.
+- **`season.current_week` reads `LeagueContext.current_week`, not `roster_slots.week`.**
+  `espn.sync` writes every roster row of the current snapshot with a NULL week, so that column
+  looks like a source and is not. The order is ESPN, then the week the last sync stored, then
+  `None` — never the calendar. The fallback is what covers cookies that expired on Friday.
+- **An empty bye list means two different things and must not render as one.**
+  `lineup_check.ByeCheck` carries `checked` (was the week known at all) and `unchecked` (starters
+  with no bye week on file — anyone added after the board was built). Both reach the summary and the
+  lineup card. Silence here reads as "nobody is on a bye", which is the one sentence she must not be
+  told wrongly.
+- **Which jobs are scheduled depends on `scheduler.current_phase`**, re-checked daily by the
+  reserved `_phase_check` job. `max_instances=1` and `coalesce=True` on everything. A scheduled run
+  opens its own connection and its own `ClaudeRunner` inside its own thread.
+- **`[research]`, not `[season]`.** `Settings.season` is already the ESPN season year, so a
+  `[season]` config section cannot exist. The in-season prompt sizes live under `[research]`.
+- **Advice bodies are untrusted text.** They carry what a model wrote from the open web, so
+  `web.app.advice_body` escapes first and *then* honours `**bold**` and blank lines. Nothing else is
+  interpreted, and the order must not be reversed.
 - **`app.routes` does not contain your routes.** This FastAPI represents each
   `include_router` as one opaque `_IncludedRouter` object holding the original router, so a test
   that walks `app.routes` looking for paths finds three pathless objects and silently checks

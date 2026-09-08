@@ -1,0 +1,24 @@
+{# One card in the advice feed, and the tick that marks it actioned.
+
+   The tick is a form, not a link: it changes state, so it carries the CSRF
+   token like every other post on the private router. It posts to itself and
+   swaps this fragment back, so a phone that has lost its data connection still
+   works through the plain form fallback. #}
+
+<article class="advice-item{% if item.done %} advice-item--done{% endif %}"
+         id="advice-{{ item.id }}">
+  <div class="advice-item-head">
+    <h3>{{ item.headline }}</h3>
+    <form hx-post="/advice/{{ item.id }}/done"
+          hx-target="#advice-{{ item.id }}"
+          hx-swap="outerHTML"
+          method="post" action="/advice/{{ item.id }}/done">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="quiet" type="submit">
+        {% if item.done %}Done — undo{% else %}Mark done{% endif %}
+      </button>
+    </form>
+  </div>
+  {% if item.body %}<div class="advice-item-body">{{ item.body|advice_body }}</div>{% endif %}
+  <p class="small muted">{{ age_in_words(item.created_at) }}{% if item.source_job %} · {{ item.source_job }}{% endif %}</p>
+</article>

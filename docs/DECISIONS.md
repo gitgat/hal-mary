@@ -1305,3 +1305,219 @@ condition, as a test. `test_the_deploy_markers_never_reach_the_suite_it_gates_on
 stub's record of the environment it was handed. The rest of the suite was checked for the same
 class of leak by running all of it under `HAL_MARY_CONFIG`, `HAL_MARY_ENV` and `DB_PATH` pointed at
 a decoy deployment: 1155 passed, unchanged.
+## 2026-09-08 — A job run is recorded in exactly one place
+
+**Decision.** `hal_mary.jobs.registry.run_job` opens and closes the `job_runs` row for every job,
+and nothing else does. `board_build.build_board` — which used to open its own — now returns its
+outcome dict and lets `board_build.run`, the registered entry point, raise `JobFailed` on a failure
+the registry then records.
+
+**Why.** Every job now has one shape, `run(conn, settings, runner, client) -> str`, because that is
+what lets the scheduler, `hal-mary job`, and the button on the status page treat them
+interchangeably. If bookkeeping also lived inside a job, running that job through the registry would
+write two rows: one opened by the job and closed, and one opened by `run_job` — and the status page
+would report a job that started twice and finished once. `tests/unit/test_job_registry.py`'s
+`test_run_job_records_exactly_one_row_for_the_board_build` is the lock on that door.
+
+**`run_job` never re-raises, and neither does its own bookkeeping.** It catches `BaseException`, not
+`Exception`: a `MemoryError` out of a research job on a Sunday morning is still not a reason for the
+web process to stop serving the draft page. `KeyboardInterrupt` and `asyncio.CancelledError` are the
+two that genuinely mean "stop" and are re-raised, because a job that could not be cancelled would be
+a job that outlives a shutdown. A database that cannot even open the `job_runs` row is logged and the
+job runs anyway.
+
+The one thing that *does* raise out of `run_job` is `UnknownJob`, and it happens before a row is
+opened — so a typo never leaves behind a run that looks like it started and never finished.
+
+---
+
+## 2026-09-08 — The bye-week alarm is arithmetic, and it survives a failed research call
+
+**Decision.** `jobs/lineup_check.py` computes, in Python, which players in Caroline's *starting*
+slots are on a bye this week, and writes that as its own `advice` row with the player's name in the
+headline. It writes that row **even when the Claude call fails**, and raises `JobFailed` afterwards.
+A flag is raised if *either* source says bye: the `board.bye_week` researched before the draft, or
+the `bye_week` the model just returned from the live NFL schedule.
+
+**Why.** A started player on a bye scores **zero** — not a low score, nothing. It is the single most
+common mistake somebody makes in their first fantasy season, it is never intentional, and it is
+entirely determined by a roster and a calendar. Making it depend on a web-enabled model call that
+takes 30 to 120 seconds and sometimes times out would mean the one piece of advice hal-mary can
+always give is the one it gives least reliably.
+
+That is also why it is a separate `advice` row rather than a line inside the lineup card. She reads
+these on a phone; a warning three quarters of the way down a card is a warning that gets scrolled
+past. The alarm is written *after* the lineup card so that a newest-first feed puts it on top.
+
+**The asymmetry is deliberate.** Flagging a player whose bye is actually next week costs her the ten
+seconds it takes to look at ESPN. Failing to flag one costs every point that roster slot could have
+scored, and she finds out on Monday. So a disagreement between the two sources raises the flag and
+says which source claimed it, rather than resolving it quietly in favour of either.
+
+**Would revisit if:** a reliable bye-week source exists in the database for every rostered player —
+`players` has no `bye_week` column today, and the board only covers players who were researched
+before the draft. `season.bye_weeks` matches by normalised **name** rather than id for exactly that
+reason: a board row built before the first ESPN sync carries a synthetic negative id that will never
+join to a real roster row.
+
+---
+
+## 2026-09-08 — Which jobs exist at all depends on the phase, and the phase is re-checked daily
+
+**Decision.** Every job declares its phases (`pre_draft`, `draft_live`, `in_season`, `off_season`)
+to `registry.register`. `scheduler.current_phase` derives the current one from the league's draft
+date and the windows under `[scheduler]` in `config.toml`, and `scheduler.apply_phase` makes the
+running `AsyncIOScheduler` hold exactly that phase's enabled, cron'd jobs. A reserved job,
+`_phase_check`, re-evaluates it daily and re-applies.
+
+**Why.** A nightly board build is exactly right the week before the draft and is a paid, web-enabled
+Claude call producing a board for a draft that already happened every morning after it. A lineup
+check the week before has no lineup. Encoding that as one flag per job in `config.toml` would mean
+somebody has to remember to flip five of them on draft night — which is the night nobody is going to
+be editing TOML. The daily re-check is what lets a process started on Monday become an in-season
+process on Wednesday without a restart.
+
+`max_instances=1` and `coalesce=True` on every registered job. A research call can take fifteen
+minutes; a second copy starting on top of it means two `claude` subprocesses, two budgets, and two
+writers into one SQLite file. `coalesce` collapses a backlog — a box that was asleep — into one run
+rather than firing every missed hour in a row.
+
+**With no draft date, a made pick is the evidence.** ESPN can leave `draftSettings.date` null, and
+this league's was null when it was read. `current_phase` then answers `in_season` if any pick names
+somebody and `pre_draft` otherwise — using the same "a pick with no name and no positive player id
+is one of ESPN's pre-populated slots" rule as everything else. It never raises: a process that will
+not start because it could not work out the date is a far worse failure than one that assumes the
+draft has not happened.
+
+---
+
+## 2026-09-08 — The in-season sizes live in `[research]`, not `[season]`
+
+**Decision.** The `[research]` section of `config.toml` carries `free_agent_size`,
+`free_agent_shortlist`, `note_limit`, `note_shelf_life_days` and `waiver_claims`.
+
+**Why.** The obvious name is `[season]`, and it cannot be used: `Settings.season` is already the
+ESPN season *year*, read from the environment, and a second `season` attribute is a `SyntaxError` at
+the call site that builds `Settings` — which is how this was found. `[research]` also reads more
+accurately: these are how much live state the research jobs put in front of Claude, not facts about
+the season.
+
+
+---
+
+## 2026-09-08 — Weekday names in every cron, and Pacific rather than UTC
+
+**Decision.** Every `cron` in `config.toml` names its weekday (`sun`, `tue`, `wed,sat`), never
+numbers it. `[scheduler].timezone` is `America/Los_Angeles` and `scheduler_timezone()` is the only
+place it is read. `tests/unit/test_scheduler.py` asserts the computed `get_next_fire_time` lands on
+the intended weekday, and separately refuses any digit in a cron's day-of-week field.
+
+**Why.** APScheduler's `CronTrigger.from_crontab` numbers `day_of_week` from **Monday**. crontab(5)
+numbers it from Sunday. Everything shipped in the first cut of this task used the crontab spelling,
+so every weekday job fired **one day late**, verified against the branch's own APScheduler 3.11.3:
+
+```
+0 9 * * 0    lineup_check  intended Sunday   -> Mon 2026-10-12 09:00
+0 8 * * 2    waiver_scan   intended Tuesday  -> Wed 2026-10-07 08:00
+0 7 * * 3,6  news_sweep    intended Wed+Sat  -> Thu + Sun
+0 10 * * 2   weekly_recap  intended Tuesday  -> Wed 2026-10-07 10:00
+```
+
+The bye-week alarm — the single highest-value thing hal-mary produces — would have been written
+after every Sunday game had already kicked off, and waiver claims submitted after ESPN had processed
+them. The job would have run, succeeded, and shown green.
+
+**Nothing caught it**, because the tests asserted that the cron *string* rendered on the status page
+and in `hal-mary jobs`. A cron string is not a fire time. The two tests added here assert the thing
+that matters and refuse the spelling that caused it.
+
+UTC was the second half of the same mistake: these cadences are timed against NFL kickoffs, and
+`0 8 * * sun` in UTC is 01:00 Pacific — before the Sunday inactive lists the lineup prompt is told
+to go and read, and an hour adrift again whenever the clocks change.
+
+`misfire_grace_time_s` (3600) is set for the same family of reasons: APScheduler's default grace is
+**one second**, so a fire missed while the loop was blocked is skipped with only a log line.
+
+---
+
+## 2026-09-08 — The lineup check runs three times a week, because ESPN locks per player
+
+**Decision.** `JobConfig.cron` accepts a string or a list, exposed as `crons` / `cadence`.
+`lineup_check` ships three: Sunday 08:00, Thursday 15:00 and Monday 15:00, Pacific. Each cadence is
+a separate APScheduler registration (`lineup_check`, `lineup_check#2`, `lineup_check#3`) so
+`max_instances=1` still means one copy of each.
+
+**Why.** ESPN's `rosterLocktimeType` on this league is `INDIVIDUAL_GAME`: a player locks at **his
+own kickoff**, not at one deadline for the week. A Thursday-night starter ruled out on Wednesday
+evening is already lost by the time a Sunday-morning check runs, and the same is true of Monday
+night. One weekly run silently covers about two thirds of the games.
+
+They could not share a cron: the hours differ, and folding them into `0 8,15 * * sun,thu,mon` would
+be six web-enabled Opus calls a week instead of three. Cowork's own `cowork/tasks.toml` independently
+arrived at the same sunday/thursday/monday split, which is corroboration rather than coincidence.
+
+---
+
+## 2026-09-08 — "No byes" and "byes not checked" are different sentences
+
+**Decision.** `lineup_check._bye_check` returns a `ByeCheck` carrying `alarms`, `unchecked`
+(starters with no bye week on file) and `checked` (whether the week was known at all). All three
+reach the `job_runs` summary and the lineup card. A run that could not check says
+"DID NOT CHECK BYE WEEKS"; a clean run says "nobody in your lineup is on a bye".
+
+**Why.** Both conditions used to render as an empty alarm list, which is silence, which reads as
+"nobody is on a bye" — the one reassuring sentence that must never be produced by not looking. The
+week goes unknown in an ordinary way (cookies expire on Friday, Sunday's ESPN call returns nothing,
+and now the stored week covers that), and a starter goes unchecked in an even more ordinary one: a
+player claimed off waivers in October was never on the researched board, so `board.bye_week` has no
+row for him.
+
+The job is **not** failed for either. Thinner advice beats none on a Sunday morning — the same rule
+`standing_memory()` follows. It just has to say which it is giving.
+
+**The proper fix is a `players.bye_week` column** filled from ESPN's `proTeamSchedules_wl` view;
+the fixture already exists at `tests/fixtures/espn/pro_schedule.json`. Until then, `unchecked` is
+the honest report of the gap rather than a hidden one.
+
+
+---
+
+## 2026-09-08 — Two schedules, one timezone, and an ordering that has to hold
+
+**Decision.** `[cowork].timezone` is `America/Los_Angeles`, the same as `[scheduler].timezone`. They
+stay two keys, and the drift is made loud in two places: a test asserts the shipped config gives
+them the same value, and `cowork.render` adds a warning to the rendered output when they differ.
+The three Cowork lineup runs in `cowork/tasks.toml` were re-timed to sit between hal-mary's own
+`lineup_check` and kickoff: Sunday 10:30 -> **09:00**, Thursday 17:30 -> **16:00**, Monday 16:30 ->
+**16:00**.
+
+**Why the re-timing.** Those times were written against Eastern kickoff quotes — 10:30 is two and a
+half hours before a 13:00 ET Sunday start, 17:30 is comfortably before 20:15 ET on Thursday. Read in
+the operator's actual zone they are half an hour *after* the Sunday early window kicks off and
+fifteen minutes after the Thursday night game does. `[cowork].timezone = "UTC"` hid that: the
+renderer warned about the zone, but the numbers beside it looked perfectly reasonable, and a
+placeholder that prints a plausible wrong time is worse than one that prints nothing.
+
+**Why they stay two keys.** They are genuinely different ideas — the zone hal-mary's own cron is
+read in, and the zone a person types into somebody else's web form — and Task 14 documented that
+distinction deliberately. Collapsing them would be right for this deployment and wrong for an
+operator who is not sitting next to the box. What was actually missing is not one key; it is that
+nothing ever compared them.
+
+**The invariant worth more than either.** The two schedules are a pipeline: hal-mary works out the
+lineup changes and queues them as `actions`; Cowork opens ESPN and performs them. If a Cowork run
+drifts in front of the check that fills its queue, it finds nothing, reports "nothing to do", and is
+*correct* — so the failure is completely silent and the lineup simply never changes.
+`test_every_cowork_lineup_run_happens_after_the_check_that_fills_its_queue` and
+`test_both_schedules_finish_before_the_ball_is_kicked` pin both ends of that window, in local time,
+against the real kickoff hours.
+
+**Also.** The summary table's `When` column was a fixed 28 characters, sized for `UTC`. A real IANA
+name is nineteen characters and pushed every following column out of true, in the one output whose
+entire purpose is being read by a person. The widths are measured now, with a test.
+
+**Not covered, and worth a follow-up:** the `waivers` task derives its time from the league's own
+processing day less `waiver_lead_minutes`. For this league (Wednesday 10:00) that lands Tuesday
+10:00, safely after the Tuesday 08:00 `waiver_scan`. A league that processed on a Tuesday would
+derive a Monday run — in front of the scan that fills it — and nothing would catch that, because the
+derivation depends on league settings rather than on anything in the repo.
