@@ -73,7 +73,8 @@ FTS5-indexed `notes` table that every job writes to and every prompt retrieves f
 A `claude -p` call with web search takes 30 to 120 seconds. This league's pick clock is **90
 seconds**, confirmed from the live ESPN payload. **Therefore research happens before the draft
 (`jobs/board_build.py`) and on-the-clock advice (`draft/advisor.py`) runs with web tools off,
-against a board that is already built.** Any change that puts a web-enabled Claude call on the
+against a board that is already built.** The five-second poll is draft night only: outside a live
+draft the loop idles at `draft.idle_poll_seconds` and stops entirely once the board is full. Any change that puts a web-enabled Claude call on the
 pick-clock path is wrong; `tests/unit/test_advisor.py` asserts the `draft_advice` job's tool list is
 empty for exactly that reason.
 
@@ -195,6 +196,26 @@ empty for exactly that reason.
   live, shared by the team page and the draft page. "QB" is not a word Caroline has any reason to
   know, so no heading, filter or empty state may be a bare code — and the flex slot is labelled by
   what it accepts rather than called a "flex".
+- **The draft loop has three cadences, and the board picks which.** `draft_phase` in
+  `draft/loop.py` reads two numbers off the `mDraftDetail` payload the loop already fetches — how
+  many slots ESPN's board has, and how many hold a real player — and returns idle
+  (`draft.idle_poll_seconds`), live (`draft.poll_seconds`) or done, which stops the loop. **The
+  `drafted` and `inProgress` flags are reported by `EspnClient.draft_status()` and decide nothing**:
+  `drafted` is set late (that is why the raw endpoint exists) so it cannot stop the loop, and
+  `inProgress` describes the lobby, not picks, so it cannot start the fast clock. A `drafted: true`
+  over a partly filled board keeps polling and logs the discrepancy. Five seconds forever is
+  2,073,600 requests a season for a job that needs 2,160; see `docs/DECISIONS.md`.
+- **"The draft has started" is an override, never the mechanism.** `POST /draft/started` puts the
+  loop on live cadence and syncs, but the loop still finds the draft on its own within one idle
+  interval from the first pick ESPN reports. Any change that makes the button load-bearing is wrong:
+  it is the control someone forgets on the one night it matters. The override expires after
+  `draft.live_override_seconds`.
+- **`DraftLoop.stop()` must stay callable from another thread, and must wake the wait.** The web
+  app's shutdown calls it from its own thread. `asyncio.Event.set` from off the loop resolves the
+  waiter through `call_soon`, which never writes the loop's self-pipe, so the loop sleeps out its
+  full timeout — five minutes on the idle cadence, once per deploy, each one leaving a thread still
+  polling ESPN. The stop flag is a `threading.Event` and the wake-up goes through
+  `call_soon_threadsafe`, the same rule `hal_mary.events` follows.
 - **`app.routes` does not contain your routes.** This FastAPI represents each
   `include_router` as one opaque `_IncludedRouter` object holding the original router, so a test
   that walks `app.routes` looking for paths finds three pathless objects and silently checks

@@ -628,3 +628,67 @@ def test_player_name_map_is_built_once_and_reused(settings, fake_espn):
     client.player_name_map()
 
     assert len(fake_espn.calls) == calls_after_first
+
+
+# --- how far along is the draft? -------------------------------------------
+#
+# The draft loop chooses its cadence from this. It has to come off the read the
+# loop already makes: a second GET on the pick clock is exactly the over-polling
+# the phases exist to remove.
+
+
+def test_draft_status_is_none_before_anything_has_been_read(settings, fake_espn):
+    """"Nothing has been read" and "no draft" are different answers."""
+    client = client_for(settings, transport=draft_transport(load_espn_fixture(PREPOPULATED)))
+
+    assert client.draft_status() is None
+
+
+def test_draft_status_costs_no_extra_request(settings, fake_espn):
+    seen: list[httpx.Request] = []
+    client = client_for(
+        settings, transport=draft_transport(load_espn_fixture(PREPOPULATED), requests_seen=seen)
+    )
+
+    client.draft_picks()
+    client.draft_status()
+    client.draft_status()
+
+    assert len(seen) == 1, "the status comes off the read draft_picks already made"
+
+
+def test_the_real_pre_draft_payload_reads_as_ninety_six_slots_and_no_picks(settings, fake_espn):
+    """What the live league answers today, field for field."""
+    client = client_for(settings, transport=draft_transport(load_espn_fixture(PREPOPULATED)))
+
+    client.draft_picks()
+    status = client.draft_status()
+
+    assert status["slots"] == 96
+    assert status["picks_made"] == 0
+    assert status["drafted"] is False
+
+
+def test_draft_status_counts_only_the_slots_with_a_real_player(settings, fake_espn):
+    client = client_for(settings, transport=draft_transport(_board_with_picks_made(3)))
+
+    client.draft_picks()
+
+    assert client.draft_status()["picks_made"] == 3
+
+
+def test_espns_own_flags_are_carried_through_as_they_are(settings, fake_espn):
+    """Carried, not obeyed — the loop decides. A missing flag stays None."""
+    payload = _board_with_picks_made(3)
+    payload["draftDetail"]["inProgress"] = True
+    payload["draftDetail"]["drafted"] = True
+    client = client_for(settings, transport=draft_transport(payload))
+
+    client.draft_picks()
+    assert client.draft_status()["in_progress"] is True
+    assert client.draft_status()["drafted"] is True
+
+    payload["draftDetail"].pop("inProgress")
+    other = client_for(settings, transport=draft_transport(payload))
+    other.draft_picks()
+    assert other.draft_status()["in_progress"] is None, "absent is not False"

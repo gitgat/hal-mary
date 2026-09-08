@@ -249,6 +249,7 @@ def test_no_route_escapes_the_password_by_accident(db_path: Path):
         "/draft",
         "/draft/live",
         "/draft/pick",
+        "/draft/started",
         "/draft/unmatched/resolve",
         "/sync",
         "/events",

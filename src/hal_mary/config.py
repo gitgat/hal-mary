@@ -135,6 +135,18 @@ class DraftConfig(_Frozen):
     """
 
     poll_seconds: int
+    #: What the loop waits between polls when no draft is running. The draft is
+    #: one evening; ``poll_seconds`` around the clock is three orders of
+    #: magnitude more requests than the job needs. Defaulted so an older
+    #: ``config.toml`` without it still loads — at the value the shipped file
+    #: carries, not at ``poll_seconds``, because a default that quietly restored
+    #: the five-second forever loop would hide exactly the bug it replaces.
+    idle_poll_seconds: int = 300
+    #: How long "The draft has started" pins the loop to ``poll_seconds`` while
+    #: ESPN's board still shows no picks. It has to outlive the gap between the
+    #: draft opening and pick 1; it expires so a stray tap costs an hour rather
+    #: than the rest of the season.
+    live_override_seconds: int = 3600
     advise_within_picks: int
     #: How many players the pre-draft research job is asked to rank.
     board_size: int = 200

@@ -1,0 +1,36 @@
+{# What "The draft has started" found, reported where she pressed it.
+
+   Three separate facts, because they fail separately: whether the loop changed
+   cadence (it did not, if no loop is running), whether the sync worked, and
+   whether the order ESPN drew has actually been read. A single "done!" would
+   hide the case that matters — the sync succeeded and the order is still the
+   pre-draft placeholder, which is exactly when she needs to keep checking the
+   numbers against ESPN's draft room. #}
+{% if switched %}
+  <p><strong>hal-mary is watching ESPN {{ switched.cadence }} now.</strong></p>
+{% else %}
+  <p><strong>hal-mary is not following the draft.</strong> Nothing is reading ESPN on this
+    box, so nothing changed about how often it looks. You can still enter every pick by hand
+    at the bottom of this page.</p>
+{% endif %}
+
+{% if error %}
+  <p class="small">ESPN could not be reached, so the draft order was not re-read:
+    {{ error }}. Tap again in a moment.</p>
+{% elif notice %}
+  <p class="small">{{ notice }}</p>
+{% endif %}
+
+{% if turn.order_drawn %}
+  <p class="small">hal-mary has read the order ESPN drew, so the pick numbers on this page are
+    the real ones.
+    {% if turn.known and not turn.over %}
+      Pick {{ turn.next_overall_pick }} — <strong>{{ turn.on_the_clock }}</strong> is on the clock,
+      and {% if turn.mine_now %}it is your pick.{% else %}yours is {{ turn.picks_until_mine }} pick{{ '' if turn.picks_until_mine == 1 else 's' }} away.{% endif %}
+    {% endif %}
+  </p>
+{% else %}
+  <p class="small">The pick numbers are still provisional: ESPN has not shown hal-mary the
+    order it drew, which it can only read once the first pick has been made. Check who is on
+    the clock here against ESPN's draft room until then.</p>
+{% endif %}

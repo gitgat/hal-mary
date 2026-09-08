@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
 from draft_fixtures import (
     SAMPLE_BOARD,
@@ -40,7 +41,13 @@ from draft_fixtures import (
 )
 
 from hal_mary.draft import store
-from hal_mary.draft.loop import DraftLoop, record_manual_pick
+from hal_mary.draft.loop import (
+    PHASE_DONE,
+    PHASE_IDLE,
+    PHASE_LIVE,
+    DraftLoop,
+    record_manual_pick,
+)
 from hal_mary.espn.client import EspnUnavailable
 
 ADVICE = {
@@ -201,7 +208,12 @@ async def test_run_forever_keeps_polling_and_stops_when_told(tmp_path):
     failure gets waved through on the night.
     """
     _, loop, client, _, _ = loop_ready(
-        tmp_path, picks=picks_through(1), replace={"poll_seconds = 5": "poll_seconds = 0"}
+        tmp_path,
+        picks=picks_through(1),
+        replace={
+            "poll_seconds = 5": "poll_seconds = 0",
+            "idle_poll_seconds = 300": "idle_poll_seconds = 0",
+        },
     )
     client.fail_next = EspnUnavailable("ESPN returned 503")
 
@@ -247,7 +259,9 @@ async def test_the_advisor_does_not_fire_while_her_turn_is_far_away(tmp_path):
     await loop.run_once()
 
     assert advice_count(conn) == 0
-    assert [event for event, _ in bus.published] == ["board_updated"]
+    assert [event for event, _ in bus.published] == ["board_updated", "draft_phase"], (
+        "the pick, and the loop moving to draft-night cadence because of it"
+    )
 
 
 async def test_the_advisor_fires_again_for_her_next_turn(tmp_path):
@@ -537,3 +551,221 @@ async def test_the_tick_budget_starts_before_the_sync_not_after_it(tmp_path, mon
     # What the advisor is actually left with, which is the point of measuring it
     # from the top: a 25-second sync has already spent 25 of the 60.
     assert seen["deadline"] - clock.monotonic() == budget - espn_worst
+
+
+# --- how often it polls ------------------------------------------------------
+#
+# The loop was written for draft night and left running forever: five seconds
+# for a hundred and twenty days is 2,073,600 requests against an unofficial API
+# for a job that needs about 2,160 of them, once. What bounds it is the loop
+# knowing which of three phases it is in, and the phase coming from the board
+# rather than from a flag ESPN may only set once the draft is over.
+
+
+async def test_the_loop_idles_when_no_pick_has_been_made(tmp_path):
+    """Before the draft there is nothing to watch every five seconds."""
+    _, loop, _, _, _ = loop_ready(tmp_path)
+
+    await loop.run_once()
+
+    assert loop.phase == PHASE_IDLE
+    assert loop.poll_interval == 300, "the idle cadence, not the draft-night one"
+
+
+async def test_a_real_pick_puts_the_loop_on_draft_night_cadence(tmp_path):
+    """One pick is the only signal that cannot be a pre-populated placeholder."""
+    _, loop, _, _, _ = loop_ready(tmp_path, picks=picks_through(1))
+
+    await loop.run_once()
+
+    assert loop.phase == PHASE_LIVE
+    assert loop.poll_interval == 5
+
+
+async def test_a_full_board_stops_the_loop(tmp_path):
+    """Every slot filled: there is nothing left to watch, ever."""
+    _, loop, client, _, _ = loop_ready(tmp_path)
+    client.picks = picks_through(len(SAMPLE_BOARD))
+    client.slots = len(SAMPLE_BOARD)
+
+    await loop.run_once()
+
+    assert loop.phase == PHASE_DONE
+    assert loop.poll_interval is None, "a stopped loop has no cadence at all"
+
+
+async def test_espns_drafted_flag_does_not_stop_a_partly_filled_draft(tmp_path, caplog):
+    """The flag ESPN may only set once the draft is over does not get to end it.
+
+    ``docs/DECISIONS.md`` records that ``draftDetail.drafted`` is why the raw
+    endpoint exists at all. A phase detector that believed it would stop polling
+    mid-draft — the one direction in which being wrong costs Caroline picks.
+    """
+    _, loop, client, _, _ = loop_ready(tmp_path, picks=picks_through(3))
+    client.drafted = True
+
+    with caplog.at_level(logging.WARNING):
+        await loop.run_once()
+
+    assert loop.phase == PHASE_LIVE
+    assert loop.poll_interval == 5
+    assert "drafted" in caplog.text.lower(), "the disagreement is worth a line"
+
+
+async def test_in_progress_before_the_first_pick_is_not_a_live_draft(tmp_path):
+    """The real pre-draft payload's own flags must not start the fast clock.
+
+    ESPN pre-populates all 96 slots and carries ``inProgress`` alongside them;
+    a detector that trusted the flag would poll every five seconds from the day
+    the league was created, which is the bug this phase work exists to remove.
+    """
+    _, loop, client, _, _ = loop_ready(tmp_path)
+    client.in_progress = True
+    client.drafted = False
+
+    await loop.run_once()
+
+    assert loop.phase == PHASE_IDLE
+    assert loop.poll_interval == 300
+
+
+async def test_a_phase_change_is_logged_and_published(tmp_path, caplog):
+    _, loop, client, bus, _ = loop_ready(tmp_path)
+
+    with caplog.at_level(logging.INFO):
+        await loop.run_once()
+        client.picks = picks_through(1)
+        await loop.run_once()
+
+    published = [payload for event, payload in bus.published if event == "draft_phase"]
+    assert [entry["phase"] for entry in published] == [PHASE_LIVE], (
+        "a change is published; a phase that did not change is not news"
+    )
+    assert published[-1]["poll_seconds"] == 5
+    assert "300s" in caplog.text and "5s" in caplog.text, "the log names both cadences"
+    assert "live" in caplog.text and "idle" in caplog.text
+
+
+async def test_a_phase_change_takes_effect_without_restarting_the_loop(tmp_path):
+    """The cadence actually used, tick by tick — not the config value."""
+    _, loop, client, _, _ = loop_ready(tmp_path)
+    waits: list[float] = []
+
+    async def record(seconds: float) -> None:
+        waits.append(seconds)
+        if len(waits) == 1:
+            # The draft opens between two polls, which is how it really happens.
+            client.picks = picks_through(1)
+        if len(waits) >= 3:
+            loop.stop()
+
+    loop._wait_for_next_poll = record
+
+    await asyncio.wait_for(loop.run_forever(), timeout=5)
+
+    assert waits == [300, 5, 5], "the cadence actually used, tick by tick"
+
+
+async def test_the_loop_stops_polling_once_the_draft_is_over(tmp_path):
+    _, loop, client, _, _ = loop_ready(tmp_path)
+    client.picks = picks_through(len(SAMPLE_BOARD))
+    client.slots = len(SAMPLE_BOARD)
+    waits: list[float] = []
+
+    async def record(seconds: float) -> None:  # pragma: no cover - must not run
+        waits.append(seconds)
+
+    loop._wait_for_next_poll = record
+
+    await asyncio.wait_for(loop.run_forever(), timeout=5)
+
+    assert waits == [], "a finished draft is not polled again"
+    assert client.draft_picks_calls == 1
+
+
+async def test_stop_wakes_the_loop_out_of_a_five_minute_idle_wait(tmp_path):
+    """Shutdown must not wait out the idle interval.
+
+    A systemd deploy stops the service with SIGTERM; if the loop only notices
+    when its wait times out, every restart can leave a polling thread behind and
+    they accumulate against the same unofficial API.
+    """
+    _, loop, _, _, _ = loop_ready(tmp_path)
+    polled = asyncio.Event()
+    original = loop.run_once
+
+    async def watched():
+        result = await original()
+        polled.set()
+        return result
+
+    loop.run_once = watched
+
+    task = asyncio.create_task(loop.run_forever())
+    await asyncio.wait_for(polled.wait(), timeout=5)
+    assert loop.poll_interval == 300, "it is parked on the idle wait"
+
+    started = time.monotonic()
+    await asyncio.to_thread(loop.stop)
+    await asyncio.wait_for(task, timeout=5)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 2, f"stop took {elapsed:.1f}s of a 300s wait"
+
+
+# --- the override ------------------------------------------------------------
+
+
+async def test_the_draft_has_started_switches_to_live_at_once(tmp_path):
+    """The button is an override: it must not wait for the next idle poll."""
+    _, loop, _, bus, _ = loop_ready(tmp_path)
+
+    await loop.run_once()
+    assert loop.phase == PHASE_IDLE
+
+    outcome = loop.draft_started()
+
+    assert outcome["phase"] == PHASE_LIVE
+    assert loop.poll_interval == 5
+    assert [payload["phase"] for event, payload in bus.published if event == "draft_phase"][
+        -1
+    ] == PHASE_LIVE
+
+
+async def test_the_override_survives_a_tick_that_still_sees_no_picks(tmp_path):
+    """ESPN's board is empty between the draft opening and pick 1."""
+    _, loop, _, _, _ = loop_ready(tmp_path)
+
+    loop.draft_started()
+    await loop.run_once()
+
+    assert loop.phase == PHASE_LIVE, "the override must not be undone by the next tick"
+
+
+async def test_the_override_expires_so_a_stray_tap_is_not_forever(tmp_path):
+    """An accidental press must not restore the five-second-forever loop."""
+    _, loop, _, _, _ = loop_ready(tmp_path)
+    clock = FakeClock()
+    loop._clock = clock
+
+    loop.draft_started()
+    await loop.run_once()
+    assert loop.phase == PHASE_LIVE
+
+    clock.advance(loop.settings.draft.live_override_seconds + 1)
+    await loop.run_once()
+
+    assert loop.phase == PHASE_IDLE
+
+
+async def test_the_loop_reaches_live_with_no_button_press(tmp_path):
+    """The button is an override, not the mechanism."""
+    _, loop, client, _, _ = loop_ready(tmp_path)
+
+    await loop.run_once()
+    assert loop.phase == PHASE_IDLE
+
+    client.picks = picks_through(1)
+    await loop.run_once()
+
+    assert loop.phase == PHASE_LIVE, "nobody pressed anything"
