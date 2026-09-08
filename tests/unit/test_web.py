@@ -900,7 +900,7 @@ class EventProbe:
             "query_string": b"",
             "headers": [(b"host", b"testserver"), (b"cookie", cookie.encode())],
             "client": ("192.168.1.50", 51234),
-            "server": ("192.168.1.184", 8080),
+            "server": ("192.0.2.30", 8080),
             "state": {},
         }
         self.sent: asyncio.Queue = asyncio.Queue()
@@ -1116,14 +1116,14 @@ def test_pages_are_phone_shaped(db_path: Path):
 def test_lan_url_uses_a_real_address_not_the_bind_address():
     from hal_mary.web.serve import lan_url
 
-    url = lan_url("0.0.0.0", 8080, resolve=lambda: "192.168.1.184")
-    assert url == "http://192.168.1.184:8080"
+    url = lan_url("0.0.0.0", 8080, resolve=lambda: "192.0.2.30")
+    assert url == "http://192.0.2.30:8080"
 
 
 def test_lan_url_keeps_an_explicit_host():
     from hal_mary.web.serve import lan_url
 
-    assert lan_url("127.0.0.1", 8080, resolve=lambda: "192.168.1.184") == "http://127.0.0.1:8080"
+    assert lan_url("127.0.0.1", 8080, resolve=lambda: "192.0.2.30") == "http://127.0.0.1:8080"
 
 
 def test_lan_url_falls_back_when_the_address_cannot_be_found():
@@ -1149,11 +1149,11 @@ def test_serve_prints_the_lan_url_and_starts_uvicorn(capsys, monkeypatch, db_pat
 
     started: dict[str, object] = {}
     monkeypatch.setattr(cli, "load_cli_settings", lambda: make_settings(db_path))
-    monkeypatch.setattr(serve_module, "outbound_ip", lambda: "192.168.1.184")
+    monkeypatch.setattr(serve_module, "outbound_ip", lambda: "192.0.2.30")
     monkeypatch.setattr(serve_module, "run_server", lambda **kwargs: started.update(kwargs) or None)
     assert cli.main(["serve"]) == cli.EXIT_OK
     out = capsys.readouterr().out
-    assert "http://192.168.1.184:8080" in out
+    assert "http://192.0.2.30:8080" in out
     assert ".env" in out
     assert started["host"] == "0.0.0.0"
     assert started["port"] == 8080
@@ -1166,7 +1166,7 @@ def test_serve_reload_flag_is_passed_through(monkeypatch, db_path: Path):
 
     started: dict[str, object] = {}
     monkeypatch.setattr(cli, "load_cli_settings", lambda: make_settings(db_path))
-    monkeypatch.setattr(serve_module, "outbound_ip", lambda: "192.168.1.184")
+    monkeypatch.setattr(serve_module, "outbound_ip", lambda: "192.0.2.30")
     monkeypatch.setattr(serve_module, "run_server", lambda **kwargs: started.update(kwargs) or None)
     assert cli.main(["serve", "--reload"]) == cli.EXIT_OK
     assert started["reload"] is True
@@ -1287,7 +1287,7 @@ def test_serve_bounds_the_graceful_shutdown(monkeypatch, db_path: Path):
     started: dict[str, object] = {}
     settings = make_settings(db_path)
     monkeypatch.setattr(cli, "load_cli_settings", lambda: settings)
-    monkeypatch.setattr(serve_module, "outbound_ip", lambda: "192.168.1.184")
+    monkeypatch.setattr(serve_module, "outbound_ip", lambda: "192.0.2.30")
     monkeypatch.setattr(serve_module, "run_server", lambda **kwargs: started.update(kwargs) or None)
 
     assert cli.main(["serve"]) == cli.EXIT_OK

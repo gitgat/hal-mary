@@ -52,7 +52,7 @@ dashboard, not the status page, not `/events`.
 above the `http_status:404` default:
 
 ```yaml
-  - hostname: mcp.thehalf.io
+  - hostname: mcp.example.com
     service: http://traefik-public:80
 ```
 
@@ -70,7 +70,7 @@ router's rule pins the path so nothing else on the app is reachable:
 http:
   routers:
     halmary-mcp-public:
-      rule: "Host(`mcp.thehalf.io`) && PathPrefix(`/mcp`)"
+      rule: "Host(`mcp.example.com`) && PathPrefix(`/mcp`)"
       entryPoints:
         - web
       service: halmary-mcp-public
@@ -99,8 +99,8 @@ docker service update --force traefik-public_traefik-public
 **Move 3 — create the proxied CNAME:**
 
 ```bash
-~/swarm-config/scripts/cf-tunnel-route.sh mcp.thehalf.io      # dry run
-~/swarm-config/scripts/cf-tunnel-route.sh mcp.thehalf.io --apply
+~/swarm-config/scripts/cf-tunnel-route.sh mcp.example.com      # dry run
+~/swarm-config/scripts/cf-tunnel-route.sh mcp.example.com --apply
 ```
 
 Proxied is mandatory; an unproxied `cfargotunnel.com` record resolves to nothing.
@@ -108,8 +108,8 @@ Proxied is mandatory; an unproxied `cfargotunnel.com` record resolves to nothing
 **Check it before going near claude.ai:**
 
 ```bash
-curl -sS -o /dev/null -w '%{http_code}\n' https://mcp.thehalf.io/mcp     # expect 401
-curl -sS https://mcp.thehalf.io/mcp \
+curl -sS -o /dev/null -w '%{http_code}\n' https://mcp.example.com/mcp     # expect 401
+curl -sS https://mcp.example.com/mcp \
   -H "Authorization: Bearer $MCP_TOKEN" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
@@ -128,7 +128,7 @@ Settings → Connectors → **Add custom connector**.
 | Field | Value |
 | --- | --- |
 | Name | `hal-mary` |
-| URL | `https://mcp.thehalf.io/mcp` |
+| URL | `https://mcp.example.com/mcp` |
 | Authentication | Bearer token / custom header |
 | Header | `Authorization: Bearer <the MCP_TOKEN value>` |
 
