@@ -1,0 +1,28 @@
+# One nightly snapshot of the database. Started by hal-mary-backup.timer; there
+# is no [Install] section because nothing should enable this unit directly.
+#
+# `hal-mary backup` uses SQLite's online backup API rather than copying the file.
+# The database is in WAL mode and hal-mary.service writes to it while this runs,
+# so `cp hal.db` captures the main file without its write-ahead log: a snapshot
+# that opens cleanly, passes an integrity check, and has silently lost the newest
+# notes. See src/hal_mary/backup.py.
+#
+# The window (how many snapshots to keep) is `backup.keep` in config.toml.
+
+[Unit]
+Description=hal-mary nightly database backup
+Documentation=https://github.com/gitgat/hal-mary
+# Do not snapshot while a deploy is halfway through migrating.
+After=hal-mary.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/hal-mary
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HAL_MARY_CONFIG=%h/hal-mary/config.toml
+Environment=HAL_MARY_ENV=%h/hal-mary/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/.local/bin/uv run --frozen hal-mary backup
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hal-mary-backup

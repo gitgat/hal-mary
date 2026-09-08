@@ -50,6 +50,8 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 __all__ = [
     "ActionsConfig",
+
+    "BackupConfig",
     "ClaudeConfig",
     "ConfigError",
     "CoworkConfig",
@@ -91,7 +93,15 @@ INT_ENV_KEYS = ("LEAGUE_ID", "TEAM_ID", "SEASON")
 CONFIG_PATH_ENV = "HAL_MARY_CONFIG"
 DOTENV_PATH_ENV = "HAL_MARY_ENV"
 
-DEFAULT_DB_PATH = "./hal.db"
+#: Where the database goes when ``DB_PATH`` is unset — and it *is* unset on any
+#: box set up in a hurry, because ``.env.example`` ships ``DB_PATH=`` empty.
+#:
+#: Not ``./hal.db``. Since every configured path is anchored to the directory
+#: holding ``config.toml``, a relative default lands **inside the checkout** —
+#: the one directory a deploy replaces and a rollback moves, and the directory
+#: the backups then follow the database into. ``~`` is expanded by
+#: :func:`_anchor`, so this is absolute by the time any Settings exists.
+DEFAULT_DB_PATH = "~/hal-mary-data/hal.db"
 
 #: Config keys that name a path and are anchored to the config file's directory,
 #: keyed by the section attribute they live on. Adding a path to config.toml
@@ -106,6 +116,7 @@ DEFAULT_DB_PATH = "./hal.db"
 ANCHORED_PATHS: dict[str, tuple[str, ...]] = {
     "claude": ("scratch_dir", "system_prompt_file"),
     "paths": ("prompts_dir", "memory_dir", "cowork_tasks"),
+    "backup": ("dir",),
 }
 
 # src/hal_mary/config.py -> src/hal_mary -> src -> repo root
@@ -270,6 +281,23 @@ class CoworkConfig(_Frozen):
     #: a day ahead leaves room for a failed run to be noticed.
     waiver_lead_minutes: int = 1440
 
+class BackupConfig(_Frozen):
+    """The nightly snapshot of the database.
+
+    ``dir`` is optional and unset by default, which means "beside the database"
+    — see :meth:`Settings.backup_dir`. A configured value is anchored to
+    ``config.toml`` like every other path here, so setting it to something inside
+    the checkout is possible and is a mistake: a deploy replaces a checkout, and
+    surviving that is the whole point of a backup.
+
+    ``keep`` is a count of files, not days, because the timer may miss a night
+    (the box was off) and "the last fourteen backups" is the window someone
+    actually reasons about when restoring.
+    """
+
+    dir: Path | None = None
+    keep: int = 14
+
 
 class WebConfig(_Frozen):
     """How the web app listens, signs sessions and paces its background work.
@@ -354,6 +382,8 @@ class Settings(_Frozen):
     league: LeagueConfig = LeagueConfig()
     actions: ActionsConfig = ActionsConfig()
     cowork: CoworkConfig = CoworkConfig()
+
+    backup: BackupConfig = BackupConfig()
     web: WebConfig
     jobs: dict[str, JobConfig]
 
@@ -399,6 +429,15 @@ class Settings(_Frozen):
             )
         object.__setattr__(self, "db_path", _anchor(self.db_path, root))
         return self
+
+    def backup_dir(self) -> Path:
+        """Where ``hal-mary backup`` writes, resolved.
+
+        Defaults to ``backups/`` beside the database rather than beside
+        ``config.toml``, because the database is on the box's own disk and the
+        checkout is the thing a deploy replaces.
+        """
+        return self.backup.dir or self.db_path.parent / "backups"
 
     def resolved_paths(self) -> list[tuple[str, Path, bool]]:
         """Every configured path, resolved, with whether it exists on disk.
@@ -446,8 +485,15 @@ class Settings(_Frozen):
         return [key for key in REQUIRED_ENV_KEYS if values[key] in (None, "")]
 
 
-def _anchor(value: str | Path, root: Path) -> Path:
-    """``value`` as an absolute path, relative ones resolved against ``root``."""
+def _anchor(value: str | Path | None, root: Path) -> Path | None:
+    """``value`` as an absolute path, relative ones resolved against ``root``.
+
+    ``None`` passes through: an optional path that was not configured has no
+    anchor to resolve against, and inventing one here would silently give
+    ``backup.dir`` a value nobody asked for.
+    """
+    if value is None:
+        return None
     path = Path(value).expanduser()
     return path if path.is_absolute() else root / path
 
@@ -552,6 +598,8 @@ def load_settings(
         league = LeagueConfig(**raw.get("league", {}))
         actions = ActionsConfig(**raw.get("actions", {}))
         cowork = CoworkConfig(**raw.get("cowork", {}))
+
+        backup = BackupConfig(**raw.get("backup", {}))
         web = WebConfig(**raw.get("web", {}))
     except Exception as exc:
         raise ConfigError(f"{path} is missing or has an invalid section: {exc}") from exc
@@ -572,6 +620,8 @@ def load_settings(
         league=league,
         actions=actions,
         cowork=cowork,
+
+        backup=backup,
         web=web,
         jobs=jobs,
         espn_s2=values.get("ESPN_S2"),

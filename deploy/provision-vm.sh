@@ -14,6 +14,7 @@ set -euo pipefail
 
 log() { printf '\n=== %s\n' "$*"; }
 
+# shellcheck source=/dev/null  # /etc/os-release is generated; there is nothing to follow
 log "host $(hostname) $(. /etc/os-release && echo "$PRETTY_NAME") $(uname -m)"
 
 log "base packages"
@@ -31,6 +32,7 @@ node --version
 log "per-user npm prefix (no sudo for global installs, keeps claude self-update working)"
 mkdir -p "$HOME/.npm-global"
 npm config set prefix "$HOME/.npm-global"
+# shellcheck disable=SC2016  # a literal $HOME is what belongs in .bashrc
 grep -q '.npm-global/bin' "$HOME/.bashrc" 2>/dev/null ||
   echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >>"$HOME/.bashrc"
 export PATH="$HOME/.npm-global/bin:$PATH"
@@ -43,6 +45,7 @@ log "uv"
 if ! command -v uv >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/uv" ]; then
   curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
 fi
+# shellcheck disable=SC2016  # a literal $HOME is what belongs in .bashrc
 grep -q '.local/bin' "$HOME/.bashrc" 2>/dev/null ||
   echo 'export PATH="$HOME/.local/bin:$PATH"' >>"$HOME/.bashrc"
 export PATH="$HOME/.local/bin:$PATH"

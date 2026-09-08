@@ -93,6 +93,24 @@ advice_budget_s = 60
 connect_timeout_s = 10.0
 read_timeout_s = 15.0
 
+[backup]
+# The nightly snapshot of the database, written by `hal-mary backup` and run by
+# deploy/hal-mary-backup.timer. The database is the only thing here that cannot
+# be regenerated: the ESPN state resyncs and the board rebuilds, but the season's
+# accumulated notes exist nowhere else.
+#
+# `dir` is deliberately unset: it then means "a backups/ directory beside the
+# database", which on the VM is ~/hal-mary-data/backups — on the box's own disk,
+# and outside the checkout that a deploy replaces. Set it only to move backups
+# somewhere else on local disk; a value here is anchored to this file's
+# directory, so pointing it into the checkout would put the backups in the one
+# place a redeploy wipes.
+#
+# `keep` is a count of files rather than days, because the timer can miss a
+# night — the box was off — and "the last fourteen" is the window someone
+# reasons about while restoring.
+keep = 14
+
 [web]
 host = "0.0.0.0"                   # every interface: this is opened from a phone
 port = 8080
