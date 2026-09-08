@@ -36,6 +36,12 @@ advise_within_picks = 2
 # stray tap therefore costs an hour of fast polling, not a season of it.
 live_override_seconds = 3600
 
+# How long the draft loop may run at draft-night cadence with no pick on ESPN's
+# board before the page stops saying "watching" and points at manual entry.
+# Whether ESPN publishes picks live is still unverified, and the silent case is
+# the one that looks healthy while the draft moves without her.
+silent_after_seconds = 240
+
 # How much of the board each prompt sees. board_size is the pre-draft research
 # job, which has fifteen minutes. The advice_* sizes run against a 90-second
 # pick clock: bigger is better reasoning right up until the answer arrives after

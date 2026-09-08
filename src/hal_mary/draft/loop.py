@@ -445,6 +445,13 @@ class DraftLoop:
         #: loop at draft-night cadence across the gap between the draft opening
         #: and pick 1, and expires so a stray tap is not permanent.
         self._forced_live_at: float | None = None
+        #: When this loop most recently entered live cadence, on :attr:`_clock`,
+        #: and the highest pick count it has ever read. Together they answer the
+        #: one question the board cannot: "the draft is running and ESPN has
+        #: published nothing" looks identical to "the draft has not started"
+        #: unless somebody is counting how long it has looked that way.
+        self._live_since: float | None = None
+        self._picks_seen = 0
         self._flagged_disagreement = False
         #: ``rounds x teams`` from the league, filled in by :meth:`_maybe_advise`.
         #: Only used when ESPN reports no board of its own, which is the no-ESPN
@@ -502,10 +509,17 @@ class DraftLoop:
         where the loop is on draft-night cadence and the board it would be
         derived from still shows no picks at all.
         """
+        live_seconds = (
+            self._clock.monotonic() - self._live_since
+            if self._live_since is not None and self._phase == PHASE_LIVE
+            else None
+        )
         return {
             "phase": self._phase,
             "poll_seconds": self.poll_interval,
             "cadence": cadence_words(self.poll_interval),
+            "live_seconds": live_seconds,
+            "picks_seen": self._picks_seen,
         }
 
     def _forced_live(self) -> bool:
@@ -571,6 +585,9 @@ class DraftLoop:
         """
         status = self._draft_status()
         picks_made = max(picks_made, (status or {}).get("picks_made") or 0)
+        # Highest ever seen, not this tick's: a pick cannot un-happen, and a
+        # transient read of zero must not reset the "ESPN is publishing" proof.
+        self._picks_seen = max(self._picks_seen, picks_made)
         total = (status or {}).get("slots") or self._total_picks
         phase = draft_phase(picks_made=picks_made, total_slots=total)
         reason = f"{picks_made} of {total} slots on ESPN's board have a player in them"
@@ -615,6 +632,10 @@ class DraftLoop:
             return
         previous, was, before = self._phase, self.describe_cadence(), self.poll_interval
         self._phase = phase
+        # Stamped on the transition, not on every tick: "how long has it been
+        # live" has to survive the polls in between, and re-stamping would reset
+        # the clock the silence warning is measured against.
+        self._live_since = self._clock.monotonic() if phase == PHASE_LIVE else None
         log.info(
             "the draft looks %s rather than %s: hal-mary is now %s (%s), was %s (%s); %s",
             phase,
