@@ -118,16 +118,34 @@ uv sync || die "uv sync failed"
 # directory. Warnings (no standing memory notes yet, pending migrations) print
 # and do not stop the install.
 
+# By IP, deliberately. On this VM `hostname -f` answers `hal-mary`, which has no
+# DNS record: it falls through Pi-hole's wildcard onto the keepalived ingress VIP
+# and lands on the swarm manager. Printing `ssh bryan@hal-mary` in the most
+# likely failure message would be handing someone the exact command this project
+# documented after it went wrong once already.
+BOX_ADDRESS="$(hostname -I 2>/dev/null | awk '{print $1}')"
+
 step "hal-mary doctor"
-uv run hal-mary doctor ||
-  die "this box is not ready (above). The most likely one, and the only one no
+if [ "${HAL_MARY_SKIP_DOCTOR:-}" = "1" ]; then
+  # An escape hatch, because the claude-login check reads an undocumented key in
+  # Claude Code's own config file: if that format ever drifts, this gate would
+  # brick an install with no way through. The checks still run and still print.
+  uv run hal-mary doctor ||
+    note "^^ IGNORED, because HAL_MARY_SKIP_DOCTOR=1. Everything listed as FAIL
+     above is still wrong on this box, and hal-mary will be installed on it
+     anyway. If 'claude login' is among them, expect no advice at all."
+else
+  uv run hal-mary doctor ||
+    die "this box is not ready (above). The most likely one, and the only one no
      script can do for you:
 
-         ssh $(whoami)@$(hostname -f 2>/dev/null || hostname)
+         ssh $(whoami)@${BOX_ADDRESS:-this box}
          claude          # log in interactively, once
 
      The service inherits that subscription session; there is no API key to set.
-     Nothing has been installed."
+     Nothing has been installed. If you are certain the check is wrong, rerun
+     with HAL_MARY_SKIP_DOCTOR=1."
+fi
 
 # --- 7. migrations -----------------------------------------------------------
 
@@ -141,12 +159,24 @@ uv run hal-mary migrate || die "migrations failed; nothing has been installed"
 # then no longer matches the file on disk. Copying makes install.sh the thing
 # that changes a unit, which is what daemon-reload is for.
 
+# The units say `%h/hal-mary`, which systemd expands to the home of the service user.
+# When the checkout is somewhere else, that has to be substituted in rather than
+# left to point at a directory that may not exist — a unit silently running the
+# wrong code against the wrong config is worse than one that fails to start.
+# When it is the default, nothing is substituted and the installed file is
+# byte-identical to the source, so `diff` against deploy/ stays meaningful.
 step "installing units into $UNIT_DIR"
 mkdir -p "$UNIT_DIR"
 for unit in "${UNITS[@]}"; do
   source_unit="$CHECKOUT/deploy/$unit"
   [ -f "$source_unit" ] || die "missing $source_unit"
-  install -m 0644 "$source_unit" "$UNIT_DIR/$unit"
+  if [ "$CHECKOUT" = "$HOME/hal-mary" ]; then
+    install -m 0644 "$source_unit" "$UNIT_DIR/$unit"
+  else
+    sed "s|%h/hal-mary|$CHECKOUT|g" "$source_unit" >"$UNIT_DIR/$unit"
+    chmod 0644 "$UNIT_DIR/$unit"
+    note "(pointing at $CHECKOUT)"
+  fi
   note "$unit"
 done
 

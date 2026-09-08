@@ -236,6 +236,19 @@ empty for exactly that reason.
   and something else under systemd. Use `settings.paths.memory_dir` as given; a `Path(...)` around
   it is the bug, not a safety net. `Settings.resolved_paths()` is what the status page renders.
   See `docs/DECISIONS.md`.
+- **`DB_PATH` defaults to `~/hal-mary-data/hal.db`, not `./hal.db`.** `.env.example` ships it
+  empty, and every configured path is anchored to `config.toml`'s directory — so a relative default
+  put the database, and the `backups/` that follows it, *inside the checkout*: the one directory a
+  deploy replaces and a rollback moves. `doctor`'s `database location` check reports a database
+  under the checkout, and is fatal once `~/hal-mary-data` exists. Two tests in `test_config.py` pin
+  the default; do not make it relative again to make a test tidier.
+- **`doctor` resolves `claude` against the *unit's* PATH, not the caller's.** `hal_mary.doctor.
+  UNIT_PATH` mirrors `Environment=PATH=` in `deploy/hal-mary.service`, and
+  `tests/unit/test_deploy.py` asserts the two are identical so they cannot drift. Checking only
+  `os.environ["PATH"]` is wrong in both directions: Ubuntu's `.bashrc` returns early for a
+  non-interactive shell, so `~/.npm-global/bin` is missing under `ssh host 'cmd'` (fails a healthy
+  box), and a `claude` somewhere only your login shell can see passes while the service still
+  cannot find it.
 - **`serve` boots degraded; `hal-mary doctor` is what refuses.** There is no startup preflight.
   A service that will not start because the memory directory is missing is down at 2am with nobody
   watching, and the page that would have said why is served by the process that refused to start.

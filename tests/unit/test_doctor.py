@@ -100,7 +100,15 @@ def named(checks: list[Check], name: str) -> Check:
 
 
 def run(settings, home, **kwargs) -> list[Check]:
-    kwargs.setdefault("which", lambda _binary: str(home / ".local" / "bin" / "claude"))
+    """Checks against ``home``, with ``claude`` findable wherever it is asked for.
+
+    The default ``which`` ignores the ``path`` it is handed, which is the
+    "installed everywhere" case; the tests that care about *which* PATH found it
+    pass their own.
+    """
+    kwargs.setdefault(
+        "which", lambda _binary, path=None: str(home / ".local" / "bin" / "claude")
+    )
     return run_checks(settings, home=home, **kwargs)
 
 
@@ -155,7 +163,7 @@ def test_missing_secrets_are_fatal_and_named(tmp_path, deployment):
 
 def test_a_missing_claude_binary_is_fatal(deployment):
     settings, home = deployment
-    check = named(run(settings, home, which=lambda _binary: None), "claude binary")
+    check = named(run(settings, home, which=lambda _binary, path=None: None), "claude binary")
 
     assert check.ok is False
     assert check.fatal is True
@@ -377,7 +385,7 @@ def test_render_puts_every_check_on_its_own_line_with_a_verdict(deployment):
 
 def test_render_names_the_fatal_problems_at_the_end(deployment):
     settings, home = deployment
-    text = render(run(settings, home, which=lambda _binary: None))
+    text = render(run(settings, home, which=lambda _binary, path=None: None))
 
     assert "claude binary" in text
     # The summary line has to be the thing a human reads first when the script
@@ -387,7 +395,7 @@ def test_render_names_the_fatal_problems_at_the_end(deployment):
 
 def test_worst_exit_code_is_one_when_anything_fatal_failed(deployment):
     settings, home = deployment
-    assert worst_exit_code(run(settings, home, which=lambda _binary: None)) == 1
+    assert worst_exit_code(run(settings, home, which=lambda _binary, path=None: None)) == 1
 
 
 # --- the CLI wiring ----------------------------------------------------------
@@ -451,3 +459,133 @@ def test_the_deployment_config_is_a_healthy_box(tmp_path):
     assert [c.name for c in fatal] in ([], ["claude binary"], ["claude login"]), textwrap.indent(
         render(run_checks(settings)), "  "
     )
+
+
+# --- where the database is going to land -------------------------------------
+#
+# `.env.example` ships `DB_PATH=` empty, and an empty value means the default.
+# Every one of these tests exists because the check that catches this is the only
+# thing standing between "set it absolutely" in the runbook and a database inside
+# the directory a deploy replaces.
+
+
+def test_a_database_inside_the_checkout_is_reported(deployment, tmp_path):
+    """The checkout is what `git pull` rewrites and what a rollback moves. A
+    database in it — and the backups directory that follows it — is lost by the
+    first operation that is supposed to be safe."""
+    settings, home = deployment
+    checkout = settings.config_path.parent
+    settings = load_settings(
+        config_path=settings.config_path,
+        env={**FULL_ENV, "DB_PATH": str(checkout / "hal.db")},
+    )
+
+    check = named(run(settings, home), "database location")
+
+    assert check.ok is False
+    assert str(checkout) in check.detail
+    assert "DB_PATH" in check.detail
+
+
+def test_a_database_inside_the_checkout_is_fatal_when_a_data_directory_exists(deployment):
+    """`install.sh` creates ~/hal-mary-data and blesses it. If that directory is
+    there and the database is not in it, someone skipped a step in the runbook
+    and nothing else will tell them."""
+    settings, home = deployment
+    (home / "hal-mary-data").mkdir()
+    settings = load_settings(
+        config_path=settings.config_path,
+        env={**FULL_ENV, "DB_PATH": str(settings.config_path.parent / "hal.db")},
+    )
+
+    checks = run(settings, home)
+
+    assert named(checks, "database location").fatal is True
+    assert worst_exit_code(checks) == 1
+
+
+def test_a_database_inside_the_checkout_is_only_a_warning_without_one(deployment):
+    """A developer's checkout has no ~/hal-mary-data and is not a deployment.
+    Saying so is useful; refusing to run there is not."""
+    settings, home = deployment
+    settings = load_settings(
+        config_path=settings.config_path,
+        env={**FULL_ENV, "DB_PATH": str(settings.config_path.parent / "hal.db")},
+    )
+
+    checks = run(settings, home)
+
+    assert named(checks, "database location").fatal is False
+    assert worst_exit_code(checks) == 0
+
+
+def test_a_database_outside_the_checkout_passes(deployment):
+    settings, home = deployment  # the fixture points DB_PATH at tmp_path/data
+
+    assert named(run(settings, home), "database location").ok is True
+
+
+def test_the_backup_directory_is_named_when_it_would_follow_the_database(deployment):
+    """Backups default to sitting beside the database, so a database in the
+    checkout puts the backups there too — which is the worse half."""
+    settings, home = deployment
+    settings = load_settings(
+        config_path=settings.config_path,
+        env={**FULL_ENV, "DB_PATH": str(settings.config_path.parent / "hal.db")},
+    )
+
+    assert "backup" in named(run(settings, home), "database location").detail.lower()
+
+
+# --- the PATH the *service* will have, not the one you happen to be in -------
+
+
+def test_claude_is_looked_for_on_the_path_the_unit_sets(deployment):
+    """Ubuntu's .bashrc returns early for a non-interactive shell, so
+    ~/.npm-global/bin is on an interactive PATH and not on `ssh host 'cmd'`'s.
+
+    Doctor has to answer for the systemd unit's fixed PATH, or it fails a
+    perfectly healthy box every time install.sh is run non-interactively.
+    """
+    settings, home = deployment
+    asked: list[str | None] = []
+
+    def which(_binary, path=None):
+        asked.append(path)
+        return str(home / ".npm-global" / "bin" / "claude") if path else None
+
+    check = named(run(settings, home, which=which), "claude binary")
+
+    assert check.ok is True
+    assert any(p and ".npm-global/bin" in p for p in asked), asked
+
+
+def test_claude_found_only_outside_the_units_path_is_fatal(deployment):
+    """The inverse, and the one the unit file's own comment warns about: it is
+    on *your* PATH, so everything looks fine, and the service cannot find it."""
+    settings, home = deployment
+    stray = home / "somewhere-else" / "claude"
+
+    def which(_binary, path=None):
+        return None if path else str(stray)
+
+    check = named(run(settings, home, which=which), "claude binary")
+
+    assert check.ok is False
+    assert check.fatal is True
+    assert str(stray) in check.detail, "say where it did find it"
+    assert "unit" in check.detail.lower() or "service" in check.detail.lower()
+
+
+def test_the_units_path_is_a_stated_constant(deployment):
+    """tests/unit/test_deploy.py pins this against the unit file itself, so the
+    two cannot drift. Here we only pin that doctor expands ~ against the home it
+    was given rather than the process's own."""
+    from hal_mary.doctor import UNIT_PATH, unit_path_for
+
+    _settings, home = deployment
+    expanded = unit_path_for(home)
+
+    assert UNIT_PATH[0].startswith("~/")
+    assert str(home / ".local" / "bin") in expanded
+    assert "~" not in expanded

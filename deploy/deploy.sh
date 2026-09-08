@@ -22,6 +22,9 @@
 # them are set and the defaults are the deployment.
 set -euo pipefail
 
+# Absolute, and resolved before any `cd`, because the re-exec below runs it again.
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
 CHECKOUT="${HAL_MARY_HOME:-$HOME/hal-mary}"
 UNIT="${HAL_MARY_UNIT:-hal-mary.service}"
 HEALTH_TIMEOUT="${HAL_MARY_HEALTH_TIMEOUT:-90}"
@@ -40,7 +43,10 @@ die() {
 cd "$CHECKOUT"
 git rev-parse --git-dir >/dev/null 2>&1 || die "$CHECKOUT is not a git repository"
 
-PREVIOUS="$(git rev-parse HEAD)"
+# Carried across the re-exec below. Recomputing it after the pull would print
+# the commit just pulled as the thing to roll back to, which is the one SHA that
+# cannot help.
+PREVIOUS="${HAL_MARY_PREVIOUS:-$(git rev-parse HEAD)}"
 step "hal-mary deploy — $CHECKOUT"
 note "current commit $PREVIOUS"
 note "to roll back:  git -C $CHECKOUT checkout $PREVIOUS && $0"
@@ -67,6 +73,26 @@ git pull --ff-only ||
      This script will not merge or rebase on a production box."
 note "now at $(git rev-parse HEAD)"
 
+# --- 2b. re-read this script, because the pull may have just replaced it ------
+#
+# bash reads a script incrementally and seeks by byte offset. A script rewritten
+# underneath a running bash resumes at a stale offset: it can skip every
+# remaining step and still exit 0 — no tests, no migration, no restart, and a
+# clean exit code reporting a deploy that did none of the things a deploy is for.
+#
+# Measured, so the comment is not folklore: the git in use replaces a modified
+# file by unlinking and creating a new inode, so bash keeps reading the original
+# content through its already-open descriptor and the hazard does not currently
+# bite. A writer that truncates the same inode does trigger it reliably, at any
+# script size. That is an implementation detail of git to be independent of
+# rather than to rely on: the cost of this line is one extra `git pull` that
+# prints "Already up to date", and what it buys is that every step below runs
+# from bytes read after the pull.
+if [ -z "${HAL_MARY_REEXEC:-}" ]; then
+  note "re-reading $SELF after the pull"
+  exec env HAL_MARY_REEXEC=1 HAL_MARY_PREVIOUS="$PREVIOUS" bash "$SELF" "$@"
+fi
+
 # --- 3. dependencies ---------------------------------------------------------
 
 step "uv sync"
@@ -80,10 +106,14 @@ uv sync || die "uv sync failed"
 # printed and the deploy continues. See src/hal_mary/doctor.py for why the
 # service itself never refuses to boot on these.
 
+# The checks run either way. Skipping the *gate* is a decision someone should be
+# able to make; skipping the *output* would mean they made it blind.
+step "hal-mary doctor"
 if [ "${HAL_MARY_SKIP_DOCTOR:-}" = "1" ]; then
-  step "hal-mary doctor (skipped: HAL_MARY_SKIP_DOCTOR=1)"
+  uv run hal-mary doctor ||
+    note "^^ IGNORED, because HAL_MARY_SKIP_DOCTOR=1. Everything listed as FAIL
+     above is still wrong on this box; you have only turned off the refusal."
 else
-  step "hal-mary doctor"
   uv run hal-mary doctor ||
     die "preflight found a fatal problem (above). Fix it, or rerun with
      HAL_MARY_SKIP_DOCTOR=1 if you are deliberately deploying to a box that

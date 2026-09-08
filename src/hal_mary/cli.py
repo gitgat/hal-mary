@@ -320,9 +320,8 @@ def _cmd_cowork_config(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hal-mary", description=DESCRIPTION, epilog=EPILOG)
     subcommands = parser.add_subparsers(
-        dest="command", metavar="{sync,espn-check,serve,job,cowork-config}"
-
-        dest="command", metavar="{sync,espn-check,serve,job,doctor,migrate,backup}"
+        dest="command",
+        metavar="{sync,espn-check,serve,job,cowork-config,doctor,migrate,backup}",
     )
 
     sync = subcommands.add_parser("sync", help="pull league state and draft picks from ESPN")

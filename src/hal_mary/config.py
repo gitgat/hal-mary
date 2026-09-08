@@ -93,7 +93,15 @@ INT_ENV_KEYS = ("LEAGUE_ID", "TEAM_ID", "SEASON")
 CONFIG_PATH_ENV = "HAL_MARY_CONFIG"
 DOTENV_PATH_ENV = "HAL_MARY_ENV"
 
-DEFAULT_DB_PATH = "./hal.db"
+#: Where the database goes when ``DB_PATH`` is unset — and it *is* unset on any
+#: box set up in a hurry, because ``.env.example`` ships ``DB_PATH=`` empty.
+#:
+#: Not ``./hal.db``. Since every configured path is anchored to the directory
+#: holding ``config.toml``, a relative default lands **inside the checkout** —
+#: the one directory a deploy replaces and a rollback moves, and the directory
+#: the backups then follow the database into. ``~`` is expanded by
+#: :func:`_anchor`, so this is absolute by the time any Settings exists.
+DEFAULT_DB_PATH = "~/hal-mary-data/hal.db"
 
 #: Config keys that name a path and are anchored to the config file's directory,
 #: keyed by the section attribute they live on. Adding a path to config.toml
@@ -108,8 +116,6 @@ DEFAULT_DB_PATH = "./hal.db"
 ANCHORED_PATHS: dict[str, tuple[str, ...]] = {
     "claude": ("scratch_dir", "system_prompt_file"),
     "paths": ("prompts_dir", "memory_dir", "cowork_tasks"),
-
-    "paths": ("prompts_dir", "memory_dir"),
     "backup": ("dir",),
 }
 

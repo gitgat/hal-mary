@@ -108,6 +108,13 @@ class Box:
         seed = self.root / "seed"
         seed.mkdir()
         (seed / "README.md").write_text("seed\n", encoding="utf-8")
+        # The real deploy/ goes in the repository, because on the box the script
+        # being executed *is* a tracked file that `git pull` can rewrite mid-run.
+        # `run_in_checkout` executes that copy.
+        (seed / "deploy").mkdir()
+        for artifact in (*SCRIPTS, *UNITS):
+            shutil.copy(artifact, seed / "deploy" / artifact.name)
+            (seed / "deploy" / artifact.name).chmod(artifact.stat().st_mode)
         for args in (
             ("init", "-b", "main"),
             ("add", "-A"),
@@ -153,15 +160,43 @@ class Box:
             **overrides,
         }
 
+    def run_in_checkout(self, script: str, **overrides: str) -> subprocess.CompletedProcess:
+        """Run the checkout's own copy — the one a pull can rewrite underneath bash."""
+        return self._run(self.checkout / "deploy" / script, **overrides)
+
     def run(self, script: str, **overrides: str) -> subprocess.CompletedProcess:
+        return self._run(DEPLOY / script, **overrides)
+
+    def _run(self, script: Path, **overrides: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            ["bash", str(DEPLOY / script)],
+            ["bash", str(script)],
             capture_output=True,
             text=True,
             env=self.env(**overrides),
             cwd=str(self.root),
             check=False,
         )
+
+    def rewrite_deploy_sh_upstream(self) -> None:
+        """Push a commit that inserts lines near the TOP of deploy/deploy.sh.
+
+        Near the top on purpose. Bash reads a script in chunks and seeks by byte
+        offset, so a rewrite that shifts every offset after the shebang is what
+        makes it resume in the middle of a different line — the failure this
+        reproduces. Appending at the end would shift nothing and prove nothing.
+        """
+        work = self.root / "upstream-work"
+        if not work.exists():
+            subprocess.run(
+                ["git", "clone", str(self.origin), str(work)], check=True, capture_output=True
+            )
+        target = work / "deploy" / "deploy.sh"
+        lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+        padding = ["# padding that shifts every byte offset below it\n"] * 400
+        target.write_text("".join([lines[0], *padding, *lines[1:]]), encoding="utf-8")
+        self.git("add", "-A", cwd=work)
+        self.git("commit", "-m", "rewrite deploy.sh", cwd=work)
+        self.git("push", "origin", "main", cwd=work)
 
 
 @pytest.fixture
@@ -720,3 +755,185 @@ def test_install_reports_the_lan_url_with_a_real_address(installable: Box):
 
     assert "$(" not in result.stdout, result.stdout
     assert ":8080" in result.stdout
+
+
+# --- the pull rewrites the script that is running ----------------------------
+
+
+def test_a_pull_that_rewrites_deploy_sh_still_runs_every_remaining_step(box: Box):
+    """A deploy that pulls a change to deploy.sh must still do everything.
+
+    The hazard being guarded against is a script rewritten on disk while bash is
+    still reading it: bash resumes at a stale byte offset and can skip the
+    remaining steps while exiting 0 — no tests, no migration, no restart, and a
+    clean exit code.
+
+    Measured, because the mechanism matters: **the current git does not trigger
+    it.** `git pull` replaces a modified file by unlinking and creating a new
+    inode, so the running bash keeps reading the original content through its
+    open descriptor. A writer that truncates the same inode (a `sed -i`, a
+    hand-edit, a future git) does trigger it, reliably, at any script size. So
+    this test cannot fail today for the reason it was written — which is exactly
+    why the mitigation below is asserted separately, rather than trusting an
+    implementation detail of git to keep holding.
+
+    Driven through the checkout's own copy, because that is the only arrangement
+    in which the hazard exists at all.
+    """
+    box.rewrite_deploy_sh_upstream()
+
+    result = box.run_in_checkout("deploy.sh")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    uv = " | ".join(box.log("uv"))
+    for step in ("sync", "doctor", "migrate", "pytest"):
+        assert step in uv, f"deploy.sh skipped {step} after rewriting itself"
+    assert any("restart" in line for line in box.log("systemctl"))
+    assert box.log("curl"), "and it never checked whether the service came back"
+
+
+def test_deploy_re_reads_itself_after_the_pull(box: Box):
+    """The mitigation, asserted directly: everything after the pull is executed
+    from bytes read after the pull, not from a descriptor opened before it."""
+    box.push_upstream_commit()
+
+    result = box.run_in_checkout("deploy.sh")
+
+    assert result.stdout.count("re-reading") == 1, result.stdout
+
+
+def test_the_re_exec_keeps_the_rollback_sha_from_before_the_pull(box: Box):
+    """A re-exec that recomputed HEAD would print the commit just pulled as the
+    thing to roll back to, which is the one SHA that cannot help."""
+    before = box.git("rev-parse", "HEAD").stdout.strip()
+    box.rewrite_deploy_sh_upstream()
+
+    result = box.run_in_checkout("deploy.sh")
+
+    assert before[:8] in result.stdout
+    assert box.git("rev-parse", "HEAD").stdout.strip() != before
+
+
+def test_the_re_exec_cannot_loop(box: Box):
+    """Belt and braces on a construct that re-runs the whole script."""
+    box.push_upstream_commit()
+
+    result = box.run_in_checkout("deploy.sh")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len([line for line in box.log("systemctl") if "restart" in line]) == 1
+
+
+# --- the message that must not tell you to ssh to the swarm manager ----------
+
+
+def test_install_never_prints_an_ssh_command_to_a_bare_short_name(installable: Box):
+    """`hostname -f` returns `hal-mary` on the VM, and `ssh bryan@hal-mary`
+    resolves through Pi-hole's wildcard onto the ingress VIP and lands on birdo,
+    the swarm manager. This is the failure message most likely to be printed —
+    'claude is not logged in' — so it is the one that must not say that."""
+    import re
+
+    installable.fail("doctor")
+
+    result = installable.run("install.sh")
+    output = result.stdout + result.stderr
+
+    targets = re.findall(r"\bssh\s+\S+@(\S+)", output)
+    assert targets, "the message should still tell them how to get onto the box"
+    for target in targets:
+        assert re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", target) or "." in target, (
+            f"{target!r} is a bare short name; use the IP or a real FQDN"
+        )
+
+
+# --- the unit's PATH is the one doctor searches ------------------------------
+
+
+def test_the_units_path_is_exactly_what_doctor_searches():
+    """Two files, one fact. If the unit gains a directory and doctor does not,
+    doctor passes a box whose service still cannot find `claude`."""
+    from hal_mary.doctor import UNIT_PATH
+
+    unit_value = environment_lines("hal-mary.service")["PATH"].replace("%h/", "~/")
+
+    assert unit_value.split(":") == list(UNIT_PATH)
+
+
+# --- HAL_MARY_HOME actually reaches the installed unit -----------------------
+
+
+def test_the_installed_unit_points_at_the_checkout_that_installed_it(
+    installable: Box, tmp_path: Path
+):
+    """The unit says %h/hal-mary; both scripts honour HAL_MARY_HOME. A unit that
+    silently pointed somewhere other than the checkout it was installed from
+    would run the wrong code against the wrong config."""
+    elsewhere = tmp_path / "hal-mary-alt"
+    shutil.copytree(installable.checkout, elsewhere)
+
+    result = installable.run("install.sh", HAL_MARY_HOME=str(elsewhere))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    installed = (installable.units_dir / "hal-mary.service").read_text(encoding="utf-8")
+    assert str(elsewhere) in installed
+    assert "%h/hal-mary" not in installed
+
+
+def test_the_installed_unit_is_byte_identical_when_the_checkout_is_the_default(
+    installable: Box,
+):
+    """No substitution, no drift: the common case installs the file as written,
+    so `diff` against deploy/ is a meaningful check on the box."""
+    installable.run("install.sh")
+
+    assert (installable.units_dir / "hal-mary.service").read_text(encoding="utf-8") == (
+        DEPLOY / "hal-mary.service"
+    ).read_text(encoding="utf-8")
+
+
+# --- the timer's schedule means what the runbook says it means ---------------
+
+
+def test_the_backup_timer_pins_its_timezone():
+    """The runbook says 04:17 UTC. Without a pin that is true only because this
+    VM happens to be Etc/UTC, and a timezone change would move the backup
+    silently."""
+    assert unit_section("hal-mary-backup.timer", "Timer")["OnCalendar"].endswith(" UTC")
+
+
+# --- the doctor gate has an escape hatch on install too ----------------------
+
+
+def test_install_can_be_forced_past_a_fatal_preflight(installable: Box):
+    """The claude-login check reads an undocumented key in Claude Code's own
+    config. If that format ever drifts, install would be bricked with no way
+    through — so there is a way through."""
+    installable.fail("doctor")
+
+    result = installable.run("install.sh", HAL_MARY_SKIP_DOCTOR="1")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert installable.units_dir.is_dir()
+
+
+def test_forcing_past_the_preflight_still_shows_what_was_ignored(installable: Box):
+    """An operator who reaches for the override has to be able to see what they
+    turned off, so the checks still run — they just stop gating."""
+    installable.fail("doctor")
+
+    result = installable.run("install.sh", HAL_MARY_SKIP_DOCTOR="1")
+
+    assert any("doctor" in line for line in installable.log("uv")), "it still ran"
+    assert "IGNORED" in result.stdout + result.stderr
+
+
+def test_skipping_the_preflight_on_deploy_still_shows_what_was_ignored(box: Box):
+    box.push_upstream_commit()
+    box.fail("doctor")
+
+    result = box.run("deploy.sh", HAL_MARY_SKIP_DOCTOR="1")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert any("doctor" in line for line in box.log("uv")), "it still ran"
+    assert "IGNORED" in result.stdout + result.stderr

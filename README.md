@@ -48,7 +48,7 @@ hal-mary runs on its own VM as a **systemd user service**. Everything below is d
 |---|---|
 | The box | `bryan@hal-mary.thehalf.io` — `192.168.1.205` |
 | The checkout | `~/hal-mary` |
-| The database | `~/hal-mary-data/hal.db` (plus `-wal` and `-shm` beside it) |
+| The database | `~/hal-mary-data/hal.db` (plus `-wal` and `-shm` beside it) — the default when `DB_PATH` is empty |
 | Backups | `~/hal-mary-data/backups/hal-<timestamp>.db`, nightly |
 | Secrets | `~/hal-mary/.env` — mode 0600, gitignored, never in git |
 | The unit files | `~/.config/systemd/user/hal-mary*.{service,timer}` |
@@ -139,19 +139,22 @@ That script writes `~/hal-mary/.env` at mode 0600 and **merges** — it leaves k
 about alone. Or copy `.env.example` and fill it in by hand; [`docs/SETUP.md`](docs/SETUP.md) says
 where each value comes from.
 
-**Set `DB_PATH` absolutely:**
+**`DB_PATH` may be left empty.** It then defaults to `~/hal-mary-data/hal.db`, which is where it
+belongs. Writing it out explicitly is still clearer:
 
 ```
 DB_PATH=/home/bryan/hal-mary-data/hal.db
 ```
 
-Two reasons, both of which fail silently rather than loudly:
+What must not happen is a *relative* value. Every configured path is resolved against the directory
+holding `config.toml` — the checkout — so `DB_PATH=./hal.db` puts the database, and the `backups/`
+directory that follows it, inside the one directory `git pull` rewrites, a rollback moves, and a
+re-clone loses. `hal-mary doctor` has a **database location** check for exactly this, and it is
+fatal once `~/hal-mary-data` exists.
 
-- A *relative* `DB_PATH` is resolved against the directory holding `config.toml` — the checkout —
-  so it would put the database inside the thing a deploy replaces.
-- `~/hal-mary-data` is on the VM's **own disk**. `/var/data` on every machine in this homelab is a
-  TrueNAS NFS export, and **SQLite on NFS corrupts**. `hal-mary doctor` checks the filesystem under
-  `DB_PATH` and refuses an install onto a network mount, but do not rely on that to catch a typo.
+The other rule is the filesystem: `~/hal-mary-data` is on the VM's **own disk**. `/var/data` on
+every machine in this homelab is a TrueNAS NFS export, and **SQLite on NFS corrupts**. Doctor checks
+that too and refuses an install onto a network mount.
 
 ### 1.6 Install
 
@@ -164,6 +167,16 @@ writable data directory, and then `hal-mary doctor`, which is where "claude is n
 caught. If any of that fails, the box is left exactly as it was. Then it copies the three unit files
 into `~/.config/systemd/user/`, enables linger, starts `hal-mary.service` and
 `hal-mary-backup.timer`, and waits for `/healthz` to answer before claiming success.
+
+If `doctor` refuses and you are certain it is wrong — the `claude` login check reads an undocumented
+key in Claude Code's own config file, so it *can* be wrong if that format changes — then
+`HAL_MARY_SKIP_DOCTOR=1 ~/hal-mary/deploy/install.sh`. The checks still run and still print; only
+the refusal is turned off, and the output says so in capitals. The same variable works on
+`deploy.sh`.
+
+The units say `%h/hal-mary`. If the checkout is somewhere else, `install.sh` substitutes the real
+path in as it installs; when it is the default the installed file is byte-identical to
+`deploy/hal-mary.service`, so `diff` against the checkout is a meaningful check.
 
 ### 1.7 Verify
 
@@ -359,7 +372,13 @@ Two things worth knowing:
   holds real leaguemates' names — but it looks like a broken deploy. Fix with
   `git rm --cached memory/league.md`, then re-run; `hal-mary sync` rewrites the file.
 - To deploy to a box `doctor` says is not ready — for instance, to ship the fix that makes it ready
-  — `HAL_MARY_SKIP_DOCTOR=1 ~/hal-mary/deploy/deploy.sh`.
+  — `HAL_MARY_SKIP_DOCTOR=1 ~/hal-mary/deploy/deploy.sh`. The checks still run and print; only the
+  refusal is turned off.
+- `deploy.sh` **re-executes itself once, immediately after the pull**, and prints `re-reading` when
+  it does. That is not a bug: a script rewritten underneath a running bash can resume at a stale
+  byte offset and skip everything after it while still exiting 0. Today's git replaces a changed
+  file with a new inode rather than truncating the old one, so it does not actually bite — the
+  re-exec is what makes that an implementation detail of git rather than a load-bearing assumption.
 
 ### Rolling back
 

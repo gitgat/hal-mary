@@ -1104,3 +1104,53 @@ Retention matches only files named `<stem>-<timestamp><suffix>`, because a backu
 directory on someone's disk and deleting a file we did not write is not a mistake anyone gets to
 make twice. `keep` is a count of files rather than days, because a timer can miss a night and "the
 last fourteen" is the window someone reasons about while restoring.
+
+---
+
+## 2026-09-08 — `DB_PATH` defaults outside the checkout, and doctor checks where it landed
+
+**Decision.** `config.DEFAULT_DB_PATH` is `~/hal-mary-data/hal.db`, not `./hal.db`. `hal-mary
+doctor` gained a `database location` check: a database under the directory holding `config.toml` is
+a warning, and fatal once `~/hal-mary-data` exists.
+
+**Why.** These two are the same bug seen from either end, and the combination was silent. Task 11
+made every configured path anchor to `config.toml`'s directory — correct, and it quietly changed
+what `./hal.db` *means*: no longer "wherever you started the process", but "inside the checkout".
+`.env.example` ships `DB_PATH=` empty, empty falls through to the default, and the default was
+relative. So the path of least resistance put `hal.db` — and the `backups/` directory that follows
+the database — inside the one directory `git pull` rewrites, `git checkout <sha>` moves, and a
+re-clone loses. `install.sh` meanwhile created and blessed `~/hal-mary-data`, which nothing then
+used, and doctor reported nine checks and zero failures over the whole arrangement.
+
+The runbook said to set it absolutely. A runbook instruction with nothing enforcing it is a
+comment.
+
+**Consequences.** The default is now correct with no `.env` at all, which is the state a box set up
+in a hurry is in. Two tests in `test_config.py` pin it, and the tests that were exercising
+*anchoring* through the default now pass an explicit relative `DB_PATH`, because those two things
+had been conflated. The location check is fatal only when `~/hal-mary-data` exists, because that
+directory is `install.sh`'s own artifact: if it is there and the database is not in it, someone
+skipped a step in the runbook — whereas a developer's checkout has no such directory and no
+deployment to break.
+
+---
+
+## 2026-09-08 — doctor resolves `claude` against the unit's PATH, not the caller's
+
+**Decision.** `hal_mary.doctor.UNIT_PATH` mirrors `Environment=PATH=` in
+`deploy/hal-mary.service`, and the binary check searches both that and the caller's `PATH`,
+reporting disagreement as fatal. `tests/unit/test_deploy.py` asserts the constant and the unit file
+are identical.
+
+**Why.** `shutil.which` asks about the PATH of whoever is running doctor, and the only PATH that
+matters is the one the service will have. The two differ in practice: `claude` installs into
+`~/.npm-global/bin`, which Ubuntu's `.bashrc` adds — and `.bashrc` returns early for a
+non-interactive shell, so that directory is absent under `ssh host 'command'`. Checking only
+`os.environ` therefore fails a perfectly healthy box every time `install.sh` is run
+non-interactively, and — the worse direction — passes a box where `claude` sits somewhere the
+unit's fixed PATH will never look. That second case is precisely the silent failure the unit file's
+own comment warns about: the service starts, serves every page, and fails every model call.
+
+**Consequences.** The check reports *where* it found the binary and against which PATH, so a
+disagreement names both. Two files now encode one fact, which is why the drift guard is a test
+rather than a comment.

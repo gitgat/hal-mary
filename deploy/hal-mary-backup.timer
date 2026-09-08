@@ -11,7 +11,10 @@ Description=Nightly hal-mary database backup
 Documentation=https://github.com/gitgat/hal-mary
 
 [Timer]
-OnCalendar=*-*-* 04:17:00
+# UTC is pinned, not assumed. Without it the schedule follows the box's local
+# time, so the runbook's "04:17 UTC" would be true only for as long as nobody
+# runs timedatectl — and the backup would move without anything saying so.
+OnCalendar=*-*-* 04:17:00 UTC
 Persistent=true
 # So a fleet of boxes would not all wake at once, and so the snapshot is never
 # taken at exactly the same instant as anything else scheduled on the hour.

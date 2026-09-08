@@ -56,14 +56,53 @@ from typing import Any
 __all__ = [
     "PROC_MOUNTS",
     "REMOTE_FILESYSTEMS",
+    "UNIT_PATH",
     "Check",
     "claude_config_path",
     "filesystem_for",
     "read_mounts",
     "render",
     "run_checks",
+    "unit_path_for",
     "worst_exit_code",
 ]
+
+#: The PATH ``deploy/hal-mary.service`` sets, as written there, with ``%h``
+#: spelled ``~``. This is the PATH the **service** will have, which is the only
+#: one that matters: ``claude`` lives in ``~/.npm-global/bin``, and Ubuntu's
+#: ``.bashrc`` returns early for a non-interactive shell, so that directory is on
+#: an interactive login's PATH and *not* on the PATH of ``ssh host 'command'``.
+#:
+#: Checking only ``os.environ["PATH"]`` therefore gets it wrong in both
+#: directions: it fails a healthy box whenever ``install.sh`` is run
+#: non-interactively, and it passes a box where ``claude`` sits somewhere the
+#: unit's fixed PATH will never look — the exact silent failure the unit file's
+#: own comment warns about.
+#:
+#: ``tests/unit/test_deploy.py`` pins this against the unit file, so the two
+#: cannot drift.
+UNIT_PATH: tuple[str, ...] = (
+    "~/.local/bin",
+    "~/.npm-global/bin",
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
+)
+
+
+def unit_path_for(home: Path) -> str:
+    """:data:`UNIT_PATH` as a real search path, ``~`` expanded against ``home``.
+
+    Against ``home`` rather than ``Path.home()`` so a test can describe a box it
+    is not running on — and so this says what it means: the PATH belongs to the
+    user the service runs as.
+    """
+    return os.pathsep.join(
+        str(home / entry[2:]) if entry.startswith("~/") else entry for entry in UNIT_PATH
+    )
 
 #: Where the kernel publishes the mount table. Read rather than shelled out to,
 #: because doctor spawns nothing.
@@ -190,21 +229,45 @@ def environment_check(settings: Any) -> Check:
     return Check("environment", True, "every required key is set in .env")
 
 
-def claude_binary_check(settings: Any, which: Callable[[str], str | None]) -> Check:
+def claude_binary_check(settings: Any, which: Callable[..., str | None], home: Path) -> Check:
+    """Can the *service* find ``claude``?
+
+    Two searches, because they answer different questions and disagreeing is the
+    interesting case. :data:`UNIT_PATH` is what the systemd unit gives the
+    process; ``os.environ["PATH"]`` is what whoever is running doctor has. A
+    binary on the second and not the first is a box that looks healthy from a
+    terminal and cannot make a model call from the service.
+    """
     binary = settings.claude.binary
-    resolved = which(binary)
-    if resolved is None:
+    on_unit_path = which(binary, path=unit_path_for(home))
+    on_caller_path = which(binary)
+
+    if on_unit_path is None and on_caller_path is None:
         candidate = Path(binary)
         if candidate.is_file() and os.access(candidate, os.X_OK):
-            resolved = str(candidate)
-    if resolved is None:
+            # An absolute or explicitly-pathed binary from config.toml; PATH is
+            # not involved, so neither search was ever going to find it.
+            return Check("claude binary", True, f"found at {candidate}")
         return Check(
             "claude binary",
             False,
-            f"{binary!r} is not on the PATH. A systemd user unit does not inherit "
-            f"your shell's PATH — check Environment=PATH= in the unit file.",
+            f"{binary!r} is on neither the PATH the systemd unit sets "
+            f"({unit_path_for(home)}) nor this shell's. Install Claude Code, or "
+            f"correct claude.binary in {settings.config_path}.",
         )
-    return Check("claude binary", True, f"found at {resolved}")
+
+    if on_unit_path is None:
+        return Check(
+            "claude binary",
+            False,
+            f"{binary!r} is at {on_caller_path}, which is NOT on the PATH the "
+            f"systemd unit sets. The service would start, serve every page, and "
+            f"fail every Claude call with 'claude: not found'. Move it onto "
+            f"{unit_path_for(home)}, or widen Environment=PATH= in "
+            f"deploy/hal-mary.service.",
+        )
+
+    return Check("claude binary", True, f"found at {on_unit_path} (on the unit's PATH)")
 
 
 def claude_login_check(home: Path) -> Check:
@@ -282,6 +345,42 @@ def database_directory_check(settings: Any) -> Check:
     return Check(
         "database directory", True, f"{parent} will be created under {existing}, which is writable"
     )
+
+
+def database_location_check(settings: Any, home: Path) -> Check:
+    """Is the database inside the checkout — the directory a deploy replaces?
+
+    This is the check that catches the shipped default. ``.env.example`` carries
+    ``DB_PATH=`` empty; empty means the default; and every configured path is
+    anchored to the directory holding ``config.toml``, which *is* the checkout.
+    So the easy path put ``hal.db`` and its ``backups/`` where ``git pull``
+    rewrites, ``git checkout <sha>`` moves, and a re-clone loses them — and
+    nothing else in the system would have said a word about it.
+
+    Fatal when ``~/hal-mary-data`` exists, because that directory is created and
+    blessed by ``install.sh``: if it is there and the database is not in it,
+    someone skipped the one step in the runbook that says to set ``DB_PATH``
+    absolutely. On a developer's checkout there is no such directory and no
+    deployment to break, so it is a warning.
+    """
+    db_path = settings.db_path
+    checkout = settings.config_path.parent
+    if checkout not in db_path.parents:
+        return Check("database location", True, f"{db_path.parent} is outside {checkout}")
+
+    data_dir = home / "hal-mary-data"
+    deployed = data_dir.is_dir()
+    detail = (
+        f"the database is {db_path}, inside the checkout {checkout} — the one "
+        f"directory a deploy replaces and a rollback moves. Backups follow it, "
+        f"so {settings.backup_dir()} would go the same way. "
+    )
+    detail += (
+        f"Set DB_PATH={data_dir / 'hal.db'} in .env."
+        if deployed
+        else "Set DB_PATH to an absolute path outside the checkout in .env."
+    )
+    return Check("database location", False, detail, fatal=deployed)
 
 
 def database_filesystem_check(settings: Any, mounts: str | None) -> Check:
@@ -398,10 +497,11 @@ def run_checks(
     return [
         Check("config", True, f"loaded {settings.config_path}"),
         environment_check(settings),
-        claude_binary_check(settings, which),
+        claude_binary_check(settings, which, home),
         claude_login_check(home),
         prompts_check(settings),
         memory_check(settings),
+        database_location_check(settings, home),
         database_directory_check(settings),
         database_filesystem_check(settings, mount_table),
         database_check(settings),

@@ -57,7 +57,7 @@ Fill in:
 | `TEAM_ID` | Caroline's team id |
 | `SEASON` | the season year, e.g. `2026` |
 | `WEB_PASSWORD` | a password for the web app; anyone on the network who knows it can read the league |
-| `DB_PATH` | where the database lives; defaults to `./hal.db`. A relative value is resolved against the directory holding `config.toml`, **not** the working directory — see below. Set it absolute for a real deployment. |
+| `DB_PATH` | where the database lives. Leave it empty and it defaults to `~/hal-mary-data/hal.db` — on local disk and outside the checkout, which is what you want. A *relative* value is resolved against the directory holding `config.toml`, **not** the working directory, which puts the database inside the checkout; `hal-mary doctor` reports that. |
 
 ### Every path is resolved against `config.toml`, not the working directory
 
