@@ -177,7 +177,7 @@ sse_heartbeat_s = 15.0             # comment frame that keeps a phone's stream o
 # silence, so the app sees scheme "http" on an https site and sets the session
 # cookie WITHOUT Secure. The page works; the cookie is downgraded. Set this to
 # the ingress address, or "*" when nothing but the proxy can reach the port.
-forwarded_allow_ips = ""
+forwarded_allow_ips = "192.168.1.163"   # birdo, the host Traefik runs on
 auth_check_seconds = 3600          # how often the status page re-checks the ESPN cookies
 login_max_attempts = 5             # wrong passwords from one device before it is locked out
 login_lockout_seconds = 60.0       # and for how long
