@@ -137,6 +137,20 @@ live_poll_ms = 10000
 # the loop keeps polling ESPN, and a deploy leaves it behind.
 shutdown_timeout_s = 5
 
+[chat]
+# How much hal-mary puts in front of the model when Caroline asks a question,
+# and how much of the conversation the page itself shows.
+#
+# note_limit is larger than the draft's because a chat question has no pick
+# clock. The whole point of the page is the question a dashboard could not
+# anticipate, and a thin retrieval is exactly how that gets a thin answer.
+#
+# Notes are retrieved with no age cutoff here, unlike every other job: "how has
+# my season gone" is a question about things that happened months ago.
+note_limit = 25
+advice_limit = 5          # recent recommendations shown to the model and the page
+session_limit = 20        # conversations listed down the side of the page
+
 [jobs.board_build]
 model = "opus"
 tools = ["WebSearch", "WebFetch"]

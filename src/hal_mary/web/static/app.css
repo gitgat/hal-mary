@@ -76,14 +76,21 @@ header h1 {
   color: var(--ink-soft);
 }
 
+/* Wraps rather than overflows. Five destinations do not fit across a phone in
+ * one row at a 48px tap target, and a nav that runs off the right edge hides
+ * whichever page was added last. */
 nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.4rem;
   margin: 0.6rem 0 1rem;
 }
 
 nav a {
-  flex: 1;
+  flex: 1 1 5rem;
+  min-width: 0;
+  padding: 0 0.5rem;
+  text-align: center;
   min-height: var(--tap);
   display: flex;
   align-items: center;
@@ -497,3 +504,47 @@ input[type="text"], select {
 .result.ok { background: var(--ok-bg); color: var(--ok); }
 .result.bad { background: var(--bad-bg); color: var(--bad); }
 .result.warn { background: var(--warn-bg); color: var(--warn); }
+
+/* --- the chat page ------------------------------------------------------- */
+
+#messages { margin-bottom: 1rem; }
+
+.msg {
+  border-top: 1px solid var(--line);
+  padding: 0.7rem 0;
+}
+.msg:first-child { border-top: 0; padding-top: 0; }
+
+.msg-who {
+  margin: 0 0 0.25rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+/* pre-wrap, so a model's paragraphs and lists keep their shape without this
+ * page ever rendering what it was handed as markup. */
+.msg-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.msg.mine .msg-text { font-weight: 600; }
+.msg-state { margin: 0.4rem 0 0; }
+
+/* The bubble being written into. The dotted edge is the only thing on the page
+ * that says "this is not finished yet", and it has to survive a text-only
+ * answer arriving one word at a time. */
+.msg.pending { border-left: 3px solid var(--accent); padding-left: 0.6rem; }
+
+#chat textarea {
+  width: 100%;
+  min-height: 3.4rem;
+  padding: 0.6rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 0.6rem;
+}
+
+#conversations .row a { color: var(--accent); }

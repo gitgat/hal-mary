@@ -49,15 +49,31 @@ def load_prompt(settings: Any, name: str) -> str:
 
 
 def render(template: str, values: dict[str, Any]) -> str:
-    """Substitute ``{{name}}`` placeholders; raise if any are left over."""
-    filled = _PLACEHOLDER.sub(
-        lambda match: str(values[match.group(1)]) if match.group(1) in values else match.group(0),
-        template,
+    """Substitute ``{{name}}`` placeholders; raise if the *template* has any spare.
+
+    **The template is what gets checked, never the result.** This used to fill
+    the placeholders in and then re-scan the filled text, which cannot tell a
+    placeholder nobody supplied from a *value* that happens to contain braces.
+    Every caller until the chat page filled these in from the database — a team
+    count, a pick number, a player's name — so nothing a person typed had ever
+    reached here. Chat passes Caroline's own question straight through, and
+    "What does {{PPR}} mean?" raised ``PromptError`` instead of being answered:
+    permanently, because retyping it failed identically, and opaquely, because
+    nothing told her which characters did it.
+
+    So the check happens first and substitution happens once. A value is a
+    value: ``re.sub`` does not rescan what it inserted, and neither does this.
+    """
+    missing = sorted(
+        {
+            match.group(1)
+            for match in _PLACEHOLDER.finditer(template)
+            if match.group(1) not in values
+        }
     )
-    missing = sorted({match.group(1) for match in _PLACEHOLDER.finditer(filled)})
     if missing:
         raise PromptError(f"prompt has unfilled placeholders: {', '.join(missing)}")
-    return filled
+    return _PLACEHOLDER.sub(lambda match: str(values[match.group(1)]), template)
 
 
 def render_prompt(settings: Any, name: str, values: dict[str, Any]) -> str:

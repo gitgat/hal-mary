@@ -1,0 +1,5 @@
+{% if saved %}
+  <p class="chip ok">Saved. hal-mary will have this in front of it next time.</p>
+{% elif error %}
+  <p class="chip bad">{{ error }}</p>
+{% endif %}

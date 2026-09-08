@@ -73,6 +73,8 @@ uv run hal-mary job <name>     # run one job on demand
 uv run hal-mary doctor         # can this box run hal-mary? nonzero on a fatal problem
 uv run hal-mary migrate        # apply pending schema migrations
 uv run hal-mary backup         # snapshot the database, prune to backup.keep
+
+# the chat page is at /chat; it is the one job with web tools on the request path
 ```
 
 Deployment lives in `deploy/` — a systemd **user** unit, `install.sh` and `deploy.sh` — and the
@@ -332,6 +334,24 @@ empty for exactly that reason.
   full timeout — five minutes on the idle cadence, once per deploy, each one leaving a thread still
   polling ESPN. The stop flag is a `threading.Event` and the wake-up goes through
   `call_soon_threadsafe`, the same rule `hal_mary.events` follows.
+- **Chat is the only caller that keeps a Claude session.** `ClaudeRunner` adds
+  `--no-session-persistence` to every one-shot job; `hal_mary.chat` passes `persist_session=True`
+  so the CLI keeps the session whose id lands in `chat_sessions.claude_session_id` and the next
+  message can `--resume` it. A failed call clears that id, because a session the CLI no longer holds
+  fails every message after it. See `docs/DECISIONS.md`.
+- **The chat stream opens its connection inside the worker.** `ClaudeRunner.stream` is a blocking
+  generator that finishes by writing a `claude_calls` row, and `db.connect` leaves
+  `check_same_thread` on — so `web/chat_page.py` does the whole call in one `run_in_threadpool`:
+  open the connection, build the runner, drain the answer, hand chunks across a queue.
+  `iterate_in_threadpool` hops threads per `next()` and fails on the last chunk *intermittently*,
+  which is the worst way for it to fail. The runner's docstring carries the pattern.
+- **One live chat answer per conversation.** `chat_page.Answering`, one per app, is the interlock;
+  a second stream for a conversation already being answered says so and ends. Without it a phone
+  reconnecting three times buys three concurrent Claude calls and gets three answers to one
+  question. Per app, not per process: two apps in one process is every test run.
+- **A chat question is recorded by the POST and answered by the GET**, and which question a stream
+  answers is derived (`chat.pending_question`), never stored. Anything that changes when the reply is
+  persisted changes what the page believes is outstanding.
 - **`app.routes` does not contain your routes.** This FastAPI represents each
   `include_router` as one opaque `_IncludedRouter` object holding the original router, so a test
   that walks `app.routes` looking for paths finds three pathless objects and silently checks

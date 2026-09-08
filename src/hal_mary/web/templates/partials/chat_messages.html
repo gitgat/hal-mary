@@ -1,0 +1,9 @@
+{% for message in messages %}
+  {% include "partials/chat_bubble.html" %}
+{% endfor %}
+{% if pending %}
+  {% include "partials/chat_pending.html" %}
+{% endif %}
+{% if not messages and not pending %}
+  <p class="muted" id="chat-empty">Nothing asked yet. Type a question below.</p>
+{% endif %}
