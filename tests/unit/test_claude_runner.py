@@ -235,6 +235,31 @@ def test_resume_and_no_session_persistence_are_mutually_exclusive(harness: Harne
     assert "--no-session-persistence" not in argv
 
 
+def test_persist_session_keeps_the_session_the_chat_page_will_resume(harness: Harness):
+    """A one-shot job leaves nothing behind; a conversation has to.
+
+    ``--no-session-persistence`` is right for every scheduled job and fatal for
+    chat: the CLI would discard the session whose id chat then stores, and the
+    ``--resume`` on her second message would name a session that was never
+    written. So the flag is suppressed only when a caller says it is holding a
+    conversation.
+    """
+    harness.runner.run("tools_off", "hello", persist_session=True)
+    argv = harness.argv
+    assert "--no-session-persistence" not in argv
+    assert "--resume" not in argv
+
+    harness.use("streaming.jsonl")
+    list(harness.runner.stream("tools_off", "hello", persist_session=True))
+    assert "--no-session-persistence" not in harness.argv
+
+
+def test_persist_session_is_off_unless_asked_for(harness: Harness):
+    harness.use("streaming.jsonl")
+    list(harness.runner.stream("tools_off", "hello"))
+    assert "--no-session-persistence" in harness.argv
+
+
 def test_model_comes_from_job_config(harness: Harness):
     harness.runner.run("tools_on", "hello")
     assert flag_value(harness.argv, "--model") == TOOLS_ON_MODEL

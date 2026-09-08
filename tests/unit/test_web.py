@@ -216,7 +216,18 @@ def test_create_app_refuses_an_empty_password(db_path: Path):
 
 
 @pytest.mark.parametrize(
-    "path", ["/", "/status", "/team", "/league", "/draft", "/draft/live", "/events"]
+    "path",
+    [
+        "/",
+        "/status",
+        "/team",
+        "/league",
+        "/draft",
+        "/draft/live",
+        "/events",
+        "/chat",
+        "/chat/stream/1",
+    ],
 )
 def test_unauthenticated_pages_redirect_to_login(db_path: Path, path: str):
     with client_for(db_path) as client:
@@ -260,6 +271,11 @@ def test_no_route_escapes_the_password_by_accident(db_path: Path):
         "/sync",
         "/events",
         "/logout",
+        "/chat",
+        "/chat/new",
+        "/chat/send",
+        "/chat/remember",
+        "/chat/stream/{session_id}",
     } <= found, (
         f"the route walk found only {sorted(found)}"
     )
@@ -277,14 +293,19 @@ def test_no_route_escapes_the_password_by_accident(db_path: Path):
                 or path.startswith("/static")
             ):
                 continue
+            # A templated path has to be filled in before it can be requested:
+            # httpx percent-encodes the braces, and the route then either 404s or
+            # 422s on a session id of "{session_id}" — either of which walks
+            # straight past the assertion below while appearing to check it.
+            url = re.sub(r"\{[^}]+\}", "1", path)
             for method in sorted(getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}):
-                response = client.request(method, path)
-                assert response.status_code in (302, 303, 307), f"{method} {path} is unprotected"
+                response = client.request(method, url)
+                assert response.status_code in (302, 303, 307), f"{method} {url} is unprotected"
                 # The guard's own redirect, not merely one that lands on /login.
                 # A public route that redirects there under its own steam —
                 # /logout used to — would otherwise walk straight past this.
-                assert response.headers["location"] == f"/login?next={path}", (
-                    f"{method} {path} redirects to /login without being guarded"
+                assert response.headers["location"] == f"/login?next={url}", (
+                    f"{method} {url} redirects to /login without being guarded"
                 )
 
 
@@ -1345,3 +1366,345 @@ def test_the_status_page_says_so_when_cowork_has_done_nothing(db_path: Path):
         text = client.get("/status").text
 
     assert "Cowork" in text
+
+
+# --- the chat page ----------------------------------------------------------
+#
+# The engine itself is tested in test_chat.py against the fake binary. What is
+# tested here is the half a browser sees: that the question survives the POST,
+# that tokens arrive down the stream rather than in one lump at the end, and
+# that nothing anybody typed is rendered as markup.
+
+FAKE_CLAUDE = Path(__file__).resolve().parents[2] / "tests" / "fake_claude" / "claude"
+CLAUDE_FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "claude"
+
+
+def chat_settings(db_path: Path, tmp_path: Path, **knobs: Any):
+    """Settings whose ``claude`` binary is the fake, with its knobs written out.
+
+    ``model_copy`` with absolute paths: ``Settings`` anchors configured paths in
+    a validator, and a copy does not re-run it.
+    """
+    scratch = tmp_path / "scratch"
+    scratch.mkdir(parents=True, exist_ok=True)
+    system_prompt = tmp_path / "system.md"
+    system_prompt.write_text("You advise Caroline.\n", encoding="utf-8")
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir(exist_ok=True)
+
+    knobs.setdefault("fixture", str(CLAUDE_FIXTURES / "streaming.jsonl"))
+    (scratch / "fake_knobs.json").write_text(json.dumps(knobs), encoding="utf-8")
+
+    base = make_settings(db_path)
+    return base.model_copy(
+        update={
+            "claude": base.claude.model_copy(
+                update={
+                    "binary": str(FAKE_CLAUDE),
+                    "scratch_dir": scratch,
+                    "system_prompt_file": system_prompt,
+                }
+            ),
+            "paths": base.paths.model_copy(update={"memory_dir": memory_dir}),
+        }
+    )
+
+
+def open_a_session(db_path: Path, title: str | None = None) -> int:
+    from hal_mary import chat
+
+    conn = open_conn(db_path)
+    try:
+        return chat.start_session(conn, title)
+    finally:
+        conn.close()
+
+
+def chat_rows(db_path: Path, session_id: int) -> list[tuple[str, str]]:
+    from hal_mary import chat
+
+    conn = open_conn(db_path)
+    try:
+        return [(row["role"], row["content"]) for row in chat.get_messages(conn, session_id)]
+    finally:
+        conn.close()
+
+
+def test_the_chat_page_renders_on_an_empty_database(db_path: Path):
+    with client_for(db_path) as client:
+        login(client)
+        response = client.get("/chat")
+    assert response.status_code == 200
+    # No jargon, and something to type into even before a conversation exists.
+    assert "<textarea" in response.text
+    assert "csrf_token" in response.text
+
+
+def test_starting_a_conversation_lands_on_it(db_path: Path):
+    with client_for(db_path) as client:
+        login(client)
+        response = post(client, "/chat/new")
+    assert response.status_code in (302, 303)
+    assert response.headers["location"].startswith("/chat?session=")
+
+
+def test_sending_a_question_records_it_and_offers_a_bubble_to_stream_into(
+    db_path: Path, tmp_path: Path
+):
+    settings = chat_settings(db_path, tmp_path)
+    session_id = open_a_session(db_path)
+    with client_for(db_path, settings=settings) as client:
+        login(client)
+        response = post(
+            client,
+            "/chat/send",
+            {"session_id": str(session_id), "message": "What does PPR mean?"},
+            headers={"hx-request": "true"},
+        )
+    assert response.status_code == 200
+    assert "What does PPR mean?" in response.text
+    # The empty bubble the stream fills in, addressed by the session it belongs to.
+    assert f"/chat/stream/{session_id}" in response.text
+    assert chat_rows(db_path, session_id) == [("user", "What does PPR mean?")]
+
+
+def test_an_empty_question_is_refused_without_calling_claude(
+    db_path: Path, tmp_path: Path
+):
+    settings = chat_settings(db_path, tmp_path)
+    session_id = open_a_session(db_path)
+    with client_for(db_path, settings=settings) as client:
+        login(client)
+        response = post(
+            client,
+            "/chat/send",
+            {"session_id": str(session_id), "message": "   "},
+            headers={"hx-request": "true"},
+        )
+    assert response.status_code == 200
+    assert "type a question" in response.text.lower()
+    assert chat_rows(db_path, session_id) == []
+
+
+def test_sending_a_question_without_a_csrf_token_is_refused(db_path: Path):
+    session_id = open_a_session(db_path)
+    with client_for(db_path) as client:
+        login(client)
+        response = client.post(
+            "/chat/send", data={"session_id": str(session_id), "message": "Hello?"}
+        )
+    assert response.status_code == 403
+    assert chat_rows(db_path, session_id) == []
+
+
+def test_remembering_a_fact_writes_a_note_other_jobs_can_find(db_path: Path):
+    from hal_mary import memory
+
+    session_id = open_a_session(db_path)
+    with client_for(db_path) as client:
+        login(client)
+        response = post(
+            client,
+            "/chat/remember",
+            {"session_id": str(session_id), "text": "She is away in week 11."},
+            headers={"hx-request": "true"},
+        )
+    assert response.status_code == 200
+
+    conn = open_conn(db_path)
+    try:
+        found = memory.search_notes(conn, "week 11", max_age_days=None)
+    finally:
+        conn.close()
+    assert [row["text"] for row in found] == ["She is away in week 11."]
+    assert found[0]["source_job"] == "chat"
+
+
+def test_remembering_nothing_says_so_and_writes_no_note(db_path: Path):
+    session_id = open_a_session(db_path)
+    with client_for(db_path) as client:
+        login(client)
+        response = post(
+            client,
+            "/chat/remember",
+            {"session_id": str(session_id), "text": "  "},
+            headers={"hx-request": "true"},
+        )
+    assert response.status_code == 200
+    conn = open_conn(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM notes").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_a_message_is_never_rendered_as_markup(db_path: Path):
+    """Her question, and a note, both reach the page as text and stay text."""
+    from hal_mary import chat
+
+    conn = open_conn(db_path)
+    try:
+        session_id = chat.start_session(conn)
+        chat.record_question(conn, session_id, "<script>alert('x')</script> is what?")
+    finally:
+        conn.close()
+
+    with client_for(db_path) as client:
+        login(client)
+        response = client.get(f"/chat?session={session_id}")
+    assert response.status_code == 200
+    assert "<script>alert" not in response.text
+    assert str(escape("<script>alert('x')</script>")) in response.text
+
+
+async def test_the_chat_stream_delivers_the_reply_and_saves_it(
+    db_path: Path, tmp_path: Path, session_cookie: str
+):
+    from hal_mary import chat
+
+    settings = chat_settings(db_path, tmp_path)
+    conn = open_conn(db_path)
+    try:
+        session_id = chat.start_session(conn)
+        chat.record_question(conn, session_id, "What does PPR mean?")
+    finally:
+        conn.close()
+
+    app = build_app(db_path, settings=settings)
+    delivered = ""
+    async with EventProbe(app, session_cookie, path=f"/chat/stream/{session_id}") as probe:
+        assert probe.status == 200
+        assert "text/event-stream" in probe.headers["content-type"]
+        while "event: done" not in delivered:
+            delivered += await probe.frame()
+
+    # Token by token, not one lump at the end: that is the whole point of the
+    # endpoint, and a 40-second blank screen reads as broken.
+    assert delivered.count("event: chunk") >= 2
+    assert "First chunk." in delivered
+    assert chat_rows(db_path, session_id)[-1] == (
+        "assistant",
+        "First chunk. Second chunk. Third chunk.",
+    )
+
+
+async def test_a_stream_with_nothing_to_answer_ends_without_asking_claude(
+    db_path: Path, tmp_path: Path, session_cookie: str
+):
+    """A reload after the reply landed must not run the whole call again."""
+    settings = chat_settings(db_path, tmp_path, fixture=None, exit=99)
+    session_id = open_a_session(db_path)
+    app = build_app(db_path, settings=settings)
+
+    delivered = ""
+    async with EventProbe(app, session_cookie, path=f"/chat/stream/{session_id}") as probe:
+        while "event: done" not in delivered:
+            delivered += await probe.frame()
+    assert "event: chunk" not in delivered
+    assert chat_rows(db_path, session_id) == []
+
+
+async def test_a_phone_that_disconnects_mid_answer_keeps_the_reply(
+    db_path: Path, tmp_path: Path, session_cookie: str
+):
+    """Her screen locked half way through. The answer must still land.
+
+    The reply is not thrown away with the response. The worker cannot interrupt
+    a read already blocked on the subprocess, so the call hal-mary has already
+    paid for runs to the end and its answer is written into the conversation —
+    which is also the better outcome: she reloads and it is there.
+
+    The fake writes the whole fixture and then hangs, which is what leaves the
+    stream open with text already delivered, and is exactly the state a
+    disconnect has to survive.
+    """
+    from hal_mary import chat
+
+    settings = chat_settings(db_path, tmp_path, hang=1)
+    conn = open_conn(db_path)
+    try:
+        session_id = chat.start_session(conn)
+        chat.record_question(conn, session_id, "Tell me about the draft")
+    finally:
+        conn.close()
+
+    app = build_app(db_path, settings=settings)
+    delivered = ""
+    async with EventProbe(app, session_cookie, path=f"/chat/stream/{session_id}") as probe:
+        while "Third chunk." not in delivered:
+            delivered += await probe.frame()
+
+    for _ in range(100):
+        rows = chat_rows(db_path, session_id)
+        if len(rows) > 1:
+            break
+        await asyncio.sleep(0.05)
+    assert rows[-1][0] == "assistant"
+    assert "Third chunk." in rows[-1][1]
+
+
+async def test_a_chat_stream_that_cannot_open_the_database_still_ends(
+    db_path: Path, tmp_path: Path, session_cookie: str
+):
+    """The worker dying must not leave the phone on an endless keep-alive.
+
+    The reader ends on a sentinel the worker puts back, so a worker that fell
+    over before its own ``try`` would have left the stream open forever,
+    heartbeating, with nothing on the other end of it.
+    """
+    from hal_mary.web.app import create_app
+
+    def boom() -> sqlite3.Connection:
+        raise sqlite3.OperationalError("unable to open database file")
+
+    app = create_app(
+        make_settings(db_path),
+        connect=boom,
+        check_auth=lambda: (True, "not checked"),
+    )
+    delivered = ""
+    async with EventProbe(app, session_cookie, path="/chat/stream/1") as probe:
+        while "event: done" not in delivered:
+            delivered += await probe.frame()
+    assert "event: chunk" not in delivered
+
+
+async def test_a_second_stream_for_the_same_question_does_not_ask_twice(
+    db_path: Path, tmp_path: Path, session_cookie: str
+):
+    """A flaky phone must not turn one question into two paid-for answers.
+
+    Without the interlock every reconnect starts another call: three drops
+    become three concurrent Claude calls, three ``claude_calls`` rows, and three
+    answers to one question in the conversation.
+    """
+    from hal_mary import chat
+
+    settings = chat_settings(db_path, tmp_path, hang=2)
+    conn = open_conn(db_path)
+    try:
+        session_id = chat.start_session(conn)
+        chat.record_question(conn, session_id, "Tell me about the draft")
+    finally:
+        conn.close()
+
+    app = build_app(db_path, settings=settings)
+    path = f"/chat/stream/{session_id}"
+    async with EventProbe(app, session_cookie, path=path) as first:
+        delivered = ""
+        while "Third chunk." not in delivered:
+            delivered += await first.frame()
+
+        second = ""
+        async with EventProbe(app, session_cookie, path=path) as probe:
+            while "event: done" not in second:
+                second += await probe.frame()
+
+    assert "event: busy" in second
+    assert "event: chunk" not in second
+
+    conn = open_conn(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM claude_calls").fetchone()[0] == 1
+    finally:
+        conn.close()

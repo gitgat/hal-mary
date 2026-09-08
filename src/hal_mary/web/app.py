@@ -56,6 +56,7 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from starlette.routing import Route
 
+from hal_mary import chat as chat_engine
 from hal_mary import db
 from hal_mary.config import Settings
 from hal_mary.draft import loop as draft_loop
@@ -63,6 +64,7 @@ from hal_mary.draft import store as draft_store
 from hal_mary.espn.sync import last_sync
 from hal_mary.mcp.server import MCP_PATH, build_endpoint
 from hal_mary.memory import standing_memory_files
+from hal_mary.web.chat_page import Answering, chat_context, chat_event_stream
 from hal_mary.web.draft_page import draft_context
 from hal_mary.web.positions import SLOT_LABELS, position_word, slot_sort_key
 
@@ -397,6 +399,7 @@ def create_app(
     bus: Any | None = None,
     check_auth: Callable[[], tuple[bool, str]] | None = None,
     run_sync: Callable[[], dict[str, Any]] | None = None,
+    make_runner: Callable[[Settings, sqlite3.Connection], Any] | None = None,
 ) -> FastAPI:
     """Build the app.
 
@@ -404,8 +407,11 @@ def create_app(
     ``db_path``); ``bus`` is the :class:`~hal_mary.events.EventBus` ``/events``
     streams from; ``check_auth`` answers "are the ESPN cookies still good"
     (default: a real ``EspnClient`` call); ``run_sync`` performs a sync (default:
-    a real one, opening its own connection inside the worker thread). Every one
-    of them is injected so the tests build a whole app that reaches nothing.
+    a real one, opening its own connection inside the worker thread);
+    ``make_runner`` builds the :class:`~hal_mary.claude_runner.ClaudeRunner` the
+    chat page streams from, and is handed the connection its own worker thread
+    opened. Every one of them is injected so the tests build a whole app that
+    reaches nothing.
 
     Raises :class:`MissingPasswordError` when ``WEB_PASSWORD`` is unset. That is
     not defensive politeness: this binds every interface on a home network and
@@ -426,6 +432,9 @@ def create_app(
         bus = EventBus()
     check_auth = check_auth or _default_check_auth(settings)
     run_sync = run_sync or _default_run_sync(settings)
+    make_runner = make_runner or _default_make_runner
+    # One live chat answer per conversation, for this app. See chat_page.
+    answering = Answering()
 
     # The signing key is derived from the password rather than stored: there is
     # no second secret to manage, sessions survive a restart (Caroline is not
@@ -1009,6 +1018,148 @@ def create_app(
             )
         return RedirectResponse("/status", status_code=303)
 
+    # -- the chat page -----------------------------------------------------
+
+    @private.get("/chat", response_class=HTMLResponse)
+    async def chat_page(request: Request, session: int | None = None) -> HTMLResponse:
+        with database() as conn:
+            context = chat_context(conn, settings, session)
+        return page(request, "chat.html", **context)
+
+    @private.post("/chat/new")
+    async def chat_new() -> RedirectResponse:
+        with database() as conn:
+            session_id = chat_engine.start_session(conn)
+        return RedirectResponse(f"/chat?session={session_id}", status_code=303)
+
+    @private.post("/chat/send")
+    async def chat_send(
+        request: Request,
+        session_id: str = Form(""),
+        message: str = Form(""),
+    ) -> Any:
+        """Record the question. The answer is streamed from ``/chat/stream``.
+
+        Two routes rather than one because the answer takes up to a minute and
+        the question must survive that: a page reloaded in the middle finds an
+        unanswered question and reattaches to it, rather than losing what she
+        typed. The POST is therefore fast and boring, which is also what lets it
+        be an ordinary CSRF-checked form post.
+        """
+        text = (message or "").strip()
+        if not text:
+            return _chat_response(
+                request, None, error="Type a question first — the box is empty."
+            )
+
+        with database() as conn:
+            here = _session_or_new(conn, session_id)
+            try:
+                chat_engine.record_question(conn, here, text)
+            except Exception as exc:
+                logger.exception("could not save a chat question")
+                return _chat_response(
+                    request, here, error=f"That did not save ({type(exc).__name__})."
+                )
+            asked = chat_engine.get_messages(conn, here)[-1]
+        return _chat_response(request, here, message=asked)
+
+    def _session_or_new(conn: sqlite3.Connection, raw: str) -> int:
+        """The conversation she is in, starting one if she is not in any.
+
+        She should be able to open the page and type. Making "new conversation"
+        a step before the first question is a step that exists for the database's
+        benefit and nobody else's.
+        """
+        try:
+            here = int(str(raw).strip())
+        except (TypeError, ValueError):
+            here = 0
+        if here and chat_engine.get_session(conn, here) is not None:
+            return here
+        return chat_engine.start_session(conn)
+
+    def _chat_response(
+        request: Request,
+        session_id: int | None,
+        *,
+        message: Any = None,
+        error: str | None = None,
+    ) -> Any:
+        if not request.headers.get("hx-request"):
+            target = f"/chat?session={session_id}" if session_id else "/chat"
+            return RedirectResponse(target, status_code=303)
+        return _fragment(
+            request,
+            "partials/chat_turn.html",
+            session_id=session_id,
+            message=message,
+            error=error,
+            pending=message is not None,
+        )
+
+    @private.get("/chat/stream/{session_id}", response_class=EventStreamResponse)
+    async def chat_stream(session_id: int) -> StreamingResponse:
+        """The answer, a token at a time.
+
+        ``EventStreamResponse`` rather than a plain one: Starlette ends a stream
+        by cancelling the task iterating it, which leaves the generator suspended
+        rather than closed, and this generator's close is what tells its worker
+        the phone has gone.
+        """
+        return EventStreamResponse(
+            chat_event_stream(
+                open_conn,
+                settings,
+                make_runner,
+                answering,
+                session_id,
+                settings.web.sse_heartbeat_s,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @private.post("/chat/remember")
+    async def chat_remember(
+        request: Request,
+        session_id: str = Form(""),
+        text: str = Form(""),
+    ) -> Any:
+        """Save something the conversation established, as a note.
+
+        This is the only way a fact reaches the rest of hal-mary from here: notes
+        written with ``source_job='chat'`` are retrieved by the same search every
+        research job reads from, so "I am away in week 11" is in front of the
+        model the next time it writes a line-up.
+        """
+        try:
+            here: int | None = int(str(session_id).strip())
+        except (TypeError, ValueError):
+            here = None
+
+        saved, problem = False, None
+        try:
+            with database() as conn:
+                chat_engine.remember(conn, here, text)
+            saved = True
+        except ValueError:
+            problem = "There was nothing to save — highlight or type the fact first."
+        except Exception as exc:
+            logger.exception("could not save a note from the chat page")
+            problem = f"That did not save ({type(exc).__name__}). Try again."
+
+        if not request.headers.get("hx-request"):
+            target = f"/chat?session={here}" if here else "/chat"
+            return RedirectResponse(target, status_code=303)
+        return _fragment(
+            request, "partials/chat_note.html", saved=saved, error=problem
+        )
+
     @private.get("/events", response_class=EventStreamResponse)
     async def events() -> StreamingResponse:
         return EventStreamResponse(
@@ -1264,6 +1415,17 @@ def _default_check_auth(settings: Settings) -> Callable[[], tuple[bool, str]]:
         return EspnClient(settings).check_auth()
 
     return check
+
+
+def _default_make_runner(settings: Settings, conn: sqlite3.Connection) -> Any:
+    """The real runner, built on the connection its own worker thread opened.
+
+    Imported here rather than at module scope so ``hal-mary --help`` does not
+    pay for it, and so the chat page is the only thing that pulls it in.
+    """
+    from hal_mary.claude_runner import ClaudeRunner
+
+    return ClaudeRunner(settings, conn)
 
 
 def _default_run_sync(settings: Settings) -> Callable[[], dict[str, Any]]:

@@ -1154,3 +1154,62 @@ own comment warns about: the service starts, serves every page, and fails every 
 **Consequences.** The check reports *where* it found the binary and against which PATH, so a
 disagreement names both. Two files now encode one fact, which is why the drift guard is a test
 rather than a comment.
+
+---
+
+## 2026-09-08 — Chat keeps the CLI's own session, so it is the one caller that persists one
+
+**Decision.** `ClaudeRunner.run` and `.stream` take `persist_session: bool = False`.
+`--no-session-persistence` is now added only when a call neither resumes a session nor asks to keep
+one. `hal_mary.chat` is the only caller that passes `persist_session=True`.
+
+**Why.** The runner already supported `resume`, and `chat_sessions.claude_session_id` already existed
+to hold what it would resume — but the flag that made every job one-shot meant the CLI *discarded*
+the session whose id chat then stored. The second message of every conversation would have named a
+session that was never written, and the whole point of a chat page is that "why did you say that?"
+has something to refer back to.
+
+The default stays as it was, because it is right for everything else: a scheduled job that left a
+session on disk every run would accumulate them for no reader.
+
+**A resume that fails is forgotten.** A stored id the CLI no longer holds would fail every message
+after it, forever, and nothing on the page would say why. So a failed call clears
+`claude_session_id`: the conversation loses its thread once, rather than the page losing every reply.
+
+## 2026-09-08 — The question is recorded by a POST and answered by a GET
+
+**Decision.** `POST /chat/send` persists the user's message and returns a fragment containing an empty
+assistant bubble pointed at `GET /chat/stream/{session_id}`, which runs the Claude call and streams
+it. Which question a stream answers is *derived* — `chat.pending_question` is the newest message in
+the conversation when it is hers — not stored.
+
+**Why.** An answer takes up to a minute with web search on, and a phone is not a reliable reader for
+that long. Splitting the two means the question survives the wait: a page reloaded mid-answer finds
+an unanswered question and reattaches to the same stream instead of losing what she typed. It also
+keeps the POST an ordinary CSRF-checked form post — `EventSource` cannot issue one — and leaves the
+no-JavaScript path working, because the page renders the same pending bubble a reload would need.
+
+Derived rather than stored because a "needs answering" flag would need clearing on four different
+failure paths, and the one that got missed would leave a conversation permanently convinced it owed
+a reply.
+
+## 2026-09-08 — A disconnected chat stream finishes its answer rather than throwing it away
+
+**Decision.** When the browser vanishes, the SSE generator's close sets a stop flag the worker checks
+between chunks; it cannot interrupt a read already blocked on the subprocess, so a call in flight
+runs to the end and its reply is written into the conversation. `chat.answer` persists whatever
+arrived if it is closed part-way, and persists nothing at all if nothing arrived.
+`hal_mary.web.chat_page.Answering` — one instance per application — allows one live answer per
+conversation, so the page that comes back while the first call is still finishing is told to wait
+rather than starting a second one.
+
+**Why.** The alternative — killing the call with the response — throws away a searching Claude call
+that had already been paid for, at the exact moment (a phone locking its screen) when it is most
+likely to happen. Persisting means she reloads and the answer is there.
+
+The interlock is the other half. Without it, a flaky connection turns one question into as many
+concurrent calls as there were reconnects, each writing its own assistant message, and the
+conversation ends up with three answers to one question and three entries in `claude_calls`.
+
+Nothing is written for a disconnect that arrived before any text did: an empty assistant bubble
+claims to have answered, while an unanswered question is a thing the page can offer to ask again.
