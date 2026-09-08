@@ -374,6 +374,7 @@ class ClaudeRunner:
         *,
         schema: dict | None = None,
         resume: str | None = None,
+        persist_session: bool = False,
         system_prompt: str | None = None,
         extra_context: str | None = None,
     ) -> ClaudeResult:
@@ -390,6 +391,7 @@ class ClaudeRunner:
             streaming=False,
             schema=schema,
             resume=resume,
+            persist_session=persist_session,
             system_prompt=system_prompt,
             extra_context=extra_context,
         ):
@@ -405,6 +407,7 @@ class ClaudeRunner:
         prompt: str,
         *,
         resume: str | None = None,
+        persist_session: bool = False,
         system_prompt: str | None = None,
         extra_context: str | None = None,
     ) -> Iterator[StreamChunk]:
@@ -456,6 +459,7 @@ class ClaudeRunner:
             streaming=True,
             schema=None,
             resume=resume,
+            persist_session=persist_session,
             system_prompt=system_prompt,
             extra_context=extra_context,
         )
@@ -470,6 +474,7 @@ class ClaudeRunner:
         system_prompt: str | None = None,
         schema: dict | None = None,
         resume: str | None = None,
+        persist_session: bool = False,
     ) -> list[str]:
         """Construct the full argv, prompt excluded — it travels over stdin.
 
@@ -505,8 +510,13 @@ class ClaudeRunner:
             argv += ["--max-budget-usd", str(job.max_budget_usd)]
         if resume:
             argv += ["--resume", resume]
-        else:
+        elif not persist_session:
             # Jobs are one-shot; without this every run leaves a session on disk.
+            #
+            # ``persist_session`` is the chat page and nothing else. A session
+            # the CLI discarded cannot be resumed, so suppressing this flag is
+            # what makes the ``--resume`` on her second message name something
+            # that exists. Every scheduled job leaves the default alone.
             argv.append("--no-session-persistence")
         return argv
 
@@ -572,6 +582,7 @@ class ClaudeRunner:
         streaming: bool,
         schema: dict | None,
         resume: str | None,
+        persist_session: bool,
         system_prompt: str | None,
         extra_context: str | None,
     ) -> Iterator[StreamChunk]:
@@ -586,6 +597,7 @@ class ClaudeRunner:
             system_prompt=resolved_system_prompt,
             schema=schema,
             resume=resume,
+            persist_session=persist_session,
         )
 
         started_at = db.utc_now()

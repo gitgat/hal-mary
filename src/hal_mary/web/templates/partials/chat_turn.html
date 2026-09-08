@@ -1,0 +1,7 @@
+{# The answer to POST /chat/send: her message, and the bubble the stream fills. #}
+{% if error %}
+  <p class="chip bad">{{ error }}</p>
+{% else %}
+  {% include "partials/chat_bubble.html" %}
+  {% include "partials/chat_pending.html" %}
+{% endif %}

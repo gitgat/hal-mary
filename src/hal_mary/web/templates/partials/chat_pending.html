@@ -1,0 +1,10 @@
+{# The bubble the stream fills in. Rendered both by the fragment HTMX swaps in
+   and by the page itself, so a reload before the answer landed reattaches to
+   the same stream rather than losing it. #}
+<div class="msg theirs pending" data-stream="/chat/stream/{{ session_id }}">
+  <p class="msg-who">hal-mary</p>
+  <div class="msg-text"></div>
+  <p class="small muted msg-state">
+    Thinking. This can take a minute when it is looking something up.
+  </p>
+</div>

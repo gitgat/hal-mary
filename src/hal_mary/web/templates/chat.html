@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Ask hal-mary{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>Ask hal-mary</h2>
+  <p class="small muted">
+    Anything at all — what a word on your ESPN screen means, whether a trade is
+    worth taking, why hal-mary told you to bench someone. It can look things up
+    on the internet, so a question about this week is fair game. It knows your
+    league's rules and who is on your team, so you never have to explain those.
+  </p>
+</div>
+
+<div class="card" id="chat">
+  <div id="messages">
+    {% include "partials/chat_messages.html" %}
+  </div>
+
+  <form id="ask" method="post" action="/chat/send"
+        hx-post="/chat/send" hx-target="#messages" hx-swap="beforeend"
+        hx-disabled-elt="find button">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="session_id" value="{{ session_id or '' }}">
+    <label for="message">Your question</label>
+    <textarea id="message" name="message" rows="3" autocomplete="off"
+              placeholder="Is this trade any good?"></textarea>
+    <button type="submit">Ask<span class="spinner"> …</span></button>
+  </form>
+
+  <noscript>
+    <p class="small muted">
+      Answers arrive a few words at a time, which needs JavaScript. Without it,
+      ask your question and then reload this page in a minute to read the answer.
+    </p>
+  </noscript>
+</div>
+
+<div class="card">
+  <details>
+    <summary>Save something hal-mary should remember</summary>
+    <p class="small muted">
+      Anything you tell it here is put in front of it every time it writes you
+      advice — “I am away in week 11”, “I would rather not start anyone playing
+      on a Thursday”.
+    </p>
+    <form method="post" action="/chat/remember"
+          hx-post="/chat/remember" hx-target="#note-result" hx-swap="innerHTML"
+          hx-disabled-elt="find button">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="session_id" value="{{ session_id or '' }}">
+      <label for="note">What to remember</label>
+      <textarea id="note" name="text" rows="2" autocomplete="off"
+                placeholder="I am away in week 11."></textarea>
+      <button type="submit">Remember this<span class="spinner"> …</span></button>
+    </form>
+    <div class="fragment" id="note-result"></div>
+  </details>
+</div>
+
+<div class="card" id="conversations">
+  <h3>Conversations</h3>
+  {% if sessions %}
+    {% for row in sessions %}
+      <div class="row">
+        <span class="label">
+          {% if row.id == session_id %}
+            {{ row.title or 'This conversation' }}
+          {% else %}
+            <a href="/chat?session={{ row.id }}">{{ row.title or 'Untitled' }}</a>
+          {% endif %}
+        </span>
+        <span class="value">{{ age_in_words(row.updated_at or row.created_at) }}</span>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="small muted">None yet. Your first question starts one.</p>
+  {% endif %}
+  <form method="post" action="/chat/new">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="quiet" type="submit">Start a new conversation</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* Answers arrive a few words at a time.
+ *
+ * Forty seconds of blank screen reads as broken; the same forty seconds with
+ * text appearing reads as thinking. So an empty bubble is rendered first — by
+ * this page on load, or by the fragment HTMX swaps in after she asks — and this
+ * opens the stream that fills it.
+ *
+ * Text goes in with textContent, never innerHTML: it is whatever a model wrote
+ * from pages it read on the internet, and this page does not execute that.
+ */
+(function () {
+  function attach(bubble) {
+    if (bubble.dataset.started) { return; }
+    bubble.dataset.started = '1';
+
+    var text = bubble.querySelector('.msg-text');
+    var state = bubble.querySelector('.msg-state');
+    var source = new EventSource(bubble.dataset.stream);
+    var got = false;
+
+    function say(words) { if (state) { state.hidden = false; state.textContent = words; } }
+
+    source.addEventListener('chunk', function (event) {
+      got = true;
+      if (state) { state.hidden = true; }
+      text.textContent += JSON.parse(event.data).text;
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+
+    source.addEventListener('busy', function (event) {
+      say(JSON.parse(event.data).message);
+    });
+
+    source.addEventListener('done', function () {
+      /* Closed here, before the server drops the connection: an EventSource
+       * reconnects on its own otherwise, and every reconnect is another call. */
+      source.close();
+      bubble.classList.remove('pending');
+      if (got) {
+        if (state) { state.hidden = true; }
+      } else if (state && !state.textContent.trim()) {
+        say('Nothing came back. Ask again, or check the status page.');
+      }
+    });
+
+    source.onerror = function () {
+      source.close();
+      bubble.classList.remove('pending');
+      say('Lost the connection. Reload this page in a moment to read the answer.');
+    };
+  }
+
+  function start(root) {
+    (root || document).querySelectorAll('.msg.pending[data-stream]').forEach(attach);
+  }
+
+  document.addEventListener('DOMContentLoaded', function () { start(document); });
+  document.body.addEventListener('htmx:afterSwap', function (event) {
+    /* The first question appends *after* the "nothing asked yet" line, which
+     * then sits above a conversation contradicting it. */
+    var empty = document.getElementById('chat-empty');
+    if (empty) { empty.remove(); }
+    start(event.target);
+    window.scrollTo(0, document.body.scrollHeight);
+  });
+  /* Clear the box only once the question is safely recorded. */
+  document.body.addEventListener('htmx:afterRequest', function (event) {
+    if (event.target.id === 'ask' && event.detail.successful) {
+      event.target.reset();
+    }
+  });
+})();
+</script>
+{% endblock %}

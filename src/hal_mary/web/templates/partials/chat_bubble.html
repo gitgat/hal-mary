@@ -1,0 +1,6 @@
+{# One message. `content` is rendered as text, never as markup: it holds whatever
+   she typed and whatever a model wrote from pages it read on the internet. #}
+<div class="msg {{ 'mine' if message.role == 'user' else 'theirs' }}">
+  <p class="msg-who">{{ 'You' if message.role == 'user' else 'hal-mary' }}</p>
+  <div class="msg-text">{{ message.content }}</div>
+</div>

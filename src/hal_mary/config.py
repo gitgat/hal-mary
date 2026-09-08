@@ -52,6 +52,7 @@ __all__ = [
     "ActionsConfig",
 
     "BackupConfig",
+    "ChatConfig",
     "ClaudeConfig",
     "ConfigError",
     "CoworkConfig",
@@ -141,6 +142,24 @@ class ClaudeConfig(_Frozen):
     #: once a Settings exists; never resolve it again.
     scratch_dir: Path
     system_prompt_file: Path
+
+
+class ChatConfig(_Frozen):
+    """How much context the chat page puts in front of the model.
+
+    Every field is defaulted so a ``config.toml`` written before this section
+    existed still loads — the chat page is not draft-critical and must never be
+    the reason the draft page will not start.
+    """
+
+    #: Notes retrieved for one question. Bigger than the draft's because a chat
+    #: question has no pick clock, and retrieval is the only thing standing
+    #: between a question about a player and an answer from training data.
+    note_limit: int = 25
+    #: Recent recommendations shown to the model and down the side of the page.
+    advice_limit: int = 5
+    #: Conversations listed on the page.
+    session_limit: int = 20
 
 
 class PathsConfig(_Frozen):
@@ -377,6 +396,7 @@ class Settings(_Frozen):
 
     claude: ClaudeConfig
     paths: PathsConfig
+    chat: ChatConfig = ChatConfig()
     draft: DraftConfig
     espn: EspnConfig = EspnConfig()
     league: LeagueConfig = LeagueConfig()
@@ -593,6 +613,7 @@ def load_settings(
     try:
         claude = ClaudeConfig(**raw.get("claude", {}))
         paths = PathsConfig(**raw.get("paths", {}))
+        chat = ChatConfig(**raw.get("chat", {}))
         draft = DraftConfig(**raw.get("draft", {}))
         espn = EspnConfig(**raw.get("espn", {}))
         league = LeagueConfig(**raw.get("league", {}))
@@ -615,6 +636,7 @@ def load_settings(
         config_path=path,
         claude=claude,
         paths=paths,
+        chat=chat,
         draft=draft,
         espn=espn,
         league=league,
