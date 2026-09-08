@@ -402,6 +402,14 @@ empty for exactly that reason.
   kickoffs; "Sunday morning" in UTC is 02:00 Pacific. `scheduler_timezone(settings)` is the one
   reader, and `misfire_grace_time_s` is set because APScheduler's default grace is *one second* — a
   fire missed while the loop was blocked is otherwise dropped in silence.
+- **There are two schedules and they have to interleave.** hal-mary's own jobs run in-process in
+  `[scheduler].timezone`; Cowork's run in Cowork at times pasted from `hal-mary cowork-config`, in
+  `[cowork].timezone`. hal-mary *decides* and queues the actions, Cowork *performs* them, so every
+  Cowork lineup run must sit **after** that day's `lineup_check` and **before** kickoff. The two
+  zones must match: `tests/unit/test_schedule_agreement.py` refuses a config where they do not, and
+  `cowork.render` warns in the rendered output. Move one `at` in `cowork/tasks.toml` without
+  checking the other schedule and the Cowork run finds an empty queue and correctly reports that
+  there was nothing to do — forever.
 - **A job may have several cadences.** `JobConfig.cron` takes a string or a list; use
   `config.crons` / `config.cadence`, never `config.cron`. `lineup_check` has three, because ESPN
   locks each player at **his own kickoff**: a Thursday starter ruled out on Wednesday is lost by

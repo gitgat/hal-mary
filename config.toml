@@ -301,8 +301,16 @@ cron = "0 10 * * tue"       # after the week has finished, with the waiver scan
 # timezone is the zone Cowork's own scheduling form uses — the operator's local
 # zone, not the server's. The box runs UTC and the person filling in the form
 # does not, and a bare hour with no zone beside it is how a lineup run ends up
-# scheduled six hours after kickoff. Set this before pasting any time.
-timezone = "UTC"
+# scheduled six hours after kickoff.
+#
+# It must match [scheduler].timezone above. They are separate keys because they
+# are separate ideas — one is the zone hal-mary's own cron runs in, the other is
+# what a person types into somebody else's web form — but the two schedules
+# interleave: hal-mary works out the lineup changes and Cowork performs them, so
+# a Cowork run that drifts in front of the check that fills its queue finds
+# nothing to do and says so, correctly, forever. `hal-mary cowork-config` warns
+# when they differ and a test refuses a config in which they do.
+timezone = "America/Los_Angeles"
 
 # How far ahead of waiver processing a claim run happens. ESPN processes claims
 # in a batch, so a run after that time submits into a window that has closed; a

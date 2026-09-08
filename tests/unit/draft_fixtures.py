@@ -179,9 +179,16 @@ def write_config(
         ("prompts_dir", "prompts"),
         ("memory_dir", "memory"),
         ("system_prompt_file", "prompts/system.md"),
+        # cowork/tasks.toml is a deliverable too, and a test that read a stub
+        # instead would not notice it going missing.
+        ("cowork_tasks", "cowork/tasks.toml"),
     ):
         line = f'{key} = "{relative}"'
-        assert line in text, f"config.toml no longer contains {line!r}"
+        if line not in text:
+            # A defaulted path that config.toml does not spell out. Pin it
+            # explicitly so this copy does not resolve it against tmp_path.
+            text = text.replace("[paths]\n", f'[paths]\n{key} = "{REPO / relative}"\n', 1)
+            continue
         text = text.replace(line, f'{key} = "{REPO / relative}"', 1)
     for old, new in (replace or {}).items():
         assert old in text, f"config.toml no longer contains {old!r}"

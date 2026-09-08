@@ -1478,3 +1478,46 @@ The job is **not** failed for either. Thinner advice beats none on a Sunday morn
 **The proper fix is a `players.bye_week` column** filled from ESPN's `proTeamSchedules_wl` view;
 the fixture already exists at `tests/fixtures/espn/pro_schedule.json`. Until then, `unchecked` is
 the honest report of the gap rather than a hidden one.
+
+
+---
+
+## 2026-09-08 — Two schedules, one timezone, and an ordering that has to hold
+
+**Decision.** `[cowork].timezone` is `America/Los_Angeles`, the same as `[scheduler].timezone`. They
+stay two keys, and the drift is made loud in two places: a test asserts the shipped config gives
+them the same value, and `cowork.render` adds a warning to the rendered output when they differ.
+The three Cowork lineup runs in `cowork/tasks.toml` were re-timed to sit between hal-mary's own
+`lineup_check` and kickoff: Sunday 10:30 -> **09:00**, Thursday 17:30 -> **16:00**, Monday 16:30 ->
+**16:00**.
+
+**Why the re-timing.** Those times were written against Eastern kickoff quotes — 10:30 is two and a
+half hours before a 13:00 ET Sunday start, 17:30 is comfortably before 20:15 ET on Thursday. Read in
+the operator's actual zone they are half an hour *after* the Sunday early window kicks off and
+fifteen minutes after the Thursday night game does. `[cowork].timezone = "UTC"` hid that: the
+renderer warned about the zone, but the numbers beside it looked perfectly reasonable, and a
+placeholder that prints a plausible wrong time is worse than one that prints nothing.
+
+**Why they stay two keys.** They are genuinely different ideas — the zone hal-mary's own cron is
+read in, and the zone a person types into somebody else's web form — and Task 14 documented that
+distinction deliberately. Collapsing them would be right for this deployment and wrong for an
+operator who is not sitting next to the box. What was actually missing is not one key; it is that
+nothing ever compared them.
+
+**The invariant worth more than either.** The two schedules are a pipeline: hal-mary works out the
+lineup changes and queues them as `actions`; Cowork opens ESPN and performs them. If a Cowork run
+drifts in front of the check that fills its queue, it finds nothing, reports "nothing to do", and is
+*correct* — so the failure is completely silent and the lineup simply never changes.
+`test_every_cowork_lineup_run_happens_after_the_check_that_fills_its_queue` and
+`test_both_schedules_finish_before_the_ball_is_kicked` pin both ends of that window, in local time,
+against the real kickoff hours.
+
+**Also.** The summary table's `When` column was a fixed 28 characters, sized for `UTC`. A real IANA
+name is nineteen characters and pushed every following column out of true, in the one output whose
+entire purpose is being read by a person. The widths are measured now, with a test.
+
+**Not covered, and worth a follow-up:** the `waivers` task derives its time from the league's own
+processing day less `waiver_lead_minutes`. For this league (Wednesday 10:00) that lands Tuesday
+10:00, safely after the Tuesday 08:00 `waiver_scan`. A league that processed on a Tuesday would
+derive a Monday run — in front of the scan that fills it — and nothing would catch that, because the
+derivation depends on league settings rather than on anything in the repo.
