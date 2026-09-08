@@ -5,6 +5,16 @@ test here is "feed it a fixture, assert the dict". The exceptions are the error
 mapping tests and the one that matters most: ``draft_picks()`` must ignore
 ``draftDetail.drafted``, because the espn_api library does not, and a draft that
 ESPN has not flagged as complete is exactly the draft we need to read.
+
+**The fixtures are recorded, so an expected value is one of three things.** A
+value that churns with every recording — who is top of the free-agent wire, what
+a player id is called — is read back out of the fixture rather than typed, so
+re-recording costs nobody an afternoon of edits. A value that is a property of
+Caroline's league — six teams, the lineup, the 90-second clock — is pinned as a
+literal with the reason it is that number written beside it, because moving one
+of those should fail a test. And a value that disagrees with what we believed
+about ESPN is a finding: it is named in the docstring here and written up in
+`docs/DECISIONS.md`. What none of them may become is `assert code == code`.
 """
 
 from __future__ import annotations
@@ -24,11 +34,13 @@ from conftest import (
     FIXTURE_LEAGUE_ID,
     FIXTURE_SEASON,
     draft_transport,
+    fixture_player_name,
     load_espn_fixture,
 )
 from hal_mary.config import EspnConfig, load_settings
 from hal_mary.espn import client as client_module
 from hal_mary.espn.client import (
+    DEFAULT_FREE_AGENT_SIZE,
     DRAFT_VIEW,
     EspnAuthError,
     EspnClient,
@@ -86,18 +98,81 @@ def test_the_shipped_config_bounds_the_draft_poll(settings):
 
 
 def test_league_settings_maps_the_fixture(settings, fake_espn):
+    """The shape of the answer, against the values the fixture really carries.
+
+    ``name``, ``draft_date`` and the season come out of the payload rather than
+    being typed here: they are true of one recording and would have to be
+    retyped after the next one, and a fixture set nobody dares re-record is how
+    this suite ended up believing in a four-team league that does not exist.
+    What *is* pinned below is the handful of facts that are properties of
+    Caroline's league rather than of the day it was read.
+    """
+    fixture = load_espn_fixture("league_settings.json")
+    raw = fixture["settings"]
+
     result = client_for(settings).league_settings()
 
-    assert result["season"] == FIXTURE_SEASON
-    assert result["league_id"] == FIXTURE_LEAGUE_ID
-    assert result["name"] == "The Gridiron Gauntlet"
-    assert result["team_count"] == 4
-    assert result["scoring_type"] == "H2H_POINTS"
-    assert result["draft_type"] == "SNAKE"
-    assert result["draft_date"] == "2025-08-26T00:00:00+00:00"
+    assert result["season"] == fixture["seasonId"]
+    assert result["league_id"] == fixture["id"]
+    assert result["name"] == raw["name"]
+    assert result["draft_type"] == raw["draftSettings"]["type"]
+    assert result["scoring_type"] == raw["scoringSettings"]["scoringType"]
+    assert result["draft_date"].endswith("+00:00")
+
+
+def test_a_draft_date_is_converted_from_epoch_milliseconds(settings, fake_espn):
+    """ESPN sends epoch milliseconds; we store ISO-8601 UTC.
+
+    Against a fixed epoch rather than the recorded one, so the conversion has a
+    literal answer that no future recording moves — and so this does not become
+    the test that re-derives the conversion it is checking.
+    """
+    payload = load_espn_fixture("league_settings.json")
+    payload["settings"]["draftSettings"]["date"] = 1788915600000
+    fake_espn.settings_payload = payload
+
+    assert client_for(settings).league_settings()["draft_date"] == "2026-09-09T01:00:00+00:00"
+
+
+@pytest.mark.parametrize("absent", [None, 0])
+def test_a_league_with_no_draft_date_reports_none(settings, fake_espn, absent):
+    """A league that has not scheduled its draft is not a league drafting in 1970."""
+    payload = load_espn_fixture("league_settings.json")
+    payload["settings"]["draftSettings"]["date"] = absent
+    fake_espn.settings_payload = payload
+
+    assert client_for(settings).league_settings()["draft_date"] is None
+
+
+def test_league_settings_pins_the_shape_of_carolines_league(settings, fake_espn):
+    """Six teams and a 90-second clock, which everything else is sized against.
+
+    These two are not incidental values from one recording. Six teams times
+    sixteen rounds is the 96-slot board ESPN pre-populates and
+    ``draft_phase`` counts, and the 90-second pick clock is the reason the
+    advisor runs with web tools off. If a re-record moves either of them,
+    several other decisions in this project need revisiting rather than a test
+    needing an edit.
+    """
+    raw = load_espn_fixture("league_settings.json")["settings"]
+
+    assert client_for(settings).league_settings()["team_count"] == 6
+    assert raw["draftSettings"]["timePerSelection"] == 90
 
 
 def test_league_settings_roster_slots_are_named_and_drop_empty_slots(settings, fake_espn):
+    """Caroline's real lineup, and the arithmetic that makes it 16 rounds.
+
+    Nine of these start each week — QB, two RB, two WR, TE, the flex, a kicker
+    and a defence — plus seven bench, which is sixteen players and therefore
+    sixteen rounds of draft. ``IR`` is not drafted into, so it is outside that
+    count. ESPN sends a count for all twenty-five of its slot ids; the zeroes
+    are dropped here so nothing downstream renders a slot the league does not
+    use.
+
+    The flex is spelled ``RB/WR/TE``. It is not called ``FLEX`` anywhere on
+    Caroline's screen, so it is not called that here either.
+    """
     slots = client_for(settings).league_settings()["roster_slots"]
 
     assert slots == {
@@ -107,18 +182,46 @@ def test_league_settings_roster_slots_are_named_and_drop_empty_slots(settings, f
         "TE": 1,
         "D/ST": 1,
         "K": 1,
-        "BE": 6,
+        "BE": 7,
         "IR": 1,
         "RB/WR/TE": 1,
     }
+    starters = sum(count for name, count in slots.items() if name not in ("BE", "IR"))
+    assert starters + slots["BE"] == 16
 
 
 def test_league_settings_carries_the_raw_settings_json(settings, fake_espn):
+    """Everything we did not think to extract survives, byte for byte.
+
+    Asserted against the whole ``settings`` block rather than two fields of it:
+    the promise is that *nothing* is dropped, and a test that checks the trade
+    deadline checks the trade deadline.
+    """
+    fixture = load_espn_fixture("league_settings.json")
+
     raw = json.loads(client_for(settings).league_settings()["raw_json"])
 
-    # Anything we did not think to extract is still reachable.
-    assert raw["acquisitionSettings"]["acquisitionBudget"] == 100
-    assert raw["tradeSettings"]["deadlineDate"] == 1763424000000
+    assert raw == fixture["settings"]
+    # A spot check that the block really does carry things the mapping ignores.
+    assert raw["acquisitionSettings"]["acquisitionBudget"]
+    assert raw["tradeSettings"]["deadlineDate"]
+
+
+def test_league_settings_prefers_the_payload_over_the_configured_league(settings, fake_espn):
+    """The season and league id are read, not assumed.
+
+    ``league_settings`` falls back to ``settings.season`` / ``settings.league_id``
+    when ESPN sends neither, and ``FIXTURE_ENV`` deliberately agrees with the
+    fixture — so without this test the fallback would pass for the real read and
+    a client pointed at the wrong season would look right.
+    """
+    fixture = load_espn_fixture("league_settings.json")
+    misconfigured = settings.model_copy(update={"season": 1999, "league_id": 42})
+
+    result = client_for(misconfigured).league_settings()
+
+    assert result["season"] == fixture["seasonId"] != 1999
+    assert result["league_id"] == fixture["id"] != 42
 
 
 def test_league_settings_returns_plain_data(settings, fake_espn):
@@ -131,60 +234,104 @@ def test_league_settings_returns_plain_data(settings, fake_espn):
 
 
 def test_teams_maps_the_fixture(settings, fake_espn):
-    fake_espn.league_fixture = "teams.json"
+    """Every team ESPN names, with the name and abbrev it gave them.
 
-    assert client_for(settings).teams() == [
-        {
-            "team_id": 1,
-            "name": "Hail Mary",
-            "owner": "Caroline Reed",
-            "abbrev": "HAL",
-            "draft_slot": 2,
-        },
-        {
-            "team_id": 2,
-            "name": "Blitz Brigade",
-            "owner": "Dana Whitlock",
-            "abbrev": "BLZ",
-            "draft_slot": 4,
-        },
-        {
-            "team_id": 3,
-            "name": "Play Action Heroes",
-            "owner": "Marcus Ellis",
-            "abbrev": "PLY",
-            "draft_slot": 1,
-        },
-        {
-            "team_id": 4,
-            "name": "Touchdown Zone",
-            "owner": "Priya Raman",
-            "abbrev": "TDZ",
-            "draft_slot": 3,
-        },
-    ]
+    Read out of the fixture rather than typed, because the recorded names are
+    pseudonyms the scrubber assigns in first-seen order — "Team 3" is not a fact
+    about anything, and retyping six of them after every recording is the chore
+    that stops people recording.
+
+    The count *is* pinned: six is the league's size, and it is the same six that
+    make ESPN's 96-slot board.
+    """
+    fake_espn.league_fixture = "teams.json"
+    fixture = load_espn_fixture("teams.json")["teams"]
+
+    rows = client_for(settings).teams()
+
+    assert len(rows) == 6
+    assert [row["team_id"] for row in rows] == [team["id"] for team in fixture]
+    assert [row["name"] for row in rows] == [team["name"] for team in fixture]
+    assert [row["abbrev"] for row in rows] == [team["abbrev"] for team in fixture]
+
+
+def test_a_teams_owner_is_the_member_espn_points_at(settings, fake_espn):
+    """ESPN gives a team owner ids and the names in a separate `members` list.
+
+    A team ESPN gives no owner reads as ``None``, and that is not hypothetical
+    padding: this league is sized for six and four people have joined, so two
+    team objects arrive with no ``owners`` key at all. ``None`` for those, a
+    joined-up name for the rest.
+    """
+    fake_espn.league_fixture = "teams.json"
+    fixture = load_espn_fixture("teams.json")
+    members = {member["id"]: member for member in fixture["members"]}
+    expected = {}
+    for team in fixture["teams"]:
+        owners = team.get("owners") or []
+        names = [
+            f"{members[owner]['firstName']} {members[owner]['lastName']}" for owner in owners
+        ]
+        expected[team["id"]] = ", ".join(names) or None
+
+    rows = client_for(settings).teams()
+
+    assert {row["team_id"]: row["owner"] for row in rows} == expected
+    assert None in expected.values(), "the fixture must have an unclaimed team slot"
+    assert any(expected.values()), "...and a claimed one, or this asserts nothing"
+
+
+def test_a_teams_draft_slot_is_its_place_in_the_pick_order(settings, fake_espn):
+    """The slot comes from ``draftSettings.pickOrder``, not from the team id.
+
+    In the recorded fixture the drawn order happens to be ``[1, 2, 3, 4, 5, 6]``
+    — team ids in ascending order — so every slot equals its team id and the
+    fixture cannot tell the two apart. A shuffled order can, and this is the
+    column the league page renders.
+
+    It is still the *provisional* order. ``orderType`` is ``DRAFT_START``, so
+    ESPN redraws it when the draft opens; ``teams.draft_slot`` is a placeholder
+    and ``LeagueContext.draft_order`` is what the draft trusts.
+    """
+    fake_espn.league_fixture = "teams.json"
+    payload = load_espn_fixture("league_settings.json")
+    payload["settings"]["draftSettings"]["pickOrder"] = [4, 6, 1, 5, 3, 2]
+    fake_espn.settings_payload = payload
+
+    rows = client_for(settings).teams()
+
+    assert {row["team_id"]: row["draft_slot"] for row in rows} == {
+        4: 1,
+        6: 2,
+        1: 3,
+        5: 4,
+        3: 5,
+        2: 6,
+    }
 
 
 # --- rosters ---------------------------------------------------------------
 
 
-def test_rosters_maps_the_fixture(settings, fake_espn):
-    rows = client_for(settings).rosters()
+def test_rosters_are_empty_before_the_draft(settings, fake_espn):
+    """The recorded truth, and the answer that must not be papered over.
 
-    assert len(rows) == 6
-    assert rows[0] == {
-        "team_id": 1,
-        "player_id": 3139477,
-        "name": "Patrick Mahomes",
-        "position": "QB",
-        "pro_team": "KC",
-        "injury_status": "ACTIVE",
-        "slot": "QB",
-    }
-    kelce = next(row for row in rows if row["player_id"] == 3116365)
-    assert kelce["slot"] == "BE"
-    bijan = next(row for row in rows if row["player_id"] == 4362628)
-    assert bijan["injury_status"] == "QUESTIONABLE"
+    ``roster.json`` was recorded before this league drafted, so ESPN answers
+    with six teams and not one rostered player. The synthetic fixture it
+    replaced claimed six players, and a test written to that number would have
+    to invent them back — which would say the mapping works against data ESPN
+    has never sent.
+
+    The mapping itself is covered next, against a roster built by hand out of
+    real player objects. The two together are the honest pair: this one says
+    what ESPN really answers today, that one says what the code does with a
+    roster once there is one.
+    """
+    fixture_teams = load_espn_fixture("roster.json")["teams"]
+    assert len(fixture_teams) == 6, "the fixture must still describe a whole league"
+    assert all(not team.get("roster", {}).get("entries") for team in fixture_teams)
+
+    assert client_for(settings).rosters() == []
 
 
 def test_rosters_is_empty_when_no_team_has_a_roster(settings, fake_espn):
@@ -192,21 +339,115 @@ def test_rosters_is_empty_when_no_team_has_a_roster(settings, fake_espn):
     assert client_for(settings).rosters() == []
 
 
+#: Lineup slot ids, from ESPN's own numbering. ``23`` is this league's flex,
+#: which is spelled ``RB/WR/TE`` and never ``FLEX``.
+SLOT_RB, SLOT_WR, SLOT_FLEX, SLOT_BENCH = 2, 4, 23, 20
+
+
+def _drafted_league(placements):
+    """The recorded league with real players placed onto teams by hand.
+
+    ``placements`` is ``{team_id: [(free-agent index, lineup slot id), ...]}``.
+    The player objects are lifted whole out of ``free_agents.json``, so every
+    field the library reads — position eligibility, pro team id, injury status —
+    is ESPN's own; only *where the player is sitting* is invented, because that
+    is the one thing a pre-draft league cannot be recorded saying.
+    """
+    payload = load_espn_fixture("roster.json")
+    pool = load_espn_fixture("free_agents.json")["players"]
+    for team in payload["teams"]:
+        entries = [
+            {
+                "playerId": pool[index]["id"],
+                "lineupSlotId": slot_id,
+                "acquisitionType": "DRAFT",
+                "playerPoolEntry": pool[index],
+            }
+            for index, slot_id in placements.get(team["id"], [])
+        ]
+        team["roster"] = {"entries": entries}
+    return payload, pool
+
+
+def test_rosters_map_a_drafted_roster(settings, fake_espn):
+    """What every in-season job reads: one row per rostered player, all teams.
+
+    Names, positions and pro teams are checked against the player objects the
+    payload was built from rather than typed out, so this survives a re-record.
+    """
+    payload, pool = _drafted_league(
+        {1: [(0, SLOT_RB), (1, SLOT_WR), (2, SLOT_BENCH)], 2: [(3, SLOT_FLEX)]}
+    )
+    fake_espn.league_payload = payload
+
+    rows = client_for(settings).rosters()
+
+    assert [row["team_id"] for row in rows] == [1, 1, 1, 2]
+    assert [row["player_id"] for row in rows] == [pool[index]["id"] for index in range(4)]
+    assert [row["name"] for row in rows] == [
+        pool[index]["player"]["fullName"] for index in range(4)
+    ]
+    assert [row["slot"] for row in rows] == ["RB", "WR", "BE", "RB/WR/TE"]
+    assert all(row["position"] for row in rows)
+    assert all(row["pro_team"] for row in rows)
+
+
+def test_a_rostered_players_injury_status_is_espns_own(settings, fake_espn):
+    """The field the bye and lineup checks are built on, carried unchanged.
+
+    Both a healthy player and a hurt one, taken from the recorded pool, because
+    a test that only ever sees ``ACTIVE`` cannot tell "carried through" from
+    "hardcoded".
+    """
+    pool = load_espn_fixture("free_agents.json")["players"]
+    healthy = next(i for i, p in enumerate(pool) if p["player"].get("injuryStatus") == "ACTIVE")
+    hurt = next(
+        i
+        for i, p in enumerate(pool)
+        if p["player"].get("injuryStatus") not in (None, "ACTIVE")
+    )
+    payload, _ = _drafted_league({1: [(healthy, SLOT_RB), (hurt, SLOT_BENCH)]})
+    fake_espn.league_payload = payload
+
+    rows = client_for(settings).rosters()
+
+    assert [row["injury_status"] for row in rows] == [
+        "ACTIVE",
+        pool[hurt]["player"]["injuryStatus"],
+    ]
+    assert rows[1]["injury_status"] != "ACTIVE"
+
+
 # --- free agents -----------------------------------------------------------
 
 
 def test_free_agents_maps_the_fixture(settings, fake_espn):
+    """Every available player ESPN sent, in the order ESPN sent them.
+
+    Which player is top of the wire is the definition of a churning value — it
+    changes with every recording and with every waiver run — so the ids and
+    names are read back out of the fixture. What is asserted about them is what
+    the waiver job actually depends on: the order is ESPN's own (most-owned
+    first, which is why nothing here re-sorts), and every row is complete.
+    """
+    fixture = load_espn_fixture("free_agents.json")["players"]
+
     rows = client_for(settings).free_agents()
 
-    assert rows[0] == {
-        "player_id": 4426515,
-        "name": "Sam LaPorta",
-        "position": "TE",
-        "pro_team": "DET",
-        "injury_status": "OUT",
-        "percent_owned": 62.3,
-    }
-    assert [row["name"] for row in rows] == ["Sam LaPorta", "Rome Odunze", "Justin Tucker"]
+    assert [row["player_id"] for row in rows] == [entry["id"] for entry in fixture]
+    assert [row["name"] for row in rows] == [
+        entry["player"]["fullName"] for entry in fixture
+    ]
+    assert all(row["position"] and row["pro_team"] for row in rows)
+    owned = [row["percent_owned"] for row in rows]
+    assert all(isinstance(value, float) and 0 <= value <= 100 for value in owned)
+    assert owned == sorted(owned, reverse=True), "ESPN's own most-owned-first order"
+
+
+def test_free_agents_ask_for_as_many_players_as_the_default_says(settings, fake_espn):
+    """The pull size is a real bound on what the waiver job can ever consider."""
+    assert len(load_espn_fixture("free_agents.json")["players"]) == DEFAULT_FREE_AGENT_SIZE
+    assert len(client_for(settings).free_agents()) == DEFAULT_FREE_AGENT_SIZE
 
 
 # --- draft picks: the raw-endpoint path ------------------------------------
@@ -238,7 +479,7 @@ def test_draft_picks_map_the_documented_shape(settings, fake_espn):
         "round_pick": 1,
         "team_id": 3,
         "player_id": 4362628,
-        "player_name": "Bijan Robinson",
+        "player_name": fixture_player_name(4362628),
     }
 
 
@@ -574,12 +815,26 @@ def test_check_auth_without_a_league_id_says_so_without_a_request(no_network):
 
 
 def test_player_name_map_labels_players_from_the_pro_player_list(settings, fake_espn):
+    """Every id ESPN's player list carries can be named, and nothing else can.
+
+    The whole list, not two spot checks: the map is what turns a pick into a
+    sentence Caroline can read, and one id it cannot name is one pick that says
+    "player 4426515" on the night. Which id belongs to whom is ESPN's business
+    and changes with every recording — the synthetic fixtures had 4426515 down
+    as Sam LaPorta, and ESPN says Puka Nacua — so the expected names come out of
+    the fixture.
+    """
+    pro_players = load_espn_fixture("pro_players.json")
+
     names = client_for(settings).player_name_map()
 
-    assert names[3139477] == "Patrick Mahomes"
-    assert names[4426515] == "Sam LaPorta"
+    assert names == {player["id"]: player["fullName"] for player in pro_players} | {
+        entry["id"]: entry["player"]["fullName"]
+        for entry in load_espn_fixture("free_agents.json")["players"]
+    }
     assert 9999999 not in names
     assert all(isinstance(key, int) for key in names)
+    assert all(isinstance(value, str) and value for value in names.values())
 
 
 def test_a_failed_name_lookup_is_retried_rather_than_cached(settings, fake_espn, monkeypatch):
@@ -599,7 +854,7 @@ def test_a_failed_name_lookup_is_retried_rather_than_cached(settings, fake_espn,
     assert [pick["player_name"] for pick in client.draft_picks()] == [None, None, None]
 
     fake_espn.status = 200
-    assert client.draft_picks()[0]["player_name"] == "Bijan Robinson"
+    assert client.draft_picks()[0]["player_name"] == fixture_player_name(4362628)
 
 
 def test_a_failed_name_lookup_is_not_retried_on_every_poll(settings, fake_espn):
@@ -697,6 +952,19 @@ def test_espns_own_flags_are_carried_through_as_they_are(settings, fake_espn):
 # --- current_week ----------------------------------------------------------
 
 
+def _league_reporting_week(week: int):
+    """The recorded league, moved to a week ESPN says is in progress.
+
+    ``scoringPeriodId`` is the field ``espn_api`` reads and clamps to
+    ``status.finalScoringPeriod``; ``latestScoringPeriod`` is moved with it so
+    the payload is internally consistent rather than a shape ESPN never sends.
+    """
+    payload = load_espn_fixture("roster.json")
+    payload["scoringPeriodId"] = week
+    payload["status"]["latestScoringPeriod"] = week
+    return payload
+
+
 def test_current_week_reads_the_scoring_period(settings, fake_espn):
     """Nothing else in the schema knows which NFL week it is.
 
@@ -704,8 +972,48 @@ def test_current_week_reads_the_scoring_period(settings, fake_espn):
     every in-season job asks "what week is it". The only honest answer comes
     from ESPN rather than from arithmetic over a calendar the code would have to
     hardcode; a wrong answer flags the wrong players — or nobody.
+
+    The week is fabricated here because it has to be: the recorded fixtures came
+    off a league whose season had not started, so no committed payload reports a
+    week at all. That is the subject of the next two tests.
     """
-    assert client_for(settings).current_week() == 1
+    fake_espn.league_payload = _league_reporting_week(5)
+
+    assert client_for(settings).current_week() == 5
+
+
+def test_current_week_is_none_before_the_season_starts(settings, fake_espn):
+    """The finding the first real recording produced.
+
+    ESPN reports ``scoringPeriodId: 0`` and ``status.latestScoringPeriod: 0``
+    for a league whose season has not kicked off. The synthetic fixture this
+    replaced claimed week 1, so the suite had never once seen the state the
+    league is actually in the whole time hal-mary was being built.
+
+    ``None`` is the right answer, and it is the answer every caller already
+    handles: ``jobs/season.current_week`` falls back to the database and then to
+    the week the model established from the live NFL schedule.
+    """
+    payload = load_espn_fixture("roster.json")
+    assert payload["scoringPeriodId"] == 0
+    assert payload["status"]["latestScoringPeriod"] == 0
+
+    assert client_for(settings).current_week() is None
+
+
+@pytest.mark.parametrize("reported", [0, -1])
+def test_a_scoring_period_of_zero_never_becomes_week_zero(settings, fake_espn, reported):
+    """Week 0 is the dangerous answer, not `None`.
+
+    ``None`` propagates: every caller has a fallback and the bye check reports
+    that it could not be made. A ``0`` propagates too, and silently — it is a
+    number, so it reaches ``season.bye_weeks`` as a week, matches no player's
+    bye, and the lineup card says nobody is on a bye. That is the one sentence
+    Caroline must not be told wrongly.
+    """
+    fake_espn.league_payload = _league_reporting_week(reported)
+
+    assert client_for(settings).current_week() is None
 
 
 def test_current_week_without_cookies_raises_rather_than_guessing(anonymous_settings, no_network):

@@ -26,7 +26,7 @@ import pytest
 # silently eating Caroline's notes.
 from test_project_files import LEAGUE_PRESERVE_SENTINEL as PINNED_SENTINEL
 
-from conftest import FIXTURE_ENV, draft_transport, load_espn_fixture
+from conftest import FIXTURE_ENV, draft_transport, fixture_player_name, load_espn_fixture
 from hal_mary import db
 from hal_mary.config import PathsConfig, load_settings
 from hal_mary.espn import sync as espn_sync
@@ -270,15 +270,23 @@ def test_sync_league_writes_the_league_memory_file(conn, settings):
 
 
 def test_sync_league_works_against_the_real_client(conn, settings, fake_espn):
-    """The stub above pins shapes; this pins that the client actually makes them."""
+    """The stub above pins shapes; this pins that the client actually makes them.
+
+    Six teams and no rostered players is the recorded truth of a league that has
+    not drafted yet, and it is the state hal-mary is in on the night it matters
+    most: the league page has to render six teams from a database that holds not
+    one player. The synthetic fixtures claimed four teams and six players, so
+    this test used to assert a league that does not exist.
+    """
     payload = load_espn_fixture("draft_detail_partial.json")
     client = EspnClient(settings, transport=draft_transport(payload))
+    expected_name = load_espn_fixture("league_settings.json")["settings"]["name"]
 
     summary = sync_league(conn, client)
 
-    assert summary["teams"] == 4
-    assert summary["roster_slots"] == 6
-    assert rows(conn, "SELECT name FROM league_settings")[0]["name"] == "The Gridiron Gauntlet"
+    assert summary["teams"] == 6
+    assert summary["roster_slots"] == 0
+    assert rows(conn, "SELECT name FROM league_settings")[0]["name"] == expected_name
 
 
 # --- sync_draft ------------------------------------------------------------
@@ -363,7 +371,7 @@ def test_sync_draft_sees_the_first_real_pick_land_on_that_board(conn, settings, 
     new = sync_draft(conn, EspnClient(settings, transport=draft_transport(payload)))
 
     assert [pick["overall_pick"] for pick in new] == [1]
-    assert new[0]["player_name"] == "Bijan Robinson"
+    assert new[0]["player_name"] == fixture_player_name(4362628)
     assert count(conn, "draft_picks") == 1
 
 

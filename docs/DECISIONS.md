@@ -219,9 +219,10 @@ than remove the default.
 
 **Decision:** The ESPN tests run against JSON fixtures in `tests/fixtures/espn/`, mocked in at
 `requests.get` (for the library) and `httpx.MockTransport` (for the raw draft call). No test may
-open a real network connection; a conftest fixture blocks both HTTP stacks at their real transport.
-`scripts/record_espn_fixtures.py` re-records the fixtures from the real league in one command,
-scrubbing cookies and pseudonymising SWIDs, member names and team names before anything is written.
+open a real network connection; a conftest fixture blocks all three HTTP stacks at their real
+transport. `scripts/record_espn_fixtures.py` re-records the fixtures from the real league in one
+command, scrubbing cookies, substituting the league id and pseudonymising SWIDs, member names and
+team names before anything is written.
 
 **Why:** The suite has to pass on a box with no internet and no credentials, and a test that quietly
 talks to ESPN passes until the day it does not. Mocking at `requests.get` rather than at our own
@@ -234,10 +235,10 @@ leaguemates' real names into a public git history, irreversibly. Blanking them i
 collapse the team-to-owner links and the fixtures would stop meaning anything, so each distinct name
 maps to a stable fake.
 
-**Known gap:** the fixtures committed with this decision are **synthetic** — hand-built to the
-shapes in the `espn_api` source, because there were no credentials when the client was written. They
-pin the mapping honestly but cannot be trusted about ESPN's real vocabulary. Re-record them the
-first time cookies exist.
+**Known gap, now closed:** the fixtures committed with this decision were **synthetic** — hand-built
+to the shapes in the `espn_api` source, because there were no credentials when the client was
+written. They have since been re-recorded from the real league; see *2026-09-08 — What the first
+real ESPN recording moved* below for what that changed.
 
 ---
 
@@ -279,7 +280,7 @@ picks, so one request answers both questions.
 **Pinned by:** `test_a_prepopulated_board_is_no_picks_at_all` and
 `test_sync_draft_ignores_espns_prepopulated_board`, both against
 `tests/fixtures/espn/draft_detail_prepopulated_real_league.json` — 96 slots built field for field
-from the real payload, and the only fixture in the tree that is not synthetic.
+from the real payload, and at the time the only fixture in the tree that was not synthetic.
 
 **Would revisit if:** ESPN ever starts using a positive placeholder id, which would make the rule
 unenforceable from the pick row alone and would need cross-checking against `draftDetail.inProgress`.
@@ -1726,3 +1727,97 @@ an unfilled placeholder, so a job that forgets `{{recency}}` fails loudly instea
 undated research. And a test reads `config.toml`, finds every job carrying a `Web*` tool, and
 asserts it is in the recency list — so the **next** research job fails a test rather than quietly
 researching with no idea what today is.
+
+---
+
+## 2026-09-08 — What the first real ESPN recording moved
+
+**Decision:** `tests/fixtures/espn/*.json` are now recorded from Caroline's league, and the tests
+that met them were rewritten in three different ways depending on what each disagreement *was*.
+
+The lazy repair was available and was refused: paste back whatever the client currently returns.
+That produces `assert code == code` — a test that passes against broken code forever — and this
+repo has already spent days finding tests that quietly checked nothing. So each of the thirteen
+failures was sorted first:
+
+* **Churn.** Which player is top of the free-agent wire, what a given player id is called, which
+  pseudonym the scrubber assigned to team three. These change with every recording, and a test that
+  must be retyped after every recording is a test that stops anyone recording. They now read their
+  expected value **out of the fixture file** — `conftest.fixture_player_name` is the one place a
+  player id becomes a name — or assert the invariant instead: every id ESPN's list carries can be
+  named, every free-agent row is complete, the order is ESPN's own.
+* **A real property of this league.** Six teams. The lineup: one QB, two RB, two WR, a TE, an
+  `RB/WR/TE`, a kicker, a defence, seven bench. A 90-second pick clock. These are pinned as
+  literals, each with the reason it is that number written beside it — nine starters plus seven
+  bench is sixteen rounds, and six teams times sixteen rounds is the 96-slot board `draft_phase`
+  counts. If a re-record moves one of those, several decisions in this project need revisiting, and
+  a failing test is the right way to be told.
+* **A finding.** Three of them, below.
+
+**Finding 1 — `current_week()` is `None`, and that is correct.** The real payload carries
+`scoringPeriodId: 0` and `status.latestScoringPeriod: 0`, because the season had not started. The
+synthetic fixture claimed week 1, so **the suite had never once seen the state the league is
+actually in** for the whole time hal-mary was being built. `None` is already the designed answer and
+every caller handles it. What was missing was coverage: a payload that *does* report a week is now
+fabricated in the test that needs one, and a separate test says a period of `0` must never become
+"week 0". That distinction is the dangerous one — `None` propagates loudly and every caller falls
+back, while a `0` propagates *silently*, reaches `season.bye_weeks` as a week, matches nobody's bye,
+and the lineup card reports that nobody is on a bye. That is the one sentence Caroline must not be
+told wrongly.
+
+**Finding 2 — ESPN's team object has no `location` or `nickname`.** It carries a single `name`;
+`location`/`nickname` is the older spelling, which `espn_api`'s `Team` still falls back to and which
+the hand-built fixtures had. The scrubber test asserted every team carried a pseudonymised
+`location`, so it was green about a field that does not exist and raised `KeyError` the first time
+it met a real league. The scrubber itself was already right — `name`-in-a-team is its primary rule —
+and `location`/`nickname` stay on its list, because a scrubber that stops covering a field ESPN
+might still send somewhere fails *open*, and this one must not. A second shape came with it: a team
+slot nobody has claimed omits `owners` and `primaryOwner` **entirely** rather than sending them
+empty. This league is sized for six and four people have joined, so two team objects arrive that
+way; `_owner_name` already returned `None` for them, and the tests now say so out loud.
+
+**Finding 3 — every roster is empty, and no player was invented to fix it.** The recording predates
+the draft, so ESPN answers with six teams and not one rostered player. That is exactly the state
+hal-mary is in on the night that matters, so it is asserted as such. The mapping is covered
+separately, against a roster built in the test out of real player objects lifted whole from
+`free_agents.json` — every field the library reads is ESPN's own, and only *where the player is
+sitting* is invented, because that is the one thing a pre-draft league cannot be recorded saying.
+
+**Why the fake environment is derived from the fixture.** `conftest.FIXTURE_SEASON` and
+`FIXTURE_LEAGUE_ID` are read out of `league_settings.json` rather than typed. `league_settings()`
+falls back to `settings.season` when a payload does not carry one, so an environment that disagreed
+with the fixture would let that fallback pass for the real read — and a re-record of a new season
+would need a hand edit here. A separate test points a client at the wrong season and league id and
+asserts the payload still wins.
+
+**What deliberately did not change:** `src/hal_mary/espn/client.py`. Every one of the thirteen was
+a test asserting a fiction, not code doing the wrong thing.
+
+**Would revisit if:** ESPN starts sending `location`/`nickname` again, which the scrubber test now
+says out loud rather than silently tolerating.
+
+---
+
+## 2026-09-08 — The league id is a secret, and a number does not look like one
+
+**Decision:** `scripts/record_espn_fixtures.py` substitutes its own `FIXTURE_LEAGUE_ID` for the real
+league id on the way out, and `test_no_tracked_file_carries_the_real_league_id` refuses to let the
+real one appear in any tracked file.
+
+**Why:** the scrubber pseudonymised every name, every SWID, every team and every abbrev, and left
+the league id — the one value that lets a stranger look Caroline's league up. `CLAUDE.md` already
+names it alongside leaguemates' names as the reason `memory/league.md` is gitignored; the recorder
+simply did not know.
+
+**Why the guard test as well as the fix:** because the fix's own tests leaked it. The first draft of
+`test_the_league_id_is_replaced_with_the_fixture_league_id` used the **real** league id as its
+example payload, to demonstrate that the real league id gets replaced. A long run of digits does not
+read as a secret the way `ESPN_S2=AEB...` does, and nothing reviewing the diff flinched. The guard
+caught it before the commit, which is the only moment it can be caught: an id in git history cannot
+be removed by a later commit.
+
+**Why it skips rather than passes on a box with no `.env`:** it is a question about the box, not
+about this code. CI has no credentials, so it has no real id to search for and says so in its skip
+reason; Bryan's box and the production VM have one, and there the test runs and bites. Loosening it
+to something that "passes everywhere" would check nothing anywhere.
+
