@@ -1521,3 +1521,49 @@ processing day less `waiver_lead_minutes`. For this league (Wednesday 10:00) tha
 10:00, safely after the Tuesday 08:00 `waiver_scan`. A league that processed on a Tuesday would
 derive a Monday run — in front of the scan that fills it — and nothing would catch that, because the
 derivation depends on league settings rather than on anything in the repo.
+
+---
+
+## 2026-09-08 — The transcript is owner-only, and a full disk is reported as a disk
+
+**Decision.** `claude.scratch_dir` and its `transcripts/` subdirectory are created `0700` and
+tightened to `0700` if they already exist wider; every transcript is created `0600` by `os.open`
+rather than `Path.open` plus a `chmod`. Separately, an `OSError` escaping the transcript block in
+`ClaudeRunner._execute` is caught and reported as `ok=False` naming the transcript, unless the
+result was already recorded — in which case it is logged and the call still succeeds.
+
+**Why the mode.** A transcript is not a log line, it is the *entire* prompt for one call: her
+roster, the built board, every retrieved note, and any system prompt assembled at runtime that
+exists nowhere else on disk. At the default umask that file is `0644` in a `0755` directory. On a
+single-user VM that is theoretical, and it stops being theoretical the first time anything else runs
+on the box — which is exactly the kind of change nobody re-audits file modes for.
+
+`os.open` with the mode rather than open-then-chmod, because the chmod leaves a window in which the
+file exists at `0644`, and the window is the whole thing being fixed. Existing directories are
+*tightened* rather than left alone because `mkdir(exist_ok=True)` ignores `mode` when the directory
+is already there: without the tighten, only a box that had never run hal-mary before would get the
+narrower mode, and the deployed one never would.
+
+**Why the write guard, and why it was worse than a missing guard.** `mkdir` and `open` were already
+inside a guard whose comment says why — `run()` is called from an APScheduler job and from an SSE
+handler, neither of which has anywhere to put an exception. `handle.write` was not. So an `ENOSPC`
+part way through a call escaped as a raw `OSError`, *and* the `finally` then recorded the row as
+`"stream abandoned by caller"`. That second part is the reason this is an entry: the guard's absence
+costs a crash, but the mislabel costs an afternoon, because it names a different subsystem
+confidently and sends the reader to the SSE client while the box is out of space.
+
+**Why `except OSError` on the block rather than a wrapper around each write.** The block contains
+exactly four unguarded disk touches and they are all the transcript — the header, the stream loop,
+the drain after a timeout, and the flush `with` performs on the way out. Everything else in there
+either carries its own guard (`Popen`) or swallows its own `OSError` (`_kill_group`), so an
+`OSError` arriving at that clause is the disk and cannot be anything else. A wrapper type would have
+been the same guarantee with a class in between.
+
+**Why a failed flush does not fail the call.** By the time `close()` runs the result has been built,
+recorded and yielded. Failing then would throw away a good answer to protect a debugging file, so
+that case logs and returns — and the `recorded` flag is what tells the two apart, which is also what
+stops a second `claude_calls` row being written for one call.
+
+**Would revisit if:** a caller ever needs to distinguish "the model failed" from "the disk failed"
+programmatically rather than by reading the sentence — that wants a field on `ClaudeResult`, not a
+different exception.

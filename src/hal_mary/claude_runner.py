@@ -209,6 +209,29 @@ TIMEOUT_TEARDOWN_S = _REAP_TIMEOUT_S + _STDERR_JOIN_TIMEOUT_S
 #: Exit code recorded for a call that never reached the binary at all.
 _NEVER_RAN = -1
 
+#: Scratch directories and transcripts are owner-only. A transcript is the whole
+#: prompt for one call — roster, board, retrieved notes, runtime system prompt —
+#: so the default umask's ``0755``/``0644`` is a disclosure waiting for a second
+#: account on the box. See :meth:`ClaudeRunner._open_transcript`.
+_PRIVATE_DIR_MODE = 0o700
+_PRIVATE_FILE_MODE = 0o600
+
+
+def _tighten(path: Path) -> None:
+    """Drop group and other bits from a directory that already has them.
+
+    Separate from the ``mkdir`` because ``exist_ok=True`` ignores ``mode`` for a
+    directory that exists: without this, only a box that has never run hal-mary
+    before would get the tighter mode.
+    """
+    try:
+        current = path.stat().st_mode
+    except OSError:  # pragma: no cover - the caller's guard reports this
+        return
+    if current & 0o077:
+        path.chmod(_PRIVATE_DIR_MODE)
+        log.info("tightened %s to 0700; it held transcripts at a wider mode", path)
+
 #: First line of every transcript: the call itself, so the file is a complete
 #: record. ``claude`` never emits this type, and a reader that does not know it
 #: skips it like any other unknown event.
@@ -546,7 +569,7 @@ class ClaudeRunner:
         return text
 
     def scratch_dir(self) -> Path:
-        """The subprocess cwd, created if absent.
+        """The subprocess cwd, created if absent and owner-only.
 
         Never the repo root: the CLI reads ``CLAUDE.md`` and wanders into files
         under its working directory, and this application's own source is the
@@ -555,9 +578,16 @@ class ClaudeRunner:
         ``claude.scratch_dir`` arrives absolute, anchored to the directory
         holding ``config.toml`` — so it lands beside the deployment rather than
         wherever a service manager happened to start the process.
+
+        The mode is :data:`_PRIVATE_DIR_MODE`, and an existing directory is
+        *tightened* rather than left alone: ``exist_ok=True`` does not touch the
+        mode of a directory that is already there, so a box that ran an earlier
+        version at the default umask would keep its ``0755`` for ever. See
+        :meth:`_open_transcript` for what is in these files.
         """
         path = self.settings.claude.scratch_dir
-        path.mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=True, mode=_PRIVATE_DIR_MODE)
+        _tighten(path)
         return path
 
     def _transcript_path(self, scratch: Path, job_name: str) -> Path:
@@ -567,10 +597,28 @@ class ClaudeRunner:
         for when and what: two calls in the same second still get separate files.
         """
         directory = scratch / "transcripts"
-        directory.mkdir(parents=True, exist_ok=True)
+        directory.mkdir(parents=True, exist_ok=True, mode=_PRIVATE_DIR_MODE)
+        _tighten(directory)
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", job_name) or "job"
         return directory / f"{stamp}-{safe}-{uuid.uuid4().hex[:8]}.jsonl"
+
+    @staticmethod
+    def _open_transcript(path: Path) -> Any:
+        """Create the transcript owner-only, without a window where it is not.
+
+        A transcript holds the *entire* prompt for one call: her roster, the
+        board, every retrieved note, and any system prompt built at runtime that
+        exists nowhere else. ``Path.open`` would create it ``0666 & ~umask``,
+        which on a default box is ``0644``, and a ``chmod`` afterwards leaves a
+        window in which it is not. ``os.open`` with the mode is the only way to
+        have neither.
+
+        ``O_EXCL`` because the name carries a UUID: if it already exists,
+        something is wrong and reusing it would append to another call's record.
+        """
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _PRIVATE_FILE_MODE)
+        return os.fdopen(fd, "w", encoding="utf-8")
 
     # -- execution ----------------------------------------------------------
 
@@ -630,7 +678,7 @@ class ClaudeRunner:
             try:
                 scratch = self.scratch_dir()
                 transcript = self._transcript_path(scratch, job.name)
-                handle = transcript.open("w", encoding="utf-8")
+                handle = self._open_transcript(transcript)
             except OSError as exc:
                 transcript = None
                 result = finish(
@@ -731,6 +779,33 @@ class ClaudeRunner:
                     error = stderr_text or f"claude exited {exit_code} with no stderr"
                 result = finish(error, exit_code)
                 yield StreamChunk("done", "", result)
+        except OSError as exc:
+            # The transcript is the only thing in the block above that touches
+            # the disk unguarded: ``handle.write`` in the stream loop, in the
+            # header, in the drain, and the flush that ``with`` does on the way
+            # out. Everything else there either has its own guard (``Popen``) or
+            # swallows its own OSErrors (``_kill_group``), so an OSError arriving
+            # here is the disk and nothing else.
+            #
+            # Without this clause an ENOSPC part way through a call escaped into
+            # an APScheduler job or an SSE handler — neither of which has
+            # anywhere to put an exception — and the ``finally`` below then wrote
+            # "stream abandoned by caller" on the row, which is a lie about a
+            # different subsystem and sends the next reader looking at the SSE
+            # client while the box is out of space.
+            if recorded:
+                # The result was built and yielded before the flush failed. The
+                # answer is good; what is lost is the debugging record, and
+                # failing a call over that would be the worse trade.
+                log.warning("transcript %s could not be flushed to disk: %s", transcript, exc)
+                return
+            result = finish(
+                f"transcript write to {transcript} failed: {exc}",
+                proc.returncode if proc is not None and proc.returncode is not None
+                else _NEVER_RAN,
+            )
+            yield StreamChunk("done", "", result)
+            return
         finally:
             if proc is not None and proc.poll() is None:
                 _kill_group(proc)
