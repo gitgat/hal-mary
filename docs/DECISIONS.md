@@ -1015,6 +1015,19 @@ reads. `player_name` and `topic` were the same shape. Every rendered field now g
 "the whole rendering" and is only the half its author was thinking about; the replacements assert on
 the entire block and count headings that start a line, because a `##` inside a bullet is inert.
 
+**Why the collapser is its own module.** The third time this boundary was dropped it was not the note
+renderer at all: `espn.sync._league_memory_body` interpolated `teams.name`, `teams.abbrev`,
+`teams.owner` and the league name raw into `memory/league.md`, which `standing_memory()` reads whole
+into `## What you always know` — section one, the most trusted text there is, with no quarantine and
+no allowlist behind it. A leaguemate renames their team and it syncs straight in; team names are the
+first example in this project's own threat statement, and a newline is not even required for the text
+to land verbatim in the most trusted section.
+
+Three renderers, in three modules, each rediscovering the same requirement and each getting it wrong
+in a field nobody was thinking about. So `hal_mary.prompt_text.one_line` is a module of its own that
+both import: the next renderer inherits the defence rather than having to remember it, and its
+docstring carries the history so the reason survives the next refactor.
+
 **Would revisit if:** a second *trusted* writer appears — add it to `TRUSTED_SOURCE_JOBS` rather than
 inventing a second mechanism. An untrusted one needs no change at all, which is the point of the
 direction.

@@ -185,14 +185,24 @@ empty for exactly that reason.
   *closed*: under a blocklist, `Cowork-Browser` and `cowork_browser` were both "not the constant" and
   landed in the trusted section. A new job whose notes would be quarantined fails a test in
   `test_memory.py` rather than going quiet.
-- **Every value that reaches a prompt is an injection vector, not just the one named `text`.**
-  `_render_note` puts every field through `memory._one_line`, which collapses on all Unicode
-  whitespace, because a value carrying `\n\n## What we have learned recently` closes its own section
-  and opens a forged one. This has been found twice — first `_render_note` dropped `source_job`,
-  then it collapsed `text` and appended `source_url` raw, and `source_url` is caller-supplied by
-  `report_observation`. Any new rendering of note data goes through the same helper, and its test
-  asserts on the **whole** rendered block: a test that asserts on a slice reads as though it checks
-  everything and checks only the half its author was thinking about.
+- **Every value that reaches a prompt goes through `hal_mary.prompt_text.one_line`.** Not just the
+  ones that look dangerous. It collapses on all Unicode whitespace, because a value carrying
+  `\n\n## What you always know` closes its own section and opens a forged one in the most trusted
+  part of the prompt. This boundary has now been dropped **three times, by three different
+  renderers**: `memory._render_note` dropped `source_job`; it then collapsed `text` and appended
+  `source_url` raw (caller-supplied by `report_observation`); and `espn.sync._league_memory_body`
+  interpolated team names, abbreviations, owners and the league name straight into
+  `memory/league.md`, which `standing_memory()` reads whole into section one. **A leaguemate renames
+  their team and it syncs into standing memory** — team names are the first example in this
+  project's own threat statement. The collapser lives in its own module so the next renderer
+  inherits the defence instead of remembering it, and every test of it asserts on the **whole**
+  rendered output: a test that asserts on a slice reads as though it checks everything and checks
+  only the half its author was thinking about.
+- **The MCP reporting tools cap their inputs** (`MAX_OBSERVATION_CHARS`, `MAX_DETAIL_CHARS`,
+  `MAX_URL_CHARS`) and refuse with a `ToolError`, which is the only exception type whose message the
+  SDK puts in front of Cowork — anything else becomes "Error executing tool <name>" and a cap the
+  caller cannot read is one it keeps hitting. Unbounded, one observation produced a 2.5 MB memory
+  block, and a prompt that size on a 90-second pick clock is a draft nobody gets advice in.
 - **Every emitted action carries a deadline, and it is the end of that NFL week.** Without one there
   is no expiry *and* no other revocation path: `expire_stale` only touches rows that have a deadline,
   so an instruction emitted in week 5 would still be pending in week 7 and an executor that had been

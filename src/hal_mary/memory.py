@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from . import db
+from .prompt_text import one_line
 
 log = logging.getLogger(__name__)
 
@@ -625,26 +626,11 @@ UNTRUSTED_NOTE_LIMIT = 5
 DEFAULT_MAX_AGE_DAYS = 21
 
 
-def _one_line(value: Any) -> str:
-    """Collapse any value on its way into a prompt onto a single line.
-
-    **Every value that reaches a prompt is an injection vector, not just the one
-    named ``text``.** A note is the one part of a prompt whose content this
-    codebase did not write, and a value containing
-    ``\n\n## What we have learned recently\n\n- ...`` closes its own section and
-    opens a forged one — which is exactly how the quarantine gets escaped. This
-    was found twice: first ``text``, then ``source_url``, which was appended raw
-    and is caller-supplied by ``report_observation``. ``player_name`` and
-    ``topic`` are the same shape and the same exposure.
-
-    So it is applied to every rendered field rather than to the ones somebody
-    thought of. ``str.split()`` with no argument splits on every character Python
-    calls whitespace — LF, CR, VT, FF, NEL, LINE SEPARATOR and the rest — so this
-    is structural rather than a filter of the separators anyone enumerated.
-    Collapsed to a line, a ``##`` is text inside a bullet and Markdown reads it as
-    nothing at all.
-    """
-    return " ".join(str(value or "").split())
+#: The shared collapser. Aliased rather than reimplemented: this module and
+#: ``espn.sync`` both render attacker-controlled values into a prompt, and one
+#: implementation is what stops the next renderer rediscovering the requirement.
+#: See :mod:`hal_mary.prompt_text` for why it exists and what it has caught.
+_one_line = one_line
 
 
 def _render_note(row: sqlite3.Row) -> str:

@@ -714,3 +714,86 @@ def test_the_browser_tag_is_the_one_memory_enforces(client: TestClient):
     # Allowlist: the browser is trusted by not being on it, which is also true
     # of a tag nobody registered. Both are quarantined; neither is trusted.
     assert server.BROWSER_SOURCE_JOB not in memory.TRUSTED_SOURCE_JOBS
+
+
+# --- input caps --------------------------------------------------------------
+#
+# Availability, not confidentiality. These need the MCP token, so the caller is
+# Cowork misbehaving rather than a leaguemate — but one unbounded
+# report_observation produced a 2.5 MB memory block, and a prompt that size on a
+# 90-second pick clock is a draft nobody gets advice in. Trusted content is
+# emitted first so it is not displaced; it is the tokens and the latency that
+# hurt. Cap at the door, with a sentence saying so, rather than truncating
+# silently: a report that was quietly cut in half is worse than one refused.
+
+
+def tool_error(client: TestClient, name: str, arguments: dict[str, Any]) -> str:
+    response = rpc(client, "tools/call", {"name": name, "arguments": arguments})
+    body = response.json()["result"]
+    assert body["isError"] is True, body
+    return body["content"][0]["text"]
+
+
+def test_report_observation_refuses_a_note_longer_than_the_cap(db_path, client):
+    from hal_mary.mcp import server
+
+    message = tool_error(
+        client,
+        "report_observation",
+        {"text": "x" * (server.MAX_OBSERVATION_CHARS + 1), "source_url": "https://espn.com"},
+    )
+
+    assert str(server.MAX_OBSERVATION_CHARS) in message
+    assert rows(db_path, "SELECT count(*) AS n FROM notes")[0]["n"] == 0
+
+
+def test_report_observation_refuses_an_absurd_source_url(db_path, client):
+    from hal_mary.mcp import server
+
+    tool_error(
+        client,
+        "report_observation",
+        {"text": "Fine.", "source_url": "https://espn.com/" + "x" * server.MAX_URL_CHARS},
+    )
+    assert rows(db_path, "SELECT count(*) AS n FROM notes")[0]["n"] == 0
+
+
+def test_report_action_refuses_an_absurd_detail(db_path, client):
+    from hal_mary.mcp import server
+
+    populate(db_path)
+    action_id = a_pending_bench(db_path)
+
+    tool_error(
+        client,
+        "report_action",
+        {"id": action_id, "outcome": "done", "detail": "x" * (server.MAX_DETAIL_CHARS + 1)},
+    )
+    assert rows(db_path, "SELECT status FROM actions")[0]["status"] == "pending"
+
+
+def test_an_observation_of_a_reasonable_length_is_still_accepted(db_path, client):
+    from hal_mary.mcp import server
+
+    result = call_tool(
+        client,
+        "report_observation",
+        {"text": "y" * server.MAX_OBSERVATION_CHARS, "source_url": "https://espn.com"},
+    )
+    assert result["stored"] is True
+
+
+def test_a_refused_oversized_call_is_still_logged(db_path, client):
+    """It is the log that would show Cowork hammering the endpoint."""
+    from hal_mary.mcp import server
+
+    tool_error(
+        client,
+        "report_observation",
+        {"text": "x" * (server.MAX_OBSERVATION_CHARS + 1), "source_url": ""},
+    )
+
+    logged = rows(db_path, "SELECT tool, outcome, detail, arguments_json FROM mcp_calls")
+    assert [row["outcome"] for row in logged] == ["error"]
+    # And the log does not swallow the whole rejected payload.
+    assert len(logged[0]["arguments_json"]) <= server.MAX_LOGGED_ARGUMENT_CHARS + 32
