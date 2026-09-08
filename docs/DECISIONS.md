@@ -1269,3 +1269,39 @@ blocking on the commit that does it.
 
 **Would revisit if:** the suite outgrows ten minutes (split it), or a second Python version starts
 mattering (it does not; 3.12 in both places).
+
+---
+
+## 2026-09-08 — The deploy's own environment is scrubbed out of the suite it gates on
+
+**Decision.** `deploy.sh` runs the suite as
+`env -u HAL_MARY_REEXEC -u HAL_MARY_PREVIOUS uv run pytest`, and `Box.env` in
+`tests/unit/test_deploy.py` drops **every** inherited `HAL_MARY_*` variable before putting the
+fabricated box's own back. Both halves, because either alone leaves the trap.
+
+**Why.** `deploy.sh` re-execs itself after the pull with `HAL_MARY_REEXEC=1` (so it does not loop)
+and `HAL_MARY_PREVIOUS=<sha>` (so the rollback SHA survives the re-exec), and then runs the suite.
+That suite spawns `deploy.sh` subprocesses, which inherited both markers, skipped the re-exec they
+exist to test, and failed — three tests, red only when run from inside a deploy and green
+everywhere else, including CI and a bare `uv run pytest` on the same box.
+
+Every component behaved correctly. The suite was red, so `deploy.sh` refused to restart the service
+and left the previous code running. The bug was that the red condition existed *only* inside
+`deploy.sh`, and so was permanent: no deploy could ever complete. It was found by running the real
+script against the real VM; the unit tests could not see it, because the thing that was wrong was
+what they inherited.
+
+Scrubbed by prefix on the test side rather than by name. The two markers are what bit, but an
+operator with `HAL_MARY_SKIP_DOCTOR` exported, or a shell carrying the unit's `HAL_MARY_CONFIG`,
+would steer the fabricated box just as invisibly, and so would whatever variable either script
+grows next. On the `deploy.sh` side the two are named, because the scope is narrow and exact: what
+this script sets on itself, it takes back off before handing over. `HAL_MARY_PREVIOUS` is still
+needed *after* the suite, for the rollback line, so it is removed for that one command rather than
+unset.
+
+**Verified.** `test_the_deploy_tests_pass_with_the_markers_already_in_the_environment` runs the
+three tests that failed on the VM in a real pytest subprocess with both markers set — the exact
+condition, as a test. `test_the_deploy_markers_never_reach_the_suite_it_gates_on` reads the `uv`
+stub's record of the environment it was handed. The rest of the suite was checked for the same
+class of leak by running all of it under `HAL_MARY_CONFIG`, `HAL_MARY_ENV` and `DB_PATH` pointed at
+a decoy deployment: 1155 passed, unchanged.

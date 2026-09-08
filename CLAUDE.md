@@ -368,3 +368,10 @@ empty for exactly that reason.
   that walks `app.routes` looking for paths finds three pathless objects and silently checks
   nothing. `flatten_routes` in `tests/unit/test_web.py` unwraps them, and the test asserts the
   paths it expected to find before it asserts anything about them.
+- **The deploy's environment must not reach the suite it gates on.** `deploy.sh` re-execs itself
+  after the pull with `HAL_MARY_REEXEC=1` and `HAL_MARY_PREVIOUS=<sha>`, then runs `uv run pytest` —
+  and `tests/unit/test_deploy.py` spawns `deploy.sh` subprocesses. Inheriting those markers made
+  three tests fail from inside a deploy and nowhere else, which meant the guardrail refused every
+  restart forever. The suite is now run with the two removed for that one command, and `Box.env`
+  drops every inherited `HAL_MARY_*` before setting the fabricated box's own. Anything either script
+  learns to set has to be scrubbed the same way; `docs/DECISIONS.md` says why.
