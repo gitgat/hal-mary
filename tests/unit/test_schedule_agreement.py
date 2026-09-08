@@ -47,13 +47,17 @@ def test_neither_schedule_is_left_in_utc(tmp_path):
     assert settings.scheduler.timezone != "UTC"
 
 
-def local_fire_hours(settings, day: str) -> list[float]:
-    """The hours, local, at which hal-mary's lineup check fires on ``day``."""
+def local_fire_hours(settings, day: str, job: str = "lineup_check") -> list[float]:
+    """The hours, local, at which ``job`` fires on ``day``.
+
+    Defaults to the lineup check because that is what the pairs above are
+    about; the feed-ordering test below passes its own job name.
+    """
     from apscheduler.triggers.cron import CronTrigger
 
     zone = scheduler_timezone(settings)
     hours = []
-    for cron in settings.job("lineup_check").crons:
+    for cron in settings.job(job).crons:
         moment = CronTrigger.from_crontab(cron, timezone=zone).get_next_fire_time(None, FROM)
         local = moment.astimezone(zone)
         if local.strftime("%a") == day:
@@ -133,3 +137,34 @@ def test_the_summary_table_still_lines_up_with_a_real_timezone_name(tmp_path):
     assert rows
     offsets = {line.index("execute" if "execute" in line else "read_only") for line in rows}
     assert len(offsets) == 1, f"the Mode column starts at {sorted(offsets)}"
+
+
+#: A Cowork task that *feeds* a hal-mary job, and the job it must run before.
+#: The lineup pairs above are the other direction — hal-mary decides, Cowork
+#: performs. This one is Cowork observing and hal-mary reasoning afterwards, and
+#: it inverts just as silently.
+FEEDS_INTO = {"postweek-observations": "waiver_scan"}
+
+
+def test_a_cowork_task_that_feeds_a_job_runs_before_it(tmp_path):
+    """Observations are worthless to a decision already made.
+
+    `postweek-observations` reads what Monday night actually did to her players
+    and files notes. `waiver_scan` reads those notes to decide which claims go
+    in the queue. Scheduled after the scan, the notes miss the decision they are
+    most relevant to and sit in SQLite until the *following* Tuesday — a week
+    late, every week, and nothing anywhere reports a problem.
+
+    Same shape as the lineup inversion above, displaced by an hour instead of a
+    day, and just as quiet: the run succeeds, the notes are written, and the
+    claims were simply decided without them.
+    """
+    settings = make_settings(tmp_path)
+
+    for task_name, job_name in FEEDS_INTO.items():
+        cowork_at = cowork_hours(tmp_path, task_name)
+        job_at = min(local_fire_hours(settings, "Tue", job=job_name))
+        assert cowork_at < job_at, (
+            f"{task_name} runs at {cowork_at} but {job_name} reads its notes at "
+            f"{job_at}; the observations would be a week late to the decision"
+        )

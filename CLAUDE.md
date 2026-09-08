@@ -336,6 +336,15 @@ empty for exactly that reason.
   room with a drawn order reported it `True` for the whole of a mock draft that produced no picks
   and no rostered players. `tests/unit/test_watch_draft.py` pins the verdict, including that the
   flag cannot move it.
+- **A Cowork task that *feeds* a hal-mary job has to run before it, and that inverts as silently as
+  the other direction.** `postweek-observations` reads what Monday night did to her players and files
+  notes; `waiver_scan` reads those notes to decide which claims to queue. Scheduled at Tuesday 09:00
+  against a scan at 08:00, the notes missed the decision they were written for and sat in SQLite
+  until the *following* Tuesday — a week late, every week, with every run reporting success. Moved to
+  07:00 (Monday night football is long finished), and `test_a_cowork_task_that_feeds_a_job_runs_before_it`
+  pins it. Note this is the mirror of the lineup pairs: there hal-mary decides and Cowork performs, so
+  Cowork must run *after*; here Cowork observes and hal-mary reasons, so Cowork must run *before*.
+  Both fail by producing a correct-looking empty result.
 - **This league's flex slot is spelled `RB/WR/TE`, not `FLEX`.** Prose that explains "a FLEX slot"
   defines a term that appears nowhere on Caroline's screen.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export
