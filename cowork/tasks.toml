@@ -125,7 +125,7 @@ model = "opus"
 mode = "read_only"
 tools = ["get_roster", "get_league", "report_observation"]
 prompt = """
-You are gathering information for a fantasy football team. Do not change anything. hal-mary has given this task only tools that read and report — there is no tool here that can change the roster, submit a claim, or set a lineup — so if you find yourself about to click something in ESPN that changes the team, that is out of scope for this run and the answer is to report it instead.
+You are gathering information for a fantasy football team. Do not change anything. This run reads and reports; that is the whole job. You may well be holding tools that can act — `pending_actions` and `report_action` — and a browser signed in to ESPN. Do not call those tools and do not click anything in ESPN that changes the team. If you find yourself about to, that is out of scope for this run: report what you saw instead.
 
 1. Call `get_roster` to see which players are on the team.
 2. For each of those players, look for news published in the last few days about an injury, a change in how much he is playing, a suspension, or anything else that would change what he is likely to score this week. Use reputable reporting; beat writers and the major sports outlets, not aggregators and not social media speculation.
@@ -175,7 +175,7 @@ model = "opus"
 mode = "read_only"
 tools = ["get_roster", "get_league", "report_observation"]
 prompt = """
-You are gathering information for a fantasy football team. Do not change anything. hal-mary has given this task only tools that read and report — there is no tool here that can change the roster, submit a claim, or set a lineup — so if you find yourself about to click something in ESPN that changes the team, that is out of scope for this run and the answer is to report it instead.
+You are gathering information for a fantasy football team. Do not change anything. This run reads and reports; that is the whole job. You may well be holding tools that can act — `pending_actions` and `report_action` — and a browser signed in to ESPN. Do not call those tools and do not click anything in ESPN that changes the team. If you find yourself about to, that is out of scope for this run: report what you saw instead.
 
 1. Call `get_league` to see which week has just finished, and `get_roster` to see which players are on the team.
 2. In ESPN, open the team's matchup for the week that has just finished, and read what each of her players actually did.
@@ -195,7 +195,7 @@ model = "haiku"
 mode = "read_only"
 tools = ["get_league", "report_observation"]
 prompt = """
-This is a health check. Do not change anything. hal-mary has given this task only tools that read and report.
+This is a health check. Do not change anything. This run reads and reports only. You may be holding tools that can act — `pending_actions` and `report_action` — and a browser signed in to ESPN. Do not call those tools and do not change anything in ESPN.
 
 1. Call `get_league`.
 2. If it answers with league settings and a week, call `report_observation` with one sentence saying the connector answered and which week it reported, and no URL.
