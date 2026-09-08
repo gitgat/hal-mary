@@ -1,0 +1,148 @@
+- generic [ref=f6e2]:
+  - banner [ref=f6e3]:
+    - heading "hal-mary" [level=1] [ref=f6e4]
+    - navigation [ref=f6e5]:
+      - link "Draft" [ref=f6e6] [cursor=pointer]:
+        - /url: /draft
+      - link "Status" [ref=f6e7] [cursor=pointer]:
+        - /url: /status
+      - link "My team" [ref=f6e8] [cursor=pointer]:
+        - /url: /team
+      - link "League" [ref=f6e9] [cursor=pointer]:
+        - /url: /league
+  - generic [ref=f6e10]:
+    - generic [ref=f6e11]:
+      - paragraph [ref=f6e12]:
+        - generic [ref=f6e13]: Researched
+        - text: Take at pick 6
+      - heading "Bijan Robinson" [level=2] [ref=f6e14]
+      - paragraph [ref=f6e15]: He is on the field for nearly every play and catches passes as well as running, which is worth a lot in this league because every catch scores a point on its own. Nobody left is close to him.
+      - heading "If somebody takes him first" [level=3] [ref=f6e16]
+      - list [ref=f6e17]:
+        - listitem [ref=f6e18]:
+          - strong [ref=f6e19]: Jahmyr Gibbs
+          - text: — Scores nearly as often, on fewer touches.
+        - listitem [ref=f6e20]:
+          - strong [ref=f6e21]: Malik Nabers
+          - text: — The best receiver still on the board.
+      - paragraph [ref=f6e22]:
+        - strong [ref=f6e23]: "Watch out:"
+        - text: His team throws to him less near the goal line than it used to.
+      - paragraph [ref=f6e24]: Written just now.
+    - generic [ref=f6e25]:
+      - paragraph [ref=f6e26]:
+        - text: Pick 6 —
+        - strong [ref=f6e27]: Hail Mary Hopefuls
+        - text: is on the clock.
+      - paragraph [ref=f6e28]:
+        - strong [ref=f6e29]: It is your pick.
+      - paragraph [ref=f6e30]: "Round 1 of 16. Your picks after this one: 7 and 18."
+    - generic [ref=f6e31]:
+      - heading "Your team so far" [level=2] [ref=f6e32]
+      - generic [ref=f6e33]:
+        - heading "Quarterback" [level=3] [ref=f6e34]
+        - generic [ref=f6e35]: — empty —
+      - generic [ref=f6e37]:
+        - heading "Running back" [level=3] [ref=f6e38]
+        - generic [ref=f6e39]: — empty —
+        - generic [ref=f6e41]: — empty —
+      - generic [ref=f6e43]:
+        - heading "Wide receiver" [level=3] [ref=f6e44]
+        - generic [ref=f6e45]: — empty —
+        - generic [ref=f6e47]: — empty —
+      - generic [ref=f6e49]:
+        - heading "Tight end" [level=3] [ref=f6e50]
+        - generic [ref=f6e51]: — empty —
+      - generic [ref=f6e53]:
+        - heading "Another running back, receiver or tight end" [level=3] [ref=f6e54]
+        - generic [ref=f6e55]: — empty —
+      - generic [ref=f6e57]:
+        - heading "Defense" [level=3] [ref=f6e58]
+        - generic [ref=f6e59]: — empty —
+      - generic [ref=f6e61]:
+        - heading "Kicker" [level=3] [ref=f6e62]
+        - generic [ref=f6e63]: — empty —
+    - generic [ref=f6e65]:
+      - heading "Still available" [level=2] [ref=f6e66]
+      - paragraph [ref=f6e67]: Best first. A group is a set of players the research rated as more or less the same, and group 1 is the strongest — so anyone in a lower-numbered group is a better pick than anyone below them.
+      - navigation [ref=f6e68]:
+        - link "Everyone" [ref=f6e69] [cursor=pointer]:
+          - /url: /draft
+        - link "Running backs" [ref=f6e70] [cursor=pointer]:
+          - /url: /draft?position=RB
+        - link "Wide receivers" [ref=f6e71] [cursor=pointer]:
+          - /url: /draft?position=WR
+        - link "Tight ends" [ref=f6e72] [cursor=pointer]:
+          - /url: /draft?position=TE
+        - link "Quarterbacks" [ref=f6e73] [cursor=pointer]:
+          - /url: /draft?position=QB
+      - generic [ref=f6e74]:
+        - generic [ref=f6e75]:
+          - text: Bijan Robinson
+          - generic [ref=f6e76]: Group 1
+        - generic [ref=f6e77]: running back · ATL Bye week 5
+      - paragraph [ref=f6e78]: Runs and catches; on the field all game.
+      - generic [ref=f6e79]:
+        - generic [ref=f6e80]:
+          - text: Jahmyr Gibbs
+          - generic [ref=f6e81]: Group 2
+        - generic [ref=f6e82]: running back · DET Bye week 5
+      - paragraph [ref=f6e83]: Splits carries but scores often.
+      - generic [ref=f6e84]:
+        - generic [ref=f6e85]:
+          - text: Puka Nacua
+          - generic [ref=f6e86]: Group 3
+        - generic [ref=f6e87]: wide receiver · LAR Bye week 6
+      - paragraph [ref=f6e88]: Gets thrown to constantly when healthy.
+      - generic [ref=f6e89]:
+        - generic [ref=f6e90]:
+          - text: Malik Nabers
+          - generic [ref=f6e91]: Group 3
+        - generic [ref=f6e92]: wide receiver · NYG Bye week 11
+      - paragraph [ref=f6e93]: Thrown to constantly on a bad team.
+      - generic [ref=f6e94]:
+        - generic [ref=f6e95]:
+          - text: Trey McBride
+          - generic [ref=f6e96]: Group 4
+        - generic [ref=f6e97]: tight end · ARI Bye week 8
+      - paragraph [ref=f6e98]: Catches plenty; rarely scores.
+      - generic [ref=f6e99]:
+        - generic [ref=f6e100]:
+          - text: Jalen Hurts
+          - generic [ref=f6e101]: Group 4
+        - generic [ref=f6e102]: quarterback · PHI Bye week 9
+      - paragraph [ref=f6e103]: Scores on the ground near the line.
+      - heading "Just taken" [level=3] [ref=f6e104]
+      - generic [ref=f6e105]:
+        - generic [ref=f6e106]: Ja'Marr Chase
+        - generic [ref=f6e107]: wide receiver · CIN
+      - generic [ref=f6e108]:
+        - generic [ref=f6e109]: Justin Jefferson
+        - generic [ref=f6e110]: wide receiver · MIN
+      - generic [ref=f6e111]:
+        - generic [ref=f6e112]: Saquon Barkley
+        - generic [ref=f6e113]: running back · PHI
+      - generic [ref=f6e114]:
+        - generic [ref=f6e115]: Brock Bowers
+        - generic [ref=f6e116]: tight end · LV
+      - generic [ref=f6e117]:
+        - generic [ref=f6e118]: Josh Allen
+        - generic [ref=f6e119]: quarterback · BUF
+  - generic [ref=f6e120]:
+    - heading "If ESPN stops updating" [level=2] [ref=f6e121]
+    - generic [ref=f6e123]:
+      - heading "Someone was taken that hal-mary cannot place" [level=3] [ref=f6e124]
+      - paragraph [ref=f6e125]: hal-mary could not find this player on its own list, so it may still be treating him as available. Type the name in below to be sure, then dismiss this.
+      - generic [ref=f6e126]:
+        - generic [ref=f6e127]: Tyreek Hil to Team Three
+        - button "Dealt with" [ref=f6e129] [cursor=pointer]
+      - paragraph [ref=f6e130]: Dismissing only hides the warning — it does not change who hal-mary thinks is available.
+    - group [ref=f6e131]:
+      - generic "Enter a pick by hand" [ref=f6e132] [cursor=pointer]
+      - option "Not sure — just mark him taken" [selected]
+      - option "Gridiron Gerbils"
+      - option "Punt Intended"
+      - option "Team Three"
+      - option "The Invented Four"
+      - option "Marla's Marvellous Squad"
+      - option "Hail Mary Hopefuls"
