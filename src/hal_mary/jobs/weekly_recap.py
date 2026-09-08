@@ -31,6 +31,7 @@ from hal_mary.config import Settings
 from hal_mary.jobs import season
 from hal_mary.jobs.registry import JobFailed, register
 from hal_mary.league import LeagueUnknown, load_league_context
+from hal_mary.recency import recency_block
 
 __all__ = ["JOB_NAME", "PROMPT_FILE", "RECAP_SCHEMA", "run"]
 
@@ -212,4 +213,7 @@ def _prompt_values(
         "scoring_summary": scoring,
         "roster": season.roster_lines(roster, week) or "  - nothing has synced yet.",
         "freshness": stale or "This roster was read from ESPN moments ago.",
+        # How stale OUR ESPN data is (above) and how old a WEB source may be
+        # (below) are different questions; the prompt needs both.
+        "recency": recency_block(settings),
     }

@@ -4,6 +4,8 @@ Write the weekly recap for **{{team_name}}**. This is the one thing hal-mary
 produces whose purpose is to make her need it less: by December she should be able
 to make most of these decisions herself, and this is how that happens.
 
+{{recency}}
+
 {{freshness}}
 
 ## Explain, do not report

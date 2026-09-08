@@ -4,6 +4,8 @@ You are checking the starting lineup for **{{team_name}}** in week {{week}}. Car
 knows the rules of football and nothing about fantasy football. She has never
 managed a team before. Write for her, not for a fantasy podcast audience.
 
+{{recency}}
+
 {{freshness}}
 
 ## The single most important thing on this page

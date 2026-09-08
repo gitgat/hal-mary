@@ -277,6 +277,17 @@ empty for exactly that reason.
   `tests/unit/test_project_files.py` now pins both: nothing tracked may be a build artifact, and
   **nothing tracked may be a symlink at all** (`git ls-files -s` mode `120000`) — the second is the
   one that generalises, because the next stray link will not be called `.venv`.
+- **Every web-enabled prompt is handed today's date, and a job that forgets fails.** Hard rule six
+  says never trust training knowledge for football facts, but until `hal_mary.recency` existed no
+  research prompt was told what day it was — `board_build.md` said "prefer recent sources" and
+  nothing defined *recent*, so a model with no anchor treats its own cutoff as the present and says
+  so confidently. `recency_block` renders the date plus `[research].recency_current_days` /
+  `recency_stale_days`, and every research prompt carries `{{recency}}`. Two things keep it that
+  way: `prompts.render` raises on an unfilled placeholder, so a job that forgets it fails loudly
+  rather than researching undated; and `tests/unit/test_recency.py` reads `config.toml`, finds every
+  job with a `Web*` tool and asserts it is on the list — a **new** research job that skips this
+  fails a test rather than going quiet. Note `{{freshness}}` is a different question: that one says
+  how stale *our synced ESPN roster* is, not how old a web source may be.
 - **This league's flex slot is spelled `RB/WR/TE`, not `FLEX`.** Prose that explains "a FLEX slot"
   defines a term that appears nowhere on Caroline's screen.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export

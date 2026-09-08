@@ -237,6 +237,16 @@ class ResearchConfig(_Frozen):
     #: How many of them reach the prompt. Smaller than the pull on purpose: the
     #: extra rows exist so the job can filter before spending tokens on them.
     free_agent_shortlist: int = 40
+    #: How old a source can be and still count as *news* rather than
+    #: background, in days. This is the main filter on web research, not a
+    #: tie-breaker: in a live season a three-day-old depth-chart report and this
+    #: morning's are different facts, and the model cannot tell which it has
+    #: unless Python says what day it is.
+    recency_current_days: int = 3
+    #: Past this, in days, a source may not decide a ranking or a start/sit on
+    #: its own. It can still supply background — a player's role in August is
+    #: real — but something newer has to confirm it still holds.
+    recency_stale_days: int = 14
     #: Stored notes retrieved into an in-season prompt.
     note_limit: int = 30
     #: How long a note written by the news sweep stays true, in days. An injury

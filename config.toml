@@ -114,6 +114,14 @@ advice_budget_s = 60
 # far more good players go unowned. The shortlist is what actually reaches the
 # prompt; the rest are pulled so a job can filter before spending tokens.
 [research]
+# How recent a web source has to be to count as news rather than background.
+# Recency is the MAIN filter on research, not a tie-breaker: the season is live
+# and the model's training cutoff is not, so every research prompt is handed
+# today's date and these two windows rather than being told to "prefer recent
+# sources" and left to guess what recent means.
+recency_current_days = 3
+recency_stale_days = 14
+
 free_agent_size = 60
 free_agent_shortlist = 40
 note_limit = 30
