@@ -790,3 +790,123 @@ entry exists to remove, reintroduced by its own mitigation. Gated on the stored 
 "provisional" exactly while the numbers are provisional. Past the first pick it also says something
 plainer, because by then the order should have been readable and was not, and the sentence must not
 promise a fix that is not coming.
+
+## 2026-09-08 — Three poll cadences, chosen by the board, and a loop that can end
+
+**Decision.** The draft loop runs in one of three phases and reads its interval back from the phase
+on every pass: **idle** (`draft.idle_poll_seconds`, 300), **live** (`draft.poll_seconds`, 5,
+unchanged) and **done**, which stops polling altogether. The phase comes from
+`hal_mary.draft.loop.draft_phase`, over two numbers off the `mDraftDetail` read the loop already
+makes: how many slots ESPN's board has, and how many of them have a real player in them.
+
+**Why.** The loop was written for draft night and then left running forever, because nothing ever
+told it the draft was over. Five seconds around the clock is 720 requests an hour, 17,280 a day and
+**2,073,600 over a 120-day season**, against an unofficial, undocumented API, on one household's
+cookies, for a six-team league whose draft is a single evening. The work that job actually requires
+is about 2,160 requests, once — roughly **960x**. The risk is not politeness: it is ESPN
+rate-limiting or blocking the account, and the moment anyone notices is the moment it matters. The
+phases cost about **37,000 requests a season**, a 56x cut with nothing lost on the night, because
+`poll_seconds` is untouched the whole time a draft is running.
+
+**Why the board decides and the flags do not.** `draftDetail` carries `inProgress` and `drafted`,
+and `EspnClient.draft_status()` reports both. Neither is an argument to `draft_phase`, deliberately,
+because neither can be believed in the direction it would be used:
+
+* **`drafted` cannot stop the loop.** The entry above records that ESPN may only set it once a draft
+  is over — that is why `draft_picks` reads the raw endpoint and ignores it. A detector that stopped
+  polling on the flag would go quiet mid-draft, which is the one direction in which being wrong
+  costs Caroline picks. So a `drafted: true` over a partly filled board keeps the loop at live
+  cadence and gets a warning naming both numbers; that discrepancy line is the whole job the flag is
+  trusted with.
+* **`inProgress` cannot start the fast clock.** It is about the draft lobby, not about picks. The
+  live league answered `{"in_progress": false, "drafted": false, "slots": 96, "picks_made": 0}` on
+  2026-09-08, with the draft still days away and all 96 slots pre-populated — and had it answered
+  `true`, a rule that promoted on it would have pinned the loop to five seconds for months, which is
+  the exact bug being removed. A flag that cannot be trusted when it is true and tells us nothing
+  when it is false is not a signal.
+
+What is left is arithmetic over facts: a slot with a real player in it is a pick that happened
+(`pick_is_made`), and a board whose every slot is filled is a draft with nothing left to watch.
+`EspnClient.draft_status()` is recorded off `_raw_draft_rows` rather than fetched, so consulting it
+costs no request — a second GET on the pick-clock path would be the same bug in miniature.
+
+**The button is an override, not the mechanism.** `POST /draft/started` puts the loop on live
+cadence at once, wakes it, and runs a sync — which is what re-reads the order ESPN draws when the
+draft opens, the step `docs/SETUP.md` makes unconditional. It lives in `partials/turn.html`, inside
+the sentence explaining why it is needed, because an instruction pointing at a control on another
+page is two things to get right at the one moment nobody has a spare minute. If nobody presses it
+the loop still reaches live cadence from the first pick ESPN reports, within one idle interval: a
+button that is the only path to correct behaviour is a button someone forgets on the one night it
+matters. The override expires after `draft.live_override_seconds` (an hour) so a stray tap costs an
+hour of fast polling rather than a season of it, and it is cleared the moment the board justifies
+the cadence on its own.
+
+**The page asks the loop rather than deriving the cadence.** `draft_page._watching` prefers
+`DraftLoopThread.watching()` and only falls back to re-deriving from the board. The two agree on
+every night but one — the night somebody presses the button, where the loop is live and the board
+still shows no picks at all. It renders no cadence when nothing is polling (the page already bands
+itself for that) or when the draft is over.
+
+## 2026-09-08 — Shutdown actually stops the loop
+
+**Decision.** `DraftLoop.stop()` is safe from any thread and wakes the loop out of its wait
+immediately: a `threading.Event` for "should I keep going", and `loop.call_soon_threadsafe` to set
+the `asyncio.Event` the wait is parked on. `DraftLoopThread.stop()` joins with a bounded timeout and
+logs when the thread outlives it; the thread is a daemon, so the process exits either way.
+
+**Why.** `run_forever` used to wait on `asyncio.wait_for(self._stop.wait(), timeout=poll_seconds)`
+with `_stop` an `asyncio.Event` **set from the web app's thread**. That is the same trap
+`hal_mary.events` is written around: off-loop, `Event.set` resolves the waiter's future through
+`call_soon`, which does not write the loop's self-pipe, so a loop parked in `select()` sleeps out its
+full timeout regardless. At five seconds that was a slow shutdown nobody looked at. At the new idle
+cadence it would have been **five minutes**, and the deploy unit stops the service with `SIGTERM` on
+every release — so each deploy could leave a thread polling ESPN behind, accumulating, every one of
+them behaving perfectly on its own. That turns over-polling into hammering, invisibly.
+
+**And the wait has to be bounded, or none of that runs.** uvicorn waits for every open connection
+*before* it runs lifespan shutdown, and lifespan shutdown is where `start_draft_loop` registered
+`thread.stop`. The draft page holds `/events` open for as long as a phone is looking at it and that
+stream never ends on its own — so with no `timeout_graceful_shutdown`, `SIGTERM` to a server with one
+page open **never completes**, and the loop polls on for the life of the process. Measured: still
+alive 30 seconds after `SIGTERM`, log stuck on "Waiting for connections to close". That is not a
+corner case, it is the state on draft night. `web.shutdown_timeout_s` (5) is passed through
+`run_server`, and the measurement that matters is taken **with a client attached** — without one the
+bug is invisible, which is how it survived the first round of this work.
+
+Measured on the box, 2026-09-08. Before: 6 draft syncs in 25 seconds (the five-second loop), and
+`SIGTERM` to the server process took **0.90s** — bounded by whatever was left of a five-second wait,
+so up to 5s. After: 1 draft sync in 30 seconds, and `SIGTERM` — to the `uv` wrapper, which is what a
+plain `kill` on the job hits — had both it and the server gone in **0.22s**, with the loop parked on
+the 300-second idle wait. Without the threadsafe wake that same shutdown would have waited out the
+idle interval; `test_a_real_loop_thread_stops_well_inside_an_idle_interval` is what fails if it is
+ever removed.
+
+## 2026-09-08 — A hand-entered pick is numbered from the picks, never from the rowid
+
+**Decision.** `record_manual_pick` numbers a pick `store.next_overall_pick(conn)` — one past the
+highest pick that names somebody — and writes it with an upsert. `DraftLoop._update_phase` takes
+`store.picks_made(conn)`, a **count** of picks that name somebody, rather than the highest number.
+
+**Why.** `draft_picks.overall_pick` is an INTEGER PRIMARY KEY, so the old NULL insert took its number
+from SQLite's rowid: one past the highest *row*. Any database that ran a sync before `pick_is_made`
+existed at the client boundary still holds ESPN's 96 pre-populated placeholder rows, and there the
+first hand-entered pick of the draft was numbered **97**. `next_overall_pick` then answered 98,
+`draft_phase(97, 96)` answered `done`, and the draft loop broke out of `run_forever` and never polled
+again.
+
+The failure was total and silent, and every part of the page conspired to hide it: `loop_error` is
+`None` for a thread that exited cleanly, `_watching` renders nothing in the `done` phase, and
+`DraftLoopThread._ask` will not forward "The draft has started" to a dead thread — so there was no
+in-app recovery either. The trigger is the *first* pick entered by hand, which is exactly what
+happens on the night ESPN goes down: the contingency path ended the loop.
+
+**Two locks, deliberately.** The numbering is the cause and is fixed at the source. Counting picks
+rather than reading the highest number removes the whole class: no stray row number, from any future
+path, can make a draft that has barely started look finished. `store.picks_made` and
+`store.next_overall_pick` now say in their docstrings which question each answers — "how far along is
+the draft" and "which slot is next" — because they are only the same number while every pick is
+numbered consecutively from one, and this is what it cost to learn that.
+
+The upsert is not incidental: the slot the pick lands on may be one of the placeholder rows. It can
+only ever be a placeholder or an empty slot, because `next_overall_pick` is one past the last pick
+that names somebody, so a real pick is never overwritten.

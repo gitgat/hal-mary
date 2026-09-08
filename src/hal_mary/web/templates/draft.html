@@ -9,6 +9,11 @@
   {% include "partials/draft_sections.html" %}
 </div>
 
+{# What "The draft has started" found. Outside #live on purpose: pressing it
+   changes the loop's phase, the phase change publishes, and the page redraws
+   #live — which would wipe the report before she had read it. #}
+<div class="fragment" id="draft-started-result"></div>
+
 {# The lifeline, and the one warning that means a recommendation could be
    actively wrong. The warning sits above the control that fixes it. #}
 <div class="card" id="manual">
@@ -51,10 +56,11 @@
 <script>
 /* Live updates without a reload.
  *
- * The event stream carries three things worth redrawing for — a new card
- * (`advice`), picks landing on the board (`board_updated`), and the board being
- * empty (`board_missing`) — and each of them swaps the fragment rather than
- * reloading the page.
+ * The event stream carries four things worth redrawing for — a new card
+ * (`advice`), picks landing on the board (`board_updated`), the board being
+ * empty (`board_missing`), and the loop changing how often it reads ESPN
+ * (`draft_phase`) — and each of them swaps the fragment rather than reloading
+ * the page.
  *
  * When the stream drops (a phone locking its screen, the box restarting mid
  * draft) the same fragment is polled through htmx instead, and a line appears
@@ -75,7 +81,7 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   var POLL_MS = {{ poll_ms }};
-  var EVENTS = ["advice", "board_updated", "board_missing"];
+  var EVENTS = ["advice", "board_updated", "board_missing", "draft_phase"];
   var notice = document.getElementById('link-state');
   var timer = null;
 

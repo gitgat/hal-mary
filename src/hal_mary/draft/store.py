@@ -32,6 +32,7 @@ __all__ = [
     "mark_drafted",
     "next_overall_pick",
     "picks_for_team",
+    "picks_made",
     "recent_picks",
     "record_unmatched",
     "replace_board",
@@ -233,6 +234,23 @@ def picks_for_team(conn: sqlite3.Connection, team_id: int | None) -> list[dict[s
         (team_id,),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def picks_made(conn: sqlite3.Connection) -> int:
+    """How many picks have actually happened — a count, not the highest number.
+
+    :func:`next_overall_pick` answers "which slot is next", which is what the
+    countdown needs. This answers "how far along is the draft", which is what
+    the poll cadence needs, and the two are only the same while every pick is
+    numbered consecutively from one. They came apart once, expensively: a
+    hand-entered pick that took its number from the rowid on a database still
+    holding ESPN's 96 placeholder rows was pick **97** of a 96-pick draft, and
+    the draft loop stopped polling on the first pick of the night.
+    """
+    row = conn.execute(
+        f"SELECT COUNT(*) AS made FROM draft_picks WHERE {_IDENTIFIED}"
+    ).fetchone()
+    return int(row["made"] or 0)
 
 
 def next_overall_pick(conn: sqlite3.Connection) -> int:

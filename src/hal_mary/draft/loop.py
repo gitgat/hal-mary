@@ -50,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+import threading
 import time
 from typing import Any
 
@@ -61,9 +62,65 @@ from hal_mary.draft.board import apply_picks, normalize_name
 from hal_mary.espn.sync import sync_draft
 from hal_mary.league import LeagueUnknown, load_league_context
 
-__all__ = ["DraftLoop", "apply_new_picks", "describe_pick", "pending_picks", "record_manual_pick"]
+__all__ = [
+    "PHASE_DONE",
+    "PHASE_IDLE",
+    "PHASE_LIVE",
+    "DraftLoop",
+    "apply_new_picks",
+    "cadence_words",
+    "describe_pick",
+    "draft_phase",
+    "pending_picks",
+    "record_manual_pick",
+]
 
 log = logging.getLogger(__name__)
+
+#: Nothing has been drafted. The draft is one evening a year, so the loop only
+#: has to notice one opening — ``draft.idle_poll_seconds``.
+PHASE_IDLE = "idle"
+
+#: A draft is running. ``draft.poll_seconds``, which is what a 90-second pick
+#: clock needs and is unchanged from what draft night has always used.
+PHASE_LIVE = "live"
+
+#: Every slot on ESPN's board has a real player in it. The loop stops.
+PHASE_DONE = "done"
+
+
+def draft_phase(*, picks_made: int, total_slots: int | None) -> str:
+    """Which of the three phases the draft is in, from the board alone.
+
+    **The board decides, and only the board.** ``draftDetail`` also carries
+    ``inProgress`` and ``drafted``, and :meth:`EspnClient.draft_status` reports
+    both — but neither is an argument here, deliberately, because neither can be
+    believed in the direction it would be used:
+
+    * ``drafted`` **cannot stop the loop.** ``docs/DECISIONS.md`` records that
+      ESPN may only set it once a draft is over, which is why ``draft_picks``
+      reads the raw endpoint and ignores it. A detector that stopped polling
+      because the flag said so would go quiet mid-draft — the one direction in
+      which being wrong costs Caroline picks. It is corroboration and a log line
+      (:meth:`DraftLoop._note_flag_disagreement`), never a control input.
+    * ``inProgress`` **cannot start the fast clock.** ESPN pre-populates all 96
+      slots from the day the league exists and answers this call about the draft
+      *lobby*, not about picks; a loop that trusted it would poll every five
+      seconds for months, which is the bug the phases exist to remove.
+
+    What is left is arithmetic over facts: a slot with a real player in it is a
+    pick that happened (``EspnClient.pick_is_made``), and a board whose every
+    slot is filled is a draft with nothing left to watch.
+
+    ``total_slots`` is ESPN's own row count, or the league's ``rounds x teams``
+    when there is no ESPN. ``None`` or zero means nobody knows how long the draft
+    is, and an unknowable end is never treated as a finished one.
+    """
+    if total_slots and picks_made >= total_slots:
+        return PHASE_DONE
+    if picks_made > 0:
+        return PHASE_LIVE
+    return PHASE_IDLE
 
 
 def describe_pick(pick: dict[str, Any]) -> str:
@@ -292,9 +349,23 @@ def record_manual_pick(
     tap on the button is one pick told twice, and the second one would otherwise
     come back unmatched on every poll for the rest of the draft.
 
-    ``overall_pick`` is usually left out: SQLite assigns the next number, because
-    ``draft_picks.overall_pick`` is an INTEGER PRIMARY KEY and a NULL insert
-    takes one past the highest.
+    ``overall_pick`` is usually left out, and is then :func:`store.next_overall_pick`
+    — one past the highest pick that actually names somebody.
+
+    **Never the rowid.** ``draft_picks.overall_pick`` is an INTEGER PRIMARY KEY,
+    so a NULL insert takes one past the highest *row number*, and any database
+    that ran a sync before ``pick_is_made`` existed still holds ESPN's 96
+    pre-populated placeholder rows. There the first hand-entered pick of the
+    draft was numbered **97**, which every end-of-draft check in the project
+    reads as "the draft is over": the loop moved to the ``done`` phase, stopped
+    polling for good, and nothing on the page said so — on the night ESPN is
+    down and picks are going in by hand, which is the one night this path
+    exists for. The pick number has to come from the picks.
+
+    The write is an upsert because the slot it lands on may be one of those
+    placeholder rows. It can only ever be a placeholder or an empty slot:
+    ``next_overall_pick`` is one past the last pick that names somebody, so a
+    real pick is never overwritten.
     """
     name = (player_name or "").strip()
     if not name:
@@ -305,16 +376,21 @@ def record_manual_pick(
         log.info("manual pick for %s ignored: the board already has him gone", name)
         return {"recorded": False, "reason": "already drafted", "player_name": name}
 
+    assigned = overall_pick if overall_pick is not None else store.next_overall_pick(conn)
     with db.transaction(conn):
-        cur = conn.execute(
+        conn.execute(
             """
             INSERT INTO draft_picks
                 (overall_pick, team_id, player_id, player_name, seen_at)
             VALUES (?, ?, NULL, ?, ?)
+            ON CONFLICT (overall_pick) DO UPDATE SET
+                team_id     = excluded.team_id,
+                player_id   = excluded.player_id,
+                player_name = excluded.player_name,
+                seen_at     = excluded.seen_at
             """,
-            (overall_pick, team_id, name, db.utc_now()),
+            (assigned, team_id, name, db.utc_now()),
         )
-        assigned = overall_pick if overall_pick is not None else cur.lastrowid
 
     pick = {
         "overall_pick": assigned,
@@ -361,7 +437,214 @@ class DraftLoop:
         #: Which of *her* picks the advisor last ran for. The whole defence
         #: against advising a dozen times per turn.
         self._last_advised_pick: int | None = None
-        self._stop = asyncio.Event()
+        #: Which cadence the loop is on, and how it got there. ``phase`` starts
+        #: idle rather than live: a loop that has read nothing has no evidence a
+        #: draft is running, and guessing live is the expensive guess.
+        self._phase = PHASE_IDLE
+        #: When "The draft has started" was pressed, on :attr:`_clock`. Holds the
+        #: loop at draft-night cadence across the gap between the draft opening
+        #: and pick 1, and expires so a stray tap is not permanent.
+        self._forced_live_at: float | None = None
+        self._flagged_disagreement = False
+        #: ``rounds x teams`` from the league, filled in by :meth:`_maybe_advise`.
+        #: Only used when ESPN reports no board of its own, which is the no-ESPN
+        #: contingency: without some total, a finished draft can never be told
+        #: from one that is still running and the loop would poll forever.
+        self._total_picks: int | None = None
+        #: Swapped for a fake in tests; the loop reads no other clock.
+        self._clock: Any = time
+        # Two signals rather than one. `_stopping` is a threading.Event so
+        # `stop()` — which is called from the web app's thread on shutdown — is
+        # answered the moment it is set, with no loop involved. `_wake` is what
+        # actually interrupts the idle wait, and is only ever set *on* the
+        # loop's own thread, through `_wake_now`. Setting an asyncio.Event from
+        # another thread appears to work and then does not: it resolves the
+        # waiter's future through `call_soon`, which never writes the loop's
+        # self-pipe, so a loop parked in select() stays parked until its timeout
+        # — five minutes, on the idle cadence, for every deploy.
+        self._stopping = threading.Event()
+        self._wake = asyncio.Event()
+        self._eventloop: asyncio.AbstractEventLoop | None = None
+
+    # -- what the loop is doing, and how often -----------------------------
+
+    @property
+    def phase(self) -> str:
+        """:data:`PHASE_IDLE`, :data:`PHASE_LIVE` or :data:`PHASE_DONE`."""
+        return self._phase
+
+    @property
+    def poll_interval(self) -> int | None:
+        """Seconds until the next poll, or ``None`` when there will not be one.
+
+        Read fresh on every pass of :meth:`run_forever` rather than captured at
+        startup, which is what lets a phase change take effect on the next tick
+        instead of on the next restart.
+        """
+        if self._phase == PHASE_DONE:
+            return None
+        if self._phase == PHASE_LIVE:
+            return self.settings.draft.poll_seconds
+        return self.settings.draft.idle_poll_seconds
+
+    def describe_cadence(self) -> str:
+        """The cadence in the words the log and the page use."""
+        interval = self.poll_interval
+        if interval is None:
+            return "not polling ESPN at all"
+        return f"polling ESPN {cadence_words(interval)}"
+
+    def watching(self) -> dict[str, Any]:
+        """What the loop is doing, for the page to say out loud.
+
+        The page asks rather than deriving it. The two would agree on every
+        night but one — the night somebody presses "The draft has started",
+        where the loop is on draft-night cadence and the board it would be
+        derived from still shows no picks at all.
+        """
+        return {
+            "phase": self._phase,
+            "poll_seconds": self.poll_interval,
+            "cadence": cadence_words(self.poll_interval),
+        }
+
+    def _forced_live(self) -> bool:
+        """Is "The draft has started" still holding the loop at live cadence?"""
+        if self._forced_live_at is None:
+            return False
+        window = self.settings.draft.live_override_seconds
+        if self._clock.monotonic() - self._forced_live_at < window:
+            return True
+        log.info(
+            "the 'draft has started' override has expired after %ss with no pick on "
+            "ESPN's board; the board is back in charge of the cadence",
+            window,
+        )
+        self._forced_live_at = None
+        return False
+
+    def _expire_override(self) -> None:
+        """Let "The draft has started" lapse on a tick that never reached ESPN.
+
+        Only ever falls back to idle, which is safe by construction: the
+        override is cleared the moment the board itself justifies live or done,
+        so a live override still standing means the board has never said
+        anything else.
+        """
+        if self._forced_live_at is None or self._forced_live():
+            return
+        self._enter_phase(
+            PHASE_IDLE, reason="the override expired and ESPN is not answering"
+        )
+
+    def _note_flag_disagreement(self, status: dict[str, Any], picks_made: int) -> None:
+        """Say so, once, when ESPN's own flag disagrees with ESPN's own board.
+
+        This is the whole job ``drafted`` is trusted with. It cannot stop the
+        loop — see :func:`draft_phase` — but a flag saying the draft is over
+        while the board still has empty slots is worth exactly one line in the
+        log, because it is the sentence that explains why the loop is still
+        polling when somebody thinks it should not be.
+        """
+        if not status.get("drafted") or self._phase == PHASE_DONE:
+            self._flagged_disagreement = False
+            return
+        if self._flagged_disagreement:
+            return
+        self._flagged_disagreement = True
+        log.warning(
+            "ESPN says draftDetail.drafted is true, but only %s of %s slots on its own board "
+            "have a player in them; still watching, because that flag is set late",
+            picks_made,
+            status.get("slots"),
+        )
+
+    def _update_phase(self, picks_made: int) -> str:
+        """Recompute the cadence from what this tick already read.
+
+        ``picks_made`` is a **count**, never the highest pick number. The two
+        differ exactly when a row is numbered oddly, and one such row —
+        a hand-entered pick that took a rowid past ESPN's placeholder slots —
+        used to make a draft that had barely started read as finished. A count
+        cannot exceed the number of slots unless there really are that many
+        picks.
+        """
+        status = self._draft_status()
+        picks_made = max(picks_made, (status or {}).get("picks_made") or 0)
+        total = (status or {}).get("slots") or self._total_picks
+        phase = draft_phase(picks_made=picks_made, total_slots=total)
+        reason = f"{picks_made} of {total} slots on ESPN's board have a player in them"
+        if phase == PHASE_IDLE and self._forced_live():
+            # The override, and the only place it is applied. Between the draft
+            # opening and pick 1 ESPN's board is genuinely empty, so the board
+            # cannot yet tell the difference — that gap is what the button is
+            # for.
+            phase = PHASE_LIVE
+            reason = "she said the draft has started and ESPN has no pick yet"
+        elif phase != PHASE_IDLE:
+            self._forced_live_at = None
+        if status is not None:
+            self._note_flag_disagreement(status, picks_made)
+        self._enter_phase(phase, reason=reason)
+        return phase
+
+    def _draft_status(self) -> dict[str, Any] | None:
+        """What the read this tick already made says about the draft.
+
+        ``None`` from a client that does not report one — the loop then falls
+        back to the league's own ``rounds x teams``, which is what the no-ESPN
+        contingency runs on.
+        """
+        reader = getattr(self.client, "draft_status", None)
+        if reader is None:
+            return None
+        try:
+            return reader()
+        except Exception:
+            log.debug("could not read the draft status; using the board alone", exc_info=True)
+            return None
+
+    def _enter_phase(self, phase: str, *, reason: str) -> None:
+        """Move to ``phase``, saying so in the log and on the page.
+
+        Both are the answer to "was it watching?", which is the first thing
+        anybody asks afterwards, so the line names the old cadence and the new
+        one rather than the phase names alone.
+        """
+        if phase == self._phase:
+            return
+        previous, was, before = self._phase, self.describe_cadence(), self.poll_interval
+        self._phase = phase
+        log.info(
+            "the draft looks %s rather than %s: hal-mary is now %s (%s), was %s (%s); %s",
+            phase,
+            previous,
+            self.describe_cadence(),
+            _interval_words(self.poll_interval),
+            was,
+            _interval_words(before),
+            reason,
+        )
+        _publish(
+            self.bus,
+            "draft_phase",
+            {**self.watching(), "reason": reason},
+        )
+
+    def draft_started(self) -> dict[str, Any]:
+        """"The draft has started" — an override, from the page, on any thread.
+
+        Two things happen: the loop goes to draft-night cadence at once rather
+        than waiting out an idle interval, and it wakes up and polls now.
+
+        It is **not** the mechanism. :meth:`_update_phase` reaches live on its
+        own from the first pick ESPN reports, so a night nobody presses this is
+        a night that costs one idle interval, not a night hal-mary sat out.
+        """
+        self._forced_live_at = self._clock.monotonic()
+        self._enter_phase(PHASE_LIVE, reason="she said the draft has started")
+        self._wake_now()
+        return self.watching()
 
     # -- startup ----------------------------------------------------------
 
@@ -415,6 +698,15 @@ class DraftLoop:
             # that redraws with the same content every five seconds.
             log.warning("draft sync failed (%s); the loop continues", exc)
             result["error"] = str(exc)
+            # The phase is not recomputed on a tick that never reached ESPN —
+            # there is nothing fresh to recompute it from. The override is the
+            # exception: it is bounded by the clock, not by the board, and
+            # leaving it to lapse only on a *successful* sync means pressing
+            # "The draft has started" with expired cookies hammers a failing
+            # endpoint every five seconds for the life of the process.
+            self._expire_override()
+            result["phase"] = self._phase
+            result["poll_seconds"] = self.poll_interval
             return result
 
         try:
@@ -429,6 +721,12 @@ class DraftLoop:
         except Exception as exc:
             log.exception("draft loop tick failed after the sync")
             result["error"] = str(exc)
+        # Last, and outside the try above only in the sense that it must happen
+        # whatever the advisor did: the cadence is what decides whether there is
+        # a next tick at all, and an advisor that raised must not leave the loop
+        # polling a finished draft every five seconds forever.
+        result["phase"] = self._update_phase(store.picks_made(self.conn))
+        result["poll_seconds"] = self.poll_interval
         return result
 
     def _read_schedule(self, next_pick: int) -> None:
@@ -550,6 +848,10 @@ class DraftLoop:
             log.warning("cannot advise: %s", exc)
             return {"advised": False}
 
+        # The only other thing that knows how long the draft is. ESPN's own row
+        # count is preferred when there is one; this is what the no-ESPN path has.
+        self._total_picks = league.total_picks
+
         upcoming = league.upcoming_picks(next_pick)
         if not upcoming:
             # The only end-of-draft signal the board arithmetic gives.
@@ -580,26 +882,83 @@ class DraftLoop:
     # -- forever ----------------------------------------------------------
 
     async def run_forever(self) -> None:
-        """Poll until :meth:`stop`. One tick's failure never ends the loop."""
-        log.info("draft loop starting; polling every %ss", self.settings.draft.poll_seconds)
-        while not self._stop.is_set():
+        """Poll until :meth:`stop`, or until the draft is over. Never raises.
+
+        The interval is read back from :attr:`poll_interval` after every tick,
+        which is what lets a phase change take effect on the next poll rather
+        than on the next restart — and what lets the loop end itself when
+        ESPN's board is full, which is the only thing that ever told it to stop
+        before.
+        """
+        self._eventloop = asyncio.get_running_loop()
+        log.info("draft loop starting; %s", self.describe_cadence())
+        while not self._stopping.is_set():
             try:
                 await self.run_once()
             except Exception:
                 log.exception("draft loop tick raised; continuing")
-            if self._stop.is_set():
+            if self._stopping.is_set():
                 break
-            try:
-                await asyncio.wait_for(
-                    self._stop.wait(), timeout=max(self.settings.draft.poll_seconds, 0)
+            interval = self.poll_interval
+            if interval is None:
+                log.info(
+                    "every slot on ESPN's draft board has a player in it, so the draft is "
+                    "over and the loop is stopping; nothing else will be read from ESPN"
                 )
-            except TimeoutError:
-                pass
+                break
+            await self._wait_for_next_poll(interval)
         log.info("draft loop stopped")
 
+    async def _wait_for_next_poll(self, seconds: float) -> None:
+        """Sleep between polls, waking at once for :meth:`stop` or the button.
+
+        ``asyncio.sleep`` would be wrong here in a way that only shows up on the
+        idle cadence: a deploy stops the service with SIGTERM, and a loop that
+        only noticed when its wait timed out would keep polling ESPN for up to
+        five more minutes after the process looked stopped — once per deploy,
+        accumulating.
+        """
+        self._wake.clear()
+        try:
+            await asyncio.wait_for(self._wake.wait(), timeout=max(seconds, 0))
+        except TimeoutError:
+            pass
+
+    def _wake_now(self) -> None:
+        """Interrupt the wait, from whichever thread is calling.
+
+        ``asyncio.Event.set`` is not thread-safe, and its failure is silent:
+        off-loop it resolves the waiter through ``call_soon``, which does not
+        write the loop's self-pipe, so a loop parked in ``select`` sleeps out its
+        full timeout anyway. ``call_soon_threadsafe`` is the one documented way
+        across, and it is the same reason :class:`hal_mary.events.EventBus`
+        publishes the way it does.
+        """
+        loop = self._eventloop
+        if loop is None:  # not running yet; nothing is asleep
+            return
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            self._wake.set()
+            return
+        try:
+            loop.call_soon_threadsafe(self._wake.set)
+        except RuntimeError:  # pragma: no cover - the loop is already closed
+            pass
+
     def stop(self) -> None:
-        """Ask :meth:`run_forever` to finish after the current tick."""
-        self._stop.set()
+        """Ask :meth:`run_forever` to finish, from any thread, and wake it now.
+
+        Called from the web app's shutdown on another thread. The flag is a
+        ``threading.Event`` so it is true the instant this returns, whatever the
+        loop is doing; the wake-up is what stops the process waiting out an idle
+        interval before the flag is ever looked at.
+        """
+        self._stopping.set()
+        self._wake_now()
 
     # -- manual entry -----------------------------------------------------
 
@@ -620,7 +979,29 @@ class DraftLoop:
         )
 
 
+def cadence_words(seconds: int | None) -> str:
+    """A poll interval as a person says it: "every 5 seconds", "every 5 minutes".
+
+    Shared by the log line and the draft page so the two cannot drift, which
+    matters because "was it watching?" is answered from whichever of them the
+    person asking happens to be looking at.
+    """
+    if seconds is None:
+        return "not at all"
+    if seconds >= 60 and seconds % 60 == 0:
+        minutes = seconds // 60
+        return f"every {minutes} minute{'' if minutes == 1 else 's'}"
+    return f"every {seconds} second{'' if seconds == 1 else 's'}"
+
+
+def _interval_words(seconds: int | None) -> str:
+    """A poll interval in the log's own words. ``None`` is a loop that has stopped."""
+    return "never again" if seconds is None else f"{seconds}s"
+
+
 def _publish(bus: Any, event: str, payload: dict[str, Any]) -> None:
+    if bus is None:
+        return
     try:
         bus.publish(event, payload)
     except Exception:  # pragma: no cover - the bus does not raise

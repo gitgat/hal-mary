@@ -14,8 +14,27 @@ prompts_dir = "prompts"
 memory_dir = "memory"
 
 [draft]
+# Three cadences, one loop, chosen from what ESPN's own draft board says.
+#
+# poll_seconds is draft night and nothing else: five seconds is what a 90-second
+# pick clock needs. idle_poll_seconds is every other day of the year — the draft
+# is a single evening, and five minutes is soon enough to notice one opening.
+# When every slot on the board has a real player in it the loop stops polling
+# altogether, because there is nothing left to watch.
+#
+# Five seconds around the clock is 17,280 requests a day, 2,073,600 over a
+# season, against an unofficial API on one household's cookies, for a job that
+# needs about 2,160 of them once. The phases cost about 37,000.
 poll_seconds = 5
+idle_poll_seconds = 300
 advise_within_picks = 2
+
+# How long "The draft has started" holds the loop at draft-night cadence before
+# the board has to justify it. The button exists because ESPN draws the real
+# order when the draft opens and hal-mary cannot read it until a pick lands, so
+# the override has to outlive that gap; an hour covers it several times over. A
+# stray tap therefore costs an hour of fast polling, not a season of it.
+live_override_seconds = 3600
 
 # How much of the board each prompt sees. board_size is the pre-draft research
 # job, which has fifteen minutes. The advice_* sizes run against a 90-second
@@ -91,6 +110,14 @@ login_lockout_seconds = 60.0       # and for how long
 # turn, which is late enough not to cry wolf and early enough to matter.
 draft_stale_seconds = 30
 live_poll_ms = 10000
+
+# How long uvicorn may wait for open connections before it stops the server
+# anyway. It has to be bounded and it has to be short: uvicorn waits for
+# connections *before* running lifespan shutdown, which is where the draft loop
+# is told to stop — and the draft page holds /events open for as long as a phone
+# has it open. Without this, a phone on the sofa means SIGTERM never finishes,
+# the loop keeps polling ESPN, and a deploy leaves it behind.
+shutdown_timeout_s = 5
 
 [jobs.board_build]
 model = "opus"

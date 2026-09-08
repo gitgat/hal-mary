@@ -1109,9 +1109,16 @@ def test_the_live_fragment_needs_a_password(db_path: Path, settings):
     assert response.status_code in (302, 303, 307)
 
 
-@pytest.mark.parametrize("event", ["advice", "board_updated", "board_missing"])
+@pytest.mark.parametrize(
+    "event", ["advice", "board_updated", "board_missing", "draft_phase"]
+)
 def test_the_page_swaps_a_fragment_for_each_event_type(db_path: Path, settings, event: str):
-    """The listener must handle all three, and swap rather than reload."""
+    """The listener must handle all four, and swap rather than reload.
+
+    ``draft_phase`` is here because the page says how often hal-mary is reading
+    ESPN, and a cadence that changed while she was looking at the old sentence
+    is the page lying about the one thing she came to it for.
+    """
     seed_league(db_path)
     with signed_in(db_path, settings) as client:
         body = client.get("/draft").text
@@ -1298,3 +1305,345 @@ def test_a_draft_loop_that_will_not_start_leaves_the_web_app_serving(
     with TestClient(app, follow_redirects=False) as client:
         client.post("/login", data={"password": PASSWORD})
         assert client.get("/draft").status_code == 200
+
+
+# --- shutdown: the loop has to actually stop --------------------------------
+#
+# The deploy unit stops the service with SIGTERM on every release. A loop that
+# outlives the process it was started with leaves a polling thread behind, and
+# they accumulate — every deploy adding another parallel poller against the same
+# unofficial API, each one behaving correctly on its own.
+
+
+def test_the_apps_shutdown_stops_the_draft_loop(db_path: Path, settings):
+    """The wiring, end to end: a lifespan shutdown reaches the thread."""
+    from hal_mary.web.serve import start_draft_loop
+
+    stopped: list[bool] = []
+
+    class FakeThread:
+        def __init__(self, settings_: Any, bus: Any) -> None:
+            self.error = None
+
+        def start(self) -> bool:
+            return True
+
+        def stop(self, *args: Any, **kwargs: Any) -> None:
+            stopped.append(True)
+
+    app = build_app(db_path, settings)
+    start_draft_loop(app, settings, thread_factory=FakeThread)
+
+    with TestClient(app):
+        assert stopped == [], "not until the app is going away"
+
+    assert stopped == [True], "shutdown never reached the draft loop"
+
+
+def test_a_loop_that_will_not_die_is_logged_rather_than_hung_on(
+    db_path: Path, settings, caplog
+):
+    """The process must still exit. The thread is a daemon; the join is bounded."""
+    import threading
+
+    from hal_mary.draft.runner import DraftLoopThread
+
+    running = threading.Event()
+
+    class StubbornLoop:
+        async def run_forever(self) -> None:
+            import asyncio
+
+            running.set()
+            while True:
+                await asyncio.sleep(0.01)
+
+        def stop(self) -> None:
+            pass  # deliberately deaf
+
+    thread = DraftLoopThread(settings, bus=None, build_loop=lambda conn, bus: StubbornLoop())
+    assert thread.start() is True
+    assert running.wait(timeout=5)
+
+    with caplog.at_level("WARNING"):
+        thread.stop(timeout=0.2)
+
+    assert "did not stop" in caplog.text.lower() or "still" in caplog.text.lower()
+    assert thread._thread.daemon is True, "a stuck loop must not keep the process alive"
+
+
+def test_a_real_loop_thread_stops_well_inside_an_idle_interval(db_path: Path, settings):
+    """The number that matters on a deploy, measured rather than assumed."""
+    import threading
+    import time as clock
+
+    from draft_fixtures import FakeEspnClient, RecordingBus
+
+    from hal_mary.draft.loop import DraftLoop
+    from hal_mary.draft.runner import DraftLoopThread
+
+    polled = threading.Event()
+
+    def build(conn: sqlite3.Connection, bus: Any):
+        loop = DraftLoop(conn, settings, FakeEspnClient([]), None, RecordingBus())
+        original = loop.run_once
+
+        async def watched():
+            result = await original()
+            polled.set()
+            return result
+
+        loop.run_once = watched
+        return loop
+
+    thread = DraftLoopThread(settings, bus=None, build_loop=build)
+    assert thread.start() is True
+    assert polled.wait(timeout=10), "the loop never polled"
+    assert settings.draft.idle_poll_seconds >= 300, "it is parked on a five-minute wait"
+
+    started = clock.monotonic()
+    thread.stop(timeout=10)
+    elapsed = clock.monotonic() - started
+
+    assert thread.alive is False
+    assert elapsed < 2, f"stopping the thread took {elapsed:.1f}s"
+
+
+# --- "The draft has started" -------------------------------------------------
+#
+# An override, not the mechanism. The loop finds the draft on its own within one
+# idle interval; this is for the person watching the ESPN lobby open, who should
+# not have to wait five minutes or go and read a runbook to say so. It lives in
+# the sentence that explains why it is needed, because an instruction pointing at
+# a control on another page is two things to get right instead of one.
+
+
+class SpyLoopThread:
+    """Stands in for the running draft loop on ``app.state``."""
+
+    def __init__(self, alive: bool = True) -> None:
+        self.alive = alive
+        self.error = None
+        self.calls = 0
+
+    def draft_started(self) -> dict[str, Any] | None:
+        self.calls += 1
+        if not self.alive:
+            return None
+        return {"phase": "live", "poll_seconds": 5, "cadence": "every 5 seconds"}
+
+
+def app_with_loop(db_path: Path, settings, *, alive: bool = True, run_sync=None):
+    """The app, with a spy where the draft loop thread would be."""
+    calls: list[int] = []
+
+    def default_sync() -> dict[str, Any]:
+        calls.append(1)
+        return {"league": "Fantasy Football 2026", "picks": 0}
+
+    app = build_app(db_path, settings, run_sync=run_sync or default_sync)
+    thread = SpyLoopThread(alive=alive)
+    app.state.draft_loop = thread
+    return app, thread, calls
+
+
+def test_the_draft_has_started_is_on_the_page_beside_the_reason_for_it(
+    db_path: Path, settings
+):
+    seed_league(db_path)
+    with signed_in(db_path, settings) as client:
+        body = client.get("/draft").text
+
+    assert "/draft/started" in body, "the button posts somewhere"
+    assert "The draft has started" in body
+    # The instruction and the action are the same thing, not a sentence pointing
+    # at another page.
+    assert "status page" not in text_of(body).lower()
+
+
+def test_the_button_is_gone_once_the_drawn_order_has_been_read(db_path: Path, settings):
+    from hal_mary.draft import store
+
+    seed_league(db_path)
+    conn = open_conn(db_path)
+    store.store_draft_order(conn, [1, 6, 5, 4, 3, 2])
+    conn.close()
+
+    with signed_in(db_path, settings) as client:
+        body = client.get("/draft").text
+
+    assert "/draft/started" not in body, "there is nothing left for it to fix"
+
+
+def test_the_draft_has_started_switches_the_loop_and_syncs(db_path: Path, settings):
+    seed_league(db_path)
+    app, thread, synced = app_with_loop(db_path, settings)
+
+    with TestClient(app, follow_redirects=False) as client:
+        client.post("/login", data={"password": PASSWORD})
+        response = post(
+            client, settings, "/draft/started", {}, headers={"hx-request": "true"}
+        )
+
+    assert response.status_code == 200
+    assert thread.calls == 1, "the loop is told before anything slow happens"
+    assert synced == [1], "a sync is what re-reads the order ESPN drew"
+    assert "5 seconds" in text_of(response.text)
+
+
+def test_the_draft_has_started_says_the_numbers_are_still_provisional(
+    db_path: Path, settings
+):
+    """It reports what it found, including finding nothing."""
+    seed_league(db_path)
+    app, _, _ = app_with_loop(db_path, settings)
+
+    with TestClient(app, follow_redirects=False) as client:
+        client.post("/login", data={"password": PASSWORD})
+        body = text_of(
+            post(
+                client, settings, "/draft/started", {}, headers={"hx-request": "true"}
+            ).text
+        ).lower()
+
+    assert "provisional" in body or "has not" in body
+    assert "first pick" in body
+
+
+def test_the_draft_has_started_reports_the_order_when_it_has_one(db_path: Path, settings):
+    from hal_mary.draft import store
+
+    seed_league(db_path)
+    seed_picks(db_path, [(1, 1, "Player 1")])
+    conn = open_conn(db_path)
+    store.store_draft_order(conn, [1, 6, 5, 4, 3, 2])
+    conn.close()
+    app, _, _ = app_with_loop(db_path, settings)
+
+    with TestClient(app, follow_redirects=False) as client:
+        client.post("/login", data={"password": PASSWORD})
+        body = text_of(
+            post(
+                client, settings, "/draft/started", {}, headers={"hx-request": "true"}
+            ).text
+        )
+
+    assert "order ESPN drew" in body
+    assert "on the clock" in body.lower(), "and what it now believes"
+
+
+def test_a_failed_sync_from_the_button_is_a_sentence_not_a_500(db_path: Path, settings):
+    seed_league(db_path)
+
+    def explode() -> dict[str, Any]:
+        raise RuntimeError("ESPN returned 503")
+
+    app, thread, _ = app_with_loop(db_path, settings, run_sync=explode)
+
+    with TestClient(app, follow_redirects=False) as client:
+        client.post("/login", data={"password": PASSWORD})
+        response = post(
+            client, settings, "/draft/started", {}, headers={"hx-request": "true"}
+        )
+
+    assert response.status_code == 200
+    assert "503" in response.text
+    assert thread.calls == 1, "the cadence still changed; only ESPN failed"
+
+
+def test_the_draft_has_started_says_so_when_no_loop_is_running(db_path: Path, settings):
+    """With no loop there is nothing to switch, and saying otherwise is a lie."""
+    seed_league(db_path)
+    app, _, _ = app_with_loop(db_path, settings, alive=False)
+
+    with TestClient(app, follow_redirects=False) as client:
+        client.post("/login", data={"password": PASSWORD})
+        body = text_of(
+            post(
+                client, settings, "/draft/started", {}, headers={"hx-request": "true"}
+            ).text
+        ).lower()
+
+    assert "not following the draft" in body or "nothing is reading espn" in body
+
+
+def test_the_draft_has_started_needs_a_csrf_token(db_path: Path, settings):
+    seed_league(db_path)
+    app, thread, synced = app_with_loop(db_path, settings)
+
+    with TestClient(app, follow_redirects=False) as client:
+        client.post("/login", data={"password": PASSWORD})
+        response = client.post("/draft/started", data={})
+
+    assert response.status_code == 403
+    assert thread.calls == 0 and synced == []
+
+
+def test_a_plain_form_post_lands_back_on_the_draft_page(db_path: Path, settings):
+    seed_league(db_path)
+    app, _, _ = app_with_loop(db_path, settings)
+
+    with TestClient(app, follow_redirects=False) as client:
+        client.post("/login", data={"password": PASSWORD})
+        response = post(client, settings, "/draft/started", {})
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/draft"
+
+
+# --- how often is it watching? ----------------------------------------------
+
+
+def test_the_page_says_it_is_checking_every_few_minutes_before_the_draft(
+    db_path: Path, settings
+):
+    seed_league(db_path)
+    with signed_in(db_path, settings) as client:
+        body = text_of(client.get("/draft").text).lower()
+
+    assert "every 5 minutes" in body
+
+
+def test_the_page_says_it_is_watching_every_few_seconds_during_the_draft(
+    db_path: Path, settings
+):
+    seed_league(db_path)
+    seed_picks(db_path, [(1, 1, "Player 1")])
+    with signed_in(db_path, settings) as client:
+        body = text_of(client.get("/draft").text).lower()
+
+    assert "every 5 seconds" in body
+
+
+def test_the_page_does_not_claim_to_be_watching_when_nothing_is(db_path: Path, settings):
+    """The band already says nothing is reading ESPN; a cadence beside it is a lie."""
+    seed_league(db_path)
+    with signed_in(db_path, settings) as client:
+        app = client.app
+
+        class Dead:
+            alive = False
+            error = "EspnError: no cookies"
+
+        app.state.draft_loop = Dead()
+        body = text_of(client.get("/draft").text).lower()
+
+    assert "every 5 minutes" not in body
+    assert "not following the draft" in body
+
+
+def test_the_buttons_answer_survives_the_redraw_it_causes(db_path: Path, settings):
+    """Pressing it publishes a phase change, which swaps #live a moment later.
+
+    So the report has to land outside the swapped region, the same way the
+    hand-entered pick's result does — otherwise the page wipes the answer she
+    pressed the button to read.
+    """
+    seed_league(db_path)
+    with signed_in(db_path, settings) as client:
+        page = client.get("/draft").text
+        live = client.get("/draft/live").text
+
+    assert 'id="draft-started-result"' in page
+    assert 'id="draft-started-result"' not in live, "it would be wiped on every redraw"
+    assert "/draft/started" in live, "but the button itself is inside the live section"

@@ -45,15 +45,41 @@
       {% if turn.started %}
         <p class="small muted"><strong>The pick numbers above are still provisional.</strong>
           hal-mary has not been able to read the order ESPN drew, so these are the pre-draft
-          placeholder and nothing is correcting them on its own. Tap
-          <strong>Sync from ESPN now</strong> on the status page, then check who is on the clock
-          here against ESPN's draft room.</p>
+          placeholder and nothing is correcting them on its own. Tap the button below to sync with
+          ESPN again, then check who is on the clock here against ESPN's draft room.</p>
       {% else %}
         <p class="small muted"><strong>The pick numbers above are provisional.</strong> ESPN sets
           the draft order when the draft opens; these stop being a placeholder as soon as hal-mary
-          reads the order ESPN drew. Tap <strong>Sync from ESPN now</strong> on the status page once
-          the draft room opens.</p>
+          reads the order ESPN drew. Tap this the moment the draft room opens: it syncs with ESPN
+          and starts watching every few seconds instead of every few minutes.</p>
       {% endif %}
+      {# The instruction and the action are one thing. This used to be a sentence
+         pointing at a control on another page, which is two chances to get it
+         wrong at the one moment nobody has a spare minute. It is an override,
+         not the mechanism: the loop finds the draft on its own from the first
+         pick ESPN reports, so forgetting this costs one idle interval, not the
+         night. #}
+      {# The answer lands in #draft-started-result, which is deliberately outside
+         #live: this button's own event is a phase change, which redraws #live
+         within milliseconds and would wipe the report she pressed it to read. #}
+      <form hx-post="/draft/started" hx-target="#draft-started-result" hx-swap="innerHTML"
+            hx-disabled-elt="find button" method="post" action="/draft/started">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit">The draft has started<span class="spinner"> …</span></button>
+      </form>
     {% endif %}
+  {% endif %}
+  {% if watching %}
+    {# "Was it watching?" is the first question afterwards, and it should not
+       need a log file. The loop is asked rather than second-guessed, so this
+       stays true through the override, when the board still shows no picks. #}
+    <p class="small muted">
+      {% if watching.phase == 'live' %}
+        hal-mary is watching ESPN <strong>{{ watching.cadence }}</strong>.
+      {% else %}
+        No draft is running, so hal-mary is checking ESPN
+        <strong>{{ watching.cadence }}</strong> to see if one has opened.
+      {% endif %}
+    </p>
   {% endif %}
 </div>
