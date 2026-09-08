@@ -73,8 +73,23 @@
     {# "Was it watching?" is the first question afterwards, and it should not
        need a log file. The loop is asked rather than second-guessed, so this
        stays true through the override, when the board still shows no picks. #}
+    {% if watching.silent %}
+      {# The draft is running and ESPN has shown hal-mary nothing for minutes.
+         Saying "watching every 5 seconds" here would be true and useless: it
+         reads as working, while the real draft moves without her. #}
+      <p class="chip warn">ESPN is not telling hal-mary who has been picked.</p>
+      <p class="small">
+        The draft is running, but nothing is coming through. Open
+        <strong>Enter a pick by hand</strong> below and type each pick in as it
+        happens — that works with no ESPN at all, and it keeps the advice honest
+        about who has already gone.
+      </p>
+    {% endif %}
     <p class="small muted">
-      {% if watching.phase == 'live' %}
+      {% if watching.silent %}
+        hal-mary is still checking ESPN <strong>{{ watching.cadence }}</strong>, and
+        will pick things up on its own if ESPN starts reporting.
+      {% elif watching.phase == 'live' %}
         hal-mary is watching ESPN <strong>{{ watching.cadence }}</strong>.
       {% else %}
         No draft is running, so hal-mary is checking ESPN
