@@ -5,6 +5,8 @@ board of about {{board_size}} players for **this specific league**. This runs be
 the draft, so take the time to do it properly: search the web, read several
 independent sources, and check what you believe against them.
 
+{{recency}}
+
 You are not summarising a ranking. You are building one. Every list you will find
 was written for a different league from this one, and the gap between those lists
 and the right answer here is the entire value of this job. If the board you return

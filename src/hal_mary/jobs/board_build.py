@@ -35,6 +35,7 @@ from hal_mary.draft import store
 from hal_mary.draft.board import normalize_name
 from hal_mary.jobs.registry import JobFailed, register
 from hal_mary.league import LeagueContext, load_league_context
+from hal_mary.recency import recency_block
 
 # Slot wording lives in exactly one place and this is a reader of it, the same
 # way ``hal_mary.chat`` is. A prompt handed bare slot codes writes notes in bare
@@ -158,7 +159,7 @@ def _build(conn: sqlite3.Connection, settings: Settings, runner: Any) -> dict[st
     league = load_league_context(conn, settings)
     draft_config = settings.draft
 
-    prompt = prompts.render_prompt(settings, PROMPT_FILE, _prompt_values(league, draft_config))
+    prompt = prompts.render_prompt(settings, PROMPT_FILE, _prompt_values(league, draft_config, settings))
     context = memory.build_context(
         conn,
         settings,
@@ -212,7 +213,9 @@ def _build(conn: sqlite3.Connection, settings: Settings, runner: Any) -> dict[st
 # --- prompt ------------------------------------------------------------------
 
 
-def _prompt_values(league: LeagueContext, draft_config: Any) -> dict[str, Any]:
+def _prompt_values(
+    league: LeagueContext, draft_config: Any, settings: Settings
+) -> dict[str, Any]:
     """The league's real facts, in the words the prompt file expects.
 
     Every one of these is a fact a model would otherwise assume wrongly. Six
@@ -230,6 +233,7 @@ def _prompt_values(league: LeagueContext, draft_config: Any) -> dict[str, Any]:
         "scoring_type": league.scoring_type or "unknown",
         "draft_type": (league.draft_type or "snake").lower(),
         "roster_slots": _slot_lines(league),
+        "recency": recency_block(settings),
         "league_shape": _shape_lines(league),
         "playoff_summary": league.playoff_summary,
         "max_source_players": int(draft_config.board_size * draft_config.max_source_share),

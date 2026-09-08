@@ -31,6 +31,7 @@ from hal_mary.draft.board import normalize_name
 from hal_mary.jobs import season
 from hal_mary.jobs.registry import JobFailed, register
 from hal_mary.league import LeagueUnknown, load_league_context
+from hal_mary.recency import recency_block
 
 __all__ = ["JOB_NAME", "PROMPT_FILE", "WAIVER_SCHEMA", "run"]
 
@@ -281,4 +282,7 @@ def _prompt_values(
             free_agents, settings.research.free_agent_shortlist
         ),
         "freshness": stale or "This roster was read from ESPN moments ago.",
+        # How stale OUR ESPN data is (above) and how old a WEB source may be
+        # (below) are different questions; the prompt needs both.
+        "recency": recency_block(settings),
     }
