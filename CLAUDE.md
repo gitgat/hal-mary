@@ -248,6 +248,14 @@ empty for exactly that reason.
   `--check` so the two cannot drift. Note what `ACTING_TOOLS` does **not** cover: the browser that
   same session is holding, which is logged into ESPN. The read-only prompts therefore say hal-mary
   has given them no tool that changes anything, rather than claiming they are incapable of it.
+- **`waiverHours` is not the hour waivers are processed.** It is how long a player sits on
+  waivers before he clears; the processing hour is `waiverProcessHour`. Caroline's league sets the
+  first to 24, which is not an hour of any day, so reading it as the hour left the waiver run with
+  no time at all. `waiverProcessDays` is a *list* and this league names six of them — Monday and
+  Wednesday through Sunday — so "the processing day" is not a single value either.
+  `cowork.waiver_settings` returns every day, and `_derive_waivers` aims at the batch that follows
+  hal-mary's own waiver scan, because a claim run in front of the scan that fills its queue submits
+  nothing, reports success, and is silent about it.
 - **This league's flex slot is spelled `RB/WR/TE`, not `FLEX`.** Prose that explains "a FLEX slot"
   defines a term that appears nowhere on Caroline's screen.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export

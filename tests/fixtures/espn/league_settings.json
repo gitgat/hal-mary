@@ -114,7 +114,8 @@
       "waiverProcessDays": [
         "WEDNESDAY"
       ],
-      "waiverHours": 10
+      "waiverHours": 24,
+      "waiverProcessHour": 10
     },
     "financeSettings": {
       "entryFee": 0

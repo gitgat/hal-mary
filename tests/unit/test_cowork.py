@@ -19,12 +19,14 @@ loudly instead of assuming Wednesday.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from draft_fixtures import make_settings
 
 from conftest import FIXTURE_ENV
 from hal_mary import cowork, db
@@ -44,6 +46,38 @@ def conn(tmp_path: Path):
 @pytest.fixture
 def settings(tmp_path: Path):
     return load_settings(env={**FIXTURE_ENV, "DB_PATH": str(tmp_path / "hal.db")})
+
+
+
+DAY_ORDER = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+]
+
+_CRON_DAYS = {"mon": "monday", "tue": "tuesday", "wed": "wednesday", "thu": "thursday",
+              "fri": "friday", "sat": "saturday", "sun": "sunday"}
+
+
+def _cron_day_and_hour(cron: str) -> tuple[str, int]:
+    """The weekday and hour a one-day crontab string names."""
+    fields = cron.split()
+    return _CRON_DAYS[fields[4].split(",")[0][:3].lower()], int(fields[1])
+
+
+
+def _settings_with_scan(tmp_path: Path, cron: str):
+    """Settings whose waiver scan runs at ``cron``, for the ordering property.
+
+    Goes through ``make_settings`` so the temporary config keeps the anchored
+    paths pointing back at the repo — a bare copy in ``tmp_path`` has no
+    ``cowork/tasks.toml`` beside it and the renderer refuses it.
+    """
+    return make_settings(tmp_path, replace={'cron = "0 8 * * tue"': f'cron = "{cron}"'})
 
 
 def synced_league(conn: sqlite3.Connection, acquisition: dict | None) -> None:
@@ -200,18 +234,18 @@ def test_a_missing_file_is_refused_by_name(tmp_path, settings):
 
 def test_the_waiver_run_is_timed_from_the_leagues_own_processing_day(conn, settings):
     """A claim submitted after processing is worth nothing."""
-    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverHours": 10})
+    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverProcessHour": 10})
 
     schedule = cowork.render(conn, settings)
     waivers = next(entry for entry in schedule.tasks if entry.task.name == "waivers")
 
     assert waivers.day == "tuesday"
     assert waivers.at == "10:00"
-    assert "WEDNESDAY" in " ".join(waivers.notes)
+    assert "wednesday" in " ".join(waivers.notes).lower()
 
 
 def test_a_different_waiver_day_moves_the_run(conn, settings):
-    synced_league(conn, {"waiverProcessDays": ["THURSDAY"], "waiverHours": 3})
+    synced_league(conn, {"waiverProcessDays": ["THURSDAY"], "waiverProcessHour": 3})
 
     schedule = cowork.render(conn, settings)
     waivers = next(entry for entry in schedule.tasks if entry.task.name == "waivers")
@@ -241,29 +275,67 @@ def test_an_unsynced_league_warns_rather_than_printing_a_confident_schedule(conn
 
 
 def test_every_time_is_printed_beside_its_timezone(conn, settings):
-    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverHours": 10})
+    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverProcessHour": 10})
     text = cowork.render_text(cowork.render(conn, settings))
 
     assert settings.cowork.timezone in text
     # No bare hour without the zone next to it anywhere in the summary table.
+    # Matched by shape rather than by a literal time: this used to look for
+    # "10:30", and when the shipped times moved the loop stopped finding any
+    # line at all and checked nothing.
+    clock = re.compile(r"\b\d{1,2}:\d{2}\b")
+    checked = 0
     for line in text.splitlines():
-        if "10:30" in line and "Time" not in line:
+        if clock.search(line) and "Time" not in line:
+            checked += 1
             assert settings.cowork.timezone in line or "Times below" in text
+    assert checked, f"no line in the summary carried a time at all:\n{text}"
 
 
-def test_the_default_timezone_is_called_out_as_something_to_change(conn, settings):
-    """Cowork's form takes local times; UTC is a placeholder, not an answer."""
-    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverHours": 10})
+def test_the_default_timezone_is_called_out_as_something_to_change(conn, tmp_path):
+    """Cowork's form takes local times; UTC is a placeholder, not an answer.
+
+    This builds a UTC config rather than reading the shipped one. It used to
+    guard the assertion with ``if schedule.timezone == "UTC"``, which was true
+    while the shipped default was UTC and silently stopped being true the day
+    that default changed — leaving a test that ran no assertions at all and
+    still passed, which is the failure mode this repo keeps finding.
+    """
+    # Both zones, so the "these two disagree" warning cannot fire and stand in
+    # for the one under test. With only [cowork] flipped, the drift warning also
+    # contains the word "timezone" and this test passes with the UTC warning
+    # deleted outright — which is exactly what it did on the first attempt.
+    # Two entries because write_config replaces one occurrence per key, and the
+    # file carries the same line under [scheduler] and again under [cowork]. The
+    # anchored one goes first so it cannot be shadowed by the bare one.
+    settings = make_settings(
+        tmp_path,
+        replace={
+            "# when they differ and a test refuses a config in which they do.\n"
+            'timezone = "America/Los_Angeles"': (
+                "# when they differ and a test refuses a config in which they do.\n"
+                'timezone = "UTC"'
+            ),
+            'timezone = "America/Los_Angeles"': 'timezone = "UTC"',
+        },
+    )
+    assert settings.cowork.timezone == "UTC", "the UTC config did not take effect"
+    assert settings.scheduler.timezone == "UTC"
+    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverProcessHour": 10})
+
     schedule = cowork.render(conn, settings)
-    if schedule.timezone == "UTC":
-        assert any("timezone" in warning.lower() for warning in schedule.warnings)
+
+    assert schedule.timezone == "UTC"
+    utc_warnings = [w for w in schedule.warnings if "utc" in w.lower()]
+    assert utc_warnings, f"nothing warned that UTC is a placeholder: {schedule.warnings}"
+
 
 
 # --- next run ----------------------------------------------------------------
 
 
 def test_the_next_run_of_a_weekly_task_is_its_next_matching_day(conn, settings):
-    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverHours": 10})
+    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverProcessHour": 10})
     # A Friday.
     now = datetime(2026, 10, 2, 9, 0, tzinfo=ZoneInfo("UTC"))
 
@@ -288,7 +360,7 @@ def test_a_manual_task_has_no_next_run(conn, settings, tmp_path):
 
 
 def test_the_human_form_carries_every_field_the_cowork_form_asks_for(conn, settings):
-    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverHours": 10})
+    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverProcessHour": 10})
     text = cowork.render_text(cowork.render(conn, settings))
 
     assert "lineup-sunday" in text
@@ -302,7 +374,7 @@ def test_the_human_form_carries_every_field_the_cowork_form_asks_for(conn, setti
 
 
 def test_the_summary_table_shows_the_whole_week_at_a_glance(conn, settings):
-    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverHours": 10})
+    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverProcessHour": 10})
     text = cowork.render_text(cowork.render(conn, settings))
 
     for task in cowork.load_tasks(settings):
@@ -311,7 +383,7 @@ def test_the_summary_table_shows_the_whole_week_at_a_glance(conn, settings):
 
 
 def test_the_json_form_is_json(conn, settings):
-    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverHours": 10})
+    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverProcessHour": 10})
     payload = cowork.as_json(cowork.render(conn, settings))
 
     assert json.loads(json.dumps(payload)) == payload
@@ -321,7 +393,7 @@ def test_the_json_form_is_json(conn, settings):
 
 
 def test_a_disabled_task_is_still_listed_but_marked(conn, settings):
-    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverHours": 10})
+    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverProcessHour": 10})
     payload = cowork.as_json(cowork.render(conn, settings))
 
     by_name = {entry["name"]: entry for entry in payload["tasks"]}
@@ -428,7 +500,7 @@ def test_a_malformed_waiver_day_is_as_loud_as_an_absent_one(conn, settings):
     forbade, and did it silently — which is worse than the absence it was
     covering for, because nothing on the page says a guess was made.
     """
-    synced_league(conn, {"waiverProcessDays": ["EVERY_OTHER_TUESDAY"], "waiverHours": 10})
+    synced_league(conn, {"waiverProcessDays": ["EVERY_OTHER_TUESDAY"], "waiverProcessHour": 10})
 
     schedule = cowork.render(conn, settings)
     waivers = next(entry for entry in schedule.tasks if entry.task.name == "waivers")
@@ -441,7 +513,7 @@ def test_a_malformed_waiver_day_is_as_loud_as_an_absent_one(conn, settings):
 
 
 def test_a_malformed_waiver_hour_is_refused_too(conn, settings):
-    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverHours": 99})
+    synced_league(conn, {"waiverProcessDays": ["WEDNESDAY"], "waiverProcessHour": 99})
 
     waivers = cowork.waiver_settings(conn)
     assert waivers["known"] is False
@@ -471,3 +543,140 @@ def test_every_shipped_task_has_a_block_in_the_document(settings):
     doc = (REPO_ROOT / "docs" / "COWORK.md").read_text(encoding="utf-8")
     for task in cowork.load_tasks(settings):
         assert f"<!-- prompt:{task.name} -->" in doc, f"{task.name} has no block in COWORK.md"
+
+
+# --- the real league's waiver payload ----------------------------------------
+#
+# Every test above this line hand-wrote ``waiverHours`` as the processing hour.
+# The real payload, read off Caroline's league on 2026-09-08, does not agree:
+#
+#   "waiverHours": 24,            <- how long a player sits on waivers
+#   "waiverProcessHour": 11,      <- the hour claims are actually processed
+#   "waiverProcessDays": ["MONDAY", "WEDNESDAY", "THURSDAY",
+#                         "FRIDAY", "SATURDAY", "SUNDAY"]
+#
+# So the two fields mean different things, and this league processes on six days
+# rather than one. A fixture that says ``waiverHours: 10`` cannot contradict the
+# belief that put it there, which is why these tests quote the live payload.
+
+REAL_ACQUISITION = {
+    "acquisitionType": "WAIVERS_TRADITIONAL",
+    "waiverHours": 24,
+    "waiverProcessHour": 11,
+    "waiverProcessDays": [
+        "MONDAY",
+        "WEDNESDAY",
+        "THURSDAY",
+        "FRIDAY",
+        "SATURDAY",
+        "SUNDAY",
+    ],
+}
+
+
+def test_the_processing_hour_comes_from_the_field_that_holds_it(conn, settings):
+    """``waiverHours`` is the waiver period, not the hour of the day.
+
+    Reading it as the hour makes this league's 24 an impossible clock time, so
+    the derivation refuses it and the waiver run never gets a time at all.
+    """
+    synced_league(conn, REAL_ACQUISITION)
+
+    waivers = cowork.waiver_settings(conn)
+
+    assert waivers["known"], waivers.get("reason")
+    assert waivers["process_hour"] == 11
+
+
+def test_a_league_that_processes_every_day_says_so(conn, settings):
+    """Six processing days is not one. Modelling only the first hides five."""
+    synced_league(conn, REAL_ACQUISITION)
+
+    waivers = cowork.waiver_settings(conn)
+
+    assert [day.lower() for day in waivers["process_days"]] == [
+        "monday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    ]
+
+
+@pytest.mark.parametrize("scan_day", ["mon", "tue", "wed", "thu", "fri", "sat", "sun"])
+@pytest.mark.parametrize("scan_hour", [0, 8, 12, 23])
+@pytest.mark.parametrize(
+    "process_days",
+    [
+        ["WEDNESDAY"],
+        ["MONDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"],
+        ["TUESDAY"],
+        ["MONDAY", "THURSDAY"],
+    ],
+)
+def test_the_claim_run_always_lands_between_the_scan_and_the_batch(
+    conn, tmp_path, scan_day, scan_hour, process_days
+):
+    """The pipeline invariant, for waivers, wherever the scan is put.
+
+    hal-mary's waiver scan queues the claims; Cowork submits them. A submit run
+    before the scan finds an empty queue, reports nothing to do, and is
+    *correct* — so the failure is silent and costs a week of claims. A submit
+    run after processing is worth nothing either.
+
+    This is a property, not an example: the derivation is supposed to hold it
+    for every scan time, so an example test of one scan time would pass by
+    construction and guard nothing.
+    """
+    settings = _settings_with_scan(tmp_path, f"0 {scan_hour} * * {scan_day}")
+    synced_league(conn, {**REAL_ACQUISITION, "waiverProcessDays": process_days})
+
+    schedule = cowork.render(conn, settings)
+    waivers = next(entry for entry in schedule.tasks if entry.task.name == "waivers")
+    assert waivers.day is not None and waivers.at is not None, waivers.notes
+
+    scan = DAY_ORDER.index(_CRON_DAYS[scan_day]) * 1440 + scan_hour * 60
+    submit = DAY_ORDER.index(waivers.day) * 1440 + int(waivers.at.split(":")[0]) * 60
+    batch = DAY_ORDER.index(waivers.targets_processing_on) * 1440 + REAL_ACQUISITION[
+        "waiverProcessHour"
+    ] * 60
+    # Measured forward from the scan, so the week's wrap-around is not a special
+    # case: the submit must come first, then the batch it is aiming at.
+    week = 7 * 24 * 60
+    assert 0 < (submit - scan) % week < (batch - scan) % week or (batch - scan) % week == 0, (
+        f"scan {scan_day} {scan_hour:02d}:00 -> submit {waivers.day} {waivers.at} "
+        f"-> batch {waivers.targets_processing_on} 11:00 is not in order"
+    )
+
+    # And it must be the *next* batch after the scan, not merely some later one.
+    # "Between the scan and the batch" is satisfied by aiming a week out, which
+    # keeps the ordering honest while losing every claim to whoever submitted
+    # for the batch that came first.
+    soonest = min(
+        (DAY_ORDER.index(day.lower()) * 1440 + REAL_ACQUISITION["waiverProcessHour"] * 60 - scan)
+        % week
+        or week
+        for day in process_days
+    )
+    assert (batch - scan) % week == soonest, (
+        f"scan {scan_day} {scan_hour:02d}:00 aims at "
+        f"{waivers.targets_processing_on}, {(batch - scan) % week // 60}h out, but a batch "
+        f"runs {soonest // 60}h out — a claim submitted for the later one arrives after "
+        "the earlier one has already been processed"
+    )
+
+
+def test_the_claim_run_still_lands_before_processing(conn, settings):
+    """And before the batch it is aiming at, or it submits into a closed window."""
+    synced_league(conn, REAL_ACQUISITION)
+
+    schedule = cowork.render(conn, settings)
+    waivers = next(entry for entry in schedule.tasks if entry.task.name == "waivers")
+
+    target = waivers.targets_processing_on
+    assert target is not None
+    submit = (DAY_ORDER.index(waivers.day), int(waivers.at.split(":")[0]))
+    assert submit < (DAY_ORDER.index(target.lower()), 11), (
+        f"the claim run is {waivers.day} {waivers.at}, not before {target} 11:00"
+    )
