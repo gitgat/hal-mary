@@ -1821,3 +1821,36 @@ about this code. CI has no credentials, so it has no real id to search for and s
 reason; Bryan's box and the production VM have one, and there the test runs and bites. Loosening it
 to something that "passes everywhere" would check nothing anywhere.
 
+## 2026-09-08 — ESPN publishes nothing to the read API during a mock draft
+
+The question the manual pick path exists for, finally observed rather than assumed. Two independent
+ESPN mock drafts were joined and watched, polling `mDraftDetail` and `mRoster` together:
+
+| | room A (12-team) | room B (10-team) |
+|---|---|---|
+| owners | 12 of 12 | 9 of 10, real people |
+| page says | "This draft has begun", order drawn | "This draft has begun", order drawn |
+| `inProgress` | `true` | `true` |
+| `drafted` | `false` | `false` |
+| picks with a real `playerId` | **0**, for 47 minutes | **0**, for 7.5 minutes |
+| players on any roster | **0** | **0** |
+
+Room A was then deleted by ESPN (the league 404s). A 10-team draft on a 30-second clock is a dozen
+picks deep after seven minutes, so this is not "the draft had not got going".
+
+**Two things follow.** `draftDetail.picks` is not a live feed during a mock, and neither is
+`mRoster` — nothing on the read API moves while the draft runs. And `inProgress: true` says only
+that the lobby is open; it was `true` throughout both, alongside a drawn order and zero picks. That
+flag already decided nothing in `draft_phase` (see the earlier entry); this is the evidence for why.
+
+**What is still unknown, and matters tonight:** both observations are *mocks*. A mock league is
+ephemeral and may simply not persist picks the way a real one does. Caroline's league is real, and
+it may well behave differently. So this does not license removing the polling path — it licenses
+not *depending* on it.
+
+hal-mary already handles both, which is why this stayed a question rather than a blocker: the draft
+loop uses picks when they appear, `record_manual_pick` needs no ESPN at all, and
+`draft.silent_after_seconds` makes the page say so rather than reassuring her that it is watching
+every five seconds while the draft moves without her. `scripts/watch-draft.py` prints the verdict in
+words on the night, and reads rosters precisely because an empty board on its own cannot tell "not
+started" from "not published".
