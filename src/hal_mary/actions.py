@@ -442,15 +442,49 @@ def report(
     Reporting is what stops an instruction being re-issued, so an unknown id is a
     ``LookupError`` rather than a silent no-op: an action nobody can close is one
     Cowork performs on every run for the rest of the season.
+
+    **Re-reporting is allowed in every direction but one: out of ``done``.** A
+    session that retries needs to correct its own earlier report, so
+    ``failed`` → ``done`` and ``skipped`` → ``done`` are ordinary, and ``done``
+    over ``done`` is idempotent. But a *stale* session reporting a failure after
+    a different one already succeeded would un-complete something that really
+    happened in ESPN, and hal-mary would then hand the instruction out again and
+    perform it twice — a second drop is not recoverable. So that transition is a
+    ``ValueError``, which :mod:`hal_mary.mcp.server` turns into a sentence Cowork
+    can act on rather than a crash.
+
+    The guard is in the ``WHERE`` clause rather than in a read followed by a
+    write, because two Cowork sessions reporting at once is exactly the situation
+    it exists for.
     """
     if outcome not in OUTCOMES:
         raise ValueError(f"unknown outcome {outcome!r}; expected one of {', '.join(OUTCOMES)}")
-    cur = conn.execute(
-        "UPDATE actions SET status = ?, outcome_detail = ?, reported_at = ? WHERE id = ?",
-        (outcome, detail, _moment(now), action_id),
-    )
+    if outcome == "done":
+        cur = conn.execute(
+            "UPDATE actions SET status = ?, outcome_detail = ?, reported_at = ? WHERE id = ?",
+            (outcome, detail, _moment(now), action_id),
+        )
+    else:
+        cur = conn.execute(
+            """
+            UPDATE actions
+               SET status = ?, outcome_detail = ?, reported_at = ?
+             WHERE id = ? AND status != 'done'
+            """,
+            (outcome, detail, _moment(now), action_id),
+        )
     if cur.rowcount == 0:
-        raise LookupError(f"no actions row with id {action_id}")
+        # Nothing moved: either the id is wrong, or the row is already done and
+        # the guard above refused. Only now is a read worth the round trip, and
+        # only to say which.
+        row = conn.execute("SELECT status FROM actions WHERE id = ?", (action_id,)).fetchone()
+        if row is None:
+            raise LookupError(f"no actions row with id {action_id}")
+        raise ValueError(
+            f"action {action_id} is already done and cannot be reported {outcome!r}; "
+            "it was performed in ESPN and an action that happened stays happened. "
+            "If what you saw contradicts that, say so with report_observation."
+        )
 
 
 def expire_stale(conn: sqlite3.Connection, now: datetime | str | None = None) -> int:

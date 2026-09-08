@@ -584,6 +584,13 @@ def build_server(settings: Settings, connect: Callable[[], sqlite3.Connection]) 
         * `skipped` — you did not attempt it: a dependency had not landed, the
           deadline had passed, or the page did not match the instruction.
 
+        You may report the same action more than once — a retry correcting its
+        own earlier `failed` to `done` is expected. The one report that is
+        refused is one that would take an action *out of* `done`: it was already
+        performed in ESPN, and undoing that here would have hal-mary hand it to
+        you again and perform it twice. If what you see contradicts a `done`,
+        report it with `report_observation` instead.
+
         `detail` is what the browser actually showed, in your own words, and at
         most 2000 characters. Put the surprise here rather than acting on it — a player already benched, a name
         that does not appear, a locked lineup, an error message. hal-mary works

@@ -537,6 +537,32 @@ def test_report_action_refuses_an_outcome_that_is_not_one_of_the_three(db_path, 
     assert rows(db_path, "SELECT status FROM actions")[0]["status"] == "pending"
 
 
+def test_a_stale_session_cannot_un_complete_an_action_that_really_happened(db_path, client):
+    """The drop was performed. A later `failed` from an older session is wrong.
+
+    It reaches Cowork as a sentence rather than a crash, because a session that
+    is out of date can act on a sentence.
+    """
+    populate(db_path)
+    action_id = a_pending_bench(db_path)
+    call_tool(client, "report_action", {"id": action_id, "outcome": "done", "detail": "Benched."})
+
+    response = rpc(
+        client,
+        "tools/call",
+        {
+            "name": "report_action",
+            "arguments": {"id": action_id, "outcome": "failed", "detail": "Timed out."},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"]["isError"] is True
+    row = rows(db_path, "SELECT * FROM actions WHERE id = ?", (action_id,))[0]
+    assert row["status"] == "done"
+    assert row["outcome_detail"] == "Benched."
+
+
 def test_report_action_on_an_unknown_id_is_an_error_not_a_silent_success(client: TestClient):
     response = rpc(
         client,

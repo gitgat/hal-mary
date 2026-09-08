@@ -1567,3 +1567,37 @@ stops a second `claude_calls` row being written for one call.
 **Would revisit if:** a caller ever needs to distinguish "the model failed" from "the disk failed"
 programmatically rather than by reading the sentence — that wants a field on `ClaudeResult`, not a
 different exception.
+
+---
+
+## 2026-09-08 — Re-reporting an action can correct anything except the fact that it happened
+
+**Decision.** `actions.report` refuses a transition that leaves `done` and allows every other one.
+`failed` → `done`, `skipped` → `done` and `done` → `done` all work; `done` → `failed` and
+`done` → `skipped` raise `ValueError`, which `report_action` turns into a sentence for Cowork.
+
+**Why re-reporting stays open at all.** A Cowork session that loses its place and runs the list again
+has to be able to correct its own earlier report, and a tool that accepts a report only once is a
+tool that strands a row nobody can close. That is the same reasoning as the `LookupError` on an
+unknown id: an action that cannot be closed is re-issued every run for the rest of the season.
+
+**Why `done` is the one direction that is closed.** `done` is a claim about ESPN, not about hal-mary
+— the bench was clicked, the drop went through. A *stale* session reporting a failure after a
+different session already succeeded would un-complete something that really happened, and the action
+would then be handed out and performed a second time. For a `bench` that is noise; for a `drop`,
+`reversible` is false and the second one takes a different player. The asymmetry is the asymmetry of
+the world: a failure can turn out to have been a success, but a success does not turn out not to have
+happened.
+
+**Why the guard is in the `WHERE` clause.** Two sessions reporting at once is the exact scenario the
+rule exists for, so a `SELECT` followed by an `UPDATE` would leave the race it is meant to close. The
+row is read only when nothing moved, and only to say whether the id was wrong or the row was already
+done.
+
+**Why a `ValueError` and not a silent no-op.** Cowork is told the refusal in a sentence it can act on
+— `report_observation` is where a contradiction belongs — because a report that looks accepted and
+was not is how a session concludes it has finished a list it has not.
+
+**Would revisit if:** an action ever genuinely needs undoing from hal-mary's side. That is a new
+verb — an `undo` action emitted like any other, with its own row — not a backwards edit of the one
+that already ran.
