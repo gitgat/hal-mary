@@ -134,3 +134,43 @@ def test_league_template_carries_no_real_league_data():
     assert not _LOOKS_LIKE_A_FULL_NAME.search(text), (
         "the template looks like it contains a person's name"
     )
+
+
+def test_no_build_artifact_is_tracked():
+    """A virtualenv, a browser dump or a screenshot must never be committed.
+
+    This is not hypothetical tidiness. A `.venv -> <repo>/.venv` symlink, made
+    so several git worktrees could share one interpreter, was swept up by
+    `git add -A` and committed: `.gitignore` said `.venv/`, and a trailing
+    slash ignores a *directory* of that name, not a *symlink*. Checking that
+    branch out then replaced the real virtualenv with a link to itself, and
+    every `uv run` died with "Too many levels of symbolic links" — a failure
+    that looks nothing like its cause.
+    """
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+    ).stdout.split()
+
+    forbidden = [
+        name
+        for name in tracked
+        if name == ".venv"
+        or name.startswith((".venv/", ".playwright-mcp/", "node_modules/"))
+        or name.endswith((".pyc", ".png"))
+    ]
+    assert not forbidden, f"build artifacts are tracked: {forbidden}"
+
+
+def test_no_tracked_file_is_a_symlink():
+    """Nothing in this repo needs to be a symlink, and one already cost a day.
+
+    `git ls-files -s` reports mode 120000 for a symlink. Pinning the mode
+    catches the next one whatever it is called, rather than only the `.venv`
+    that happened to bite first.
+    """
+    listing = subprocess.run(
+        ["git", "ls-files", "-s"], cwd=REPO, capture_output=True, text=True, check=True
+    ).stdout.splitlines()
+
+    links = [line.split("\t", 1)[1] for line in listing if line.startswith("120000")]
+    assert not links, f"tracked symlinks: {links}"

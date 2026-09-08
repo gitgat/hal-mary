@@ -16,7 +16,14 @@ data/
 # Python
 __pycache__/
 *.py[cod]
-.venv/
+.venv
+# No trailing slash, deliberately. `.venv/` ignores a *directory* named .venv and
+# does NOT ignore a *symlink* of the same name -- a `.venv -> ...` link created to
+# share one interpreter between git worktrees was swept in by `git add -A` and
+# committed, and checking that branch out then replaced the real venv with a link
+# to itself ("Too many levels of symbolic links" on every uv run).
+.playwright-mcp/
+draft-phone.png
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
