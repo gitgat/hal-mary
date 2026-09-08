@@ -313,6 +313,59 @@ def test_report_refuses_an_outcome_that_is_not_one_of_the_three(conn: sqlite3.Co
     assert "maybe" in str(excinfo.value)
 
 
+def test_a_second_report_cannot_move_an_action_back_out_of_done(conn: sqlite3.Connection):
+    """A stale Cowork session must not un-complete something that happened.
+
+    Re-reporting is deliberate — a session that retries needs it — but the one
+    direction it must not go is out of ``done``: the bench really was clicked,
+    and hal-mary would re-issue the instruction and click it again.
+    """
+    action_id = actions.emit(conn, bench())
+    actions.report(conn, action_id, "done", "Benched.")
+
+    with pytest.raises(ValueError) as excinfo:
+        actions.report(conn, action_id, "failed", "The page would not load.")
+
+    row = conn.execute("SELECT * FROM actions WHERE id = ?", (action_id,)).fetchone()
+    assert row["status"] == "done"
+    assert row["outcome_detail"] == "Benched."
+    assert "done" in str(excinfo.value)
+
+
+def test_skipped_after_done_is_refused_too(conn: sqlite3.Connection):
+    action_id = actions.emit(conn, bench())
+    actions.report(conn, action_id, "done", None)
+
+    with pytest.raises(ValueError):
+        actions.report(conn, action_id, "skipped", None)
+
+    assert conn.execute("SELECT status FROM actions").fetchone()["status"] == "done"
+
+
+def test_reporting_done_over_done_is_allowed_and_refreshes_the_detail(
+    conn: sqlite3.Connection,
+):
+    """Idempotent, because a retrying session reporting the same truth is fine."""
+    action_id = actions.emit(conn, bench())
+    actions.report(conn, action_id, "done", "Benched.")
+
+    actions.report(conn, action_id, "done", "Benched, confirmed on the roster page.")
+
+    row = conn.execute("SELECT * FROM actions WHERE id = ?", (action_id,)).fetchone()
+    assert row["status"] == "done"
+    assert row["outcome_detail"] == "Benched, confirmed on the roster page."
+
+
+def test_a_failure_can_still_be_corrected_to_done(conn: sqlite3.Connection):
+    """Only leaving ``done`` is refused. Everything else a retry needs still works."""
+    action_id = actions.emit(conn, bench())
+    actions.report(conn, action_id, "failed", "Could not find the player.")
+
+    actions.report(conn, action_id, "done", "Found him under his full name.")
+
+    assert conn.execute("SELECT status FROM actions").fetchone()["status"] == "done"
+
+
 def test_report_on_an_unknown_id_is_a_lookup_error(conn: sqlite3.Connection):
     with pytest.raises(LookupError):
         actions.report(conn, 4242, "done", None)

@@ -14,13 +14,16 @@ can forget them, and these tests are what keeps that true.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import logging
 import os
+import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Self
 
 import pytest
 
@@ -406,6 +409,148 @@ def test_malformed_lines_are_skipped_and_earlier_events_survive(harness: Harness
     assert result.ok
     assert result.text == "Survived the noise."
     assert result.session_id == "sess-malformed"
+
+
+# --------------------------------------------------------------------------
+# the transcript on disk
+# --------------------------------------------------------------------------
+
+
+def test_the_transcript_and_its_directories_are_readable_only_by_their_owner(
+    harness: Harness,
+):
+    """A transcript is the whole prompt: her roster, the board, retrieved notes.
+
+    On a single-user box the default umask is theoretical; it stops being
+    theoretical the moment anything else runs there. The mode is asserted rather
+    than the path because the path is already covered and a ``0644`` transcript
+    at the right path is the bug.
+    """
+    result = harness.runner.run("tools_off", "hello")
+
+    assert result.raw_path is not None
+    assert stat.S_IMODE(result.raw_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(result.raw_path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(harness.scratch.stat().st_mode) == 0o700
+
+
+def test_a_scratch_directory_that_already_exists_too_open_is_tightened(
+    harness: Harness,
+):
+    """A deploy that created it at the old umask must not stay world-readable.
+
+    ``exist_ok=True`` does not touch the mode of a directory that is already
+    there, so creating it ``0700`` fixes only the boxes that have never run
+    hal-mary before.
+    """
+    harness.scratch.mkdir(parents=True, exist_ok=True)
+    harness.scratch.chmod(0o755)
+
+    assert harness.runner.scratch_dir() == harness.scratch
+    assert stat.S_IMODE(harness.scratch.stat().st_mode) == 0o700
+
+
+class FullDisk:
+    """A transcript handle that hits ENOSPC after ``allow`` writes.
+
+    Half a real disk-full: the header lands, the stream starts, and the write
+    that fails is one somewhere in the middle — which is the shape of the bug,
+    because a failure before the subprocess starts was already guarded.
+    """
+
+    def __init__(self, allow: int, *, fail_close: bool = False) -> None:
+        self.allow = allow
+        self.fail_close = fail_close
+        self.closed = False
+
+    def write(self, text: str) -> int:
+        if self.allow <= 0:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        self.allow -= 1
+        return len(text)
+
+    def close(self) -> None:
+        self.closed = True
+        if self.fail_close:
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    # A real file is a context manager whose __exit__ closes and suppresses
+    # nothing. The fake has to be one too, or it tests a different shape.
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc_info: object) -> bool:
+        self.close()
+        return False
+
+
+def full_disk_after(harness: Harness, allow: int, **kwargs: object) -> FullDisk:
+    """Make every transcript this runner opens fail after ``allow`` writes."""
+    handle = FullDisk(allow, **kwargs)
+    harness.monkeypatch.setattr(
+        type(harness.runner), "_open_transcript", staticmethod(lambda path: handle)
+    )
+    return handle
+
+
+def test_a_full_disk_mid_stream_does_not_escape_as_an_oserror(harness: Harness):
+    """``run()`` promises a result object to an APScheduler job and an SSE handler.
+
+    ``mkdir`` and ``open`` were inside the guard and ``handle.write`` was not, so
+    an ENOSPC part way through a call came out as a raw OSError in a caller that
+    has nowhere to put one.
+    """
+    full_disk_after(harness, allow=1)
+
+    result = harness.runner.run("tools_off", "hello")
+
+    assert result.ok is False
+
+
+def test_a_full_disk_is_recorded_as_the_disk_and_not_as_the_caller(harness: Harness):
+    """The ``finally`` used to label it "stream abandoned by caller".
+
+    That is a lie about a different subsystem, and it would send whoever reads
+    the row looking at the SSE client while the box is out of space.
+    """
+    full_disk_after(harness, allow=1)
+
+    result = harness.runner.run("tools_off", "hello")
+    rows = harness.calls()
+
+    assert len(rows) == 1
+    assert "abandoned" not in (rows[0]["error"] or "")
+    assert "transcript" in (result.error or "").lower()
+    assert "no space left on device" in (result.error or "").lower()
+    assert rows[0]["error"] == result.error
+
+
+def test_a_failed_header_write_is_reported_rather_than_raised(harness: Harness):
+    """The very first write, before the subprocess exists."""
+    full_disk_after(harness, allow=0)
+
+    result = harness.runner.run("tools_off", "hello")
+
+    assert result.ok is False
+    assert "no space left on device" in (result.error or "").lower()
+
+
+def test_a_flush_that_fails_at_close_costs_the_transcript_and_not_the_call(
+    harness: Harness, caplog
+):
+    """By then the answer is built and yielded; the record is what is lost.
+
+    Failing the call here would throw away a good answer over a debugging file,
+    but the OSError still must not escape.
+    """
+    full_disk_after(harness, allow=100, fail_close=True)
+
+    with caplog.at_level(logging.WARNING):
+        result = harness.runner.run("tools_off", "hello")
+
+    assert result.ok is True
+    assert result.text == "Take the running back."
+    assert any("transcript" in record.message.lower() for record in caplog.records)
 
 
 def test_transcript_is_written_and_raw_path_points_at_it(harness: Harness):
