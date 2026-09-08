@@ -1,0 +1,84 @@
+# `main` stays green — enforced, not remembered.
+#
+# CLAUDE.md states it as a hard rule, and for the first nineteen pull requests
+# the only thing behind that rule was one session running `uv run pytest` before
+# every merge. This file is what makes it true after that session ends.
+#
+# Deliberately not here: no deploy (a human runs deploy/deploy.sh on the VM, on
+# purpose), no coverage gate, no badge, no Python matrix. The project targets
+# 3.12 and runs on 3.12 in both places.
+#
+# No secrets, ever. The suite must pass on a runner with no `.env`, no ESPN
+# cookies and no network: tests/conftest.py blocks every HTTP stack, and the one
+# live test that spawns the real `claude` binary skips unless HAL_MARY_LIVE is
+# set to an on value.
+#
+# KNOWN RED, and honestly so — two tests assert facts about a *developer's
+# workstation* rather than about this code, and fail on any machine without
+# Claude Code and a systemd user session. They are findings, not things to
+# paper over; see the task 11 report for the one-line fixes:
+#   tests/unit/test_doctor.py::test_the_deployment_config_is_a_healthy_box
+#   tests/unit/test_deploy.py::test_systemd_accepts_every_unit
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push supersedes the run before it. Nobody reads the result of a commit
+# that has already been replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # The suite takes about two minutes locally. A runaway should cost a few
+    # minutes, not a whole runner hour.
+    timeout-minutes: 10
+
+    env:
+      # `uv run` re-locks by default. Frozen everywhere means CI tests the
+      # lockfile that is committed, and a stale uv.lock fails loudly here
+      # rather than resolving into something nobody reviewed.
+      UV_FROZEN: "1"
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # Pinned to an exact tag, not a floating major: a supply-chain change in
+      # a shared action should be something this repo opts into.
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          # Keyed on the lockfile alone, so an unrelated edit to pyproject.toml
+          # prose does not throw the environment away.
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Tests
+        run: uv run pytest
+
+      # Runs even when pytest failed: one push should report every problem it
+      # has, not the first one.
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: uv run ruff check src tests scripts
+
+      # Non-blocking on purpose. The tree was never formatted — 44 of 70 files
+      # would change — and reformatting the world is a decision to take
+      # deliberately, in its own commit, not as a side effect of adding CI.
+      # Make this blocking on the commit that formats the tree.
+      - name: Format check (advisory)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: uv run ruff format --check src tests scripts

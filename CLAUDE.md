@@ -53,6 +53,12 @@ gh pr create --fill                      # body: what changed, how verified, tas
 gh pr merge --squash --delete-branch
 ```
 
+`.github/workflows/ci.yml` runs `uv run pytest` and `uv run ruff check src tests scripts` on every
+pull request and every push to `main`, so "`main` stays green" no longer depends on someone
+remembering. It runs with no `.env` and no secrets — a test that needs one is a broken test. Two
+tests currently fail there because they assert facts about a *developer's workstation* (Claude Code
+installed, a systemd user session); the workflow's header names them.
+
 Commit messages: imperative subject, body explaining *why*. Every commit made by an agent carries
 the `Co-Authored-By` and `Claude-Session` trailers.
 

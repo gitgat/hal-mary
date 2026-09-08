@@ -25,6 +25,11 @@ DATA_DIR="${HAL_MARY_DATA_DIR:-$HOME/hal-mary-data}"
 HEALTH_TIMEOUT="${HAL_MARY_HEALTH_TIMEOUT:-90}"
 HEALTH_INTERVAL="${HAL_MARY_HEALTH_INTERVAL:-2}"
 
+# `loginctl enable-linger` needs a user name, and `set -u` makes an unset $USER a
+# crash rather than a bad argument. An interactive login sets it; a systemd unit,
+# a `sudo -u`, a cron job and a container shell do not. `id -un` always knows.
+USER="${USER:-$(id -un)}"
+
 UNITS=(hal-mary.service hal-mary-backup.service hal-mary-backup.timer)
 
 step() { printf '\n=== %s\n' "$*"; }
