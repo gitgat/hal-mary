@@ -93,6 +93,49 @@
   "missing" is only alarming once hal-mary has run.</p>
 </div>
 
+{# What hal-mary will do on its own, and why. "Nothing has happened for a week"
+   is almost always the phase, a disabled job, or a cron that never fires, and
+   reading which should not need SSH and config.toml. #}
+<div class="card">
+  <h2>What runs on its own</h2>
+  <div class="row">
+    <span class="label">Right now hal-mary thinks it is</span>
+    <span class="value">{{ phase_label }}</span>
+  </div>
+  {% for job in scheduled_jobs %}
+    <div class="row">
+      <span class="label">{{ job.name }}</span>
+      <span class="value">
+        {% if job.scheduled %}
+          <span class="chip ok">{{ job.cron }}</span>
+        {% elif not job.enabled %}
+          <span class="chip warn">turned off</span>
+        {% elif not job.cron %}
+          <span class="chip warn">on demand only</span>
+        {% else %}
+          <span class="chip warn">{{ job.cron }} — not this phase</span>
+        {% endif %}
+      </span>
+    </div>
+    <p class="small muted">
+      {{ job.summary }}
+      {% if job.last %}
+        Last run {{ age_in_words(job.last['finished_at'] or job.last['started_at']) }}:
+        {{ job.last['status'] }}{% if job.last['summary'] %} — {{ job.last['summary'] }}{% endif %}{% if job.last['error'] %} — {{ job.last['error'] }}{% endif %}
+      {% else %}
+        Never run.
+      {% endif %}
+    </p>
+    <form hx-post="/jobs/{{ job.name }}/run" hx-target="#job-result-{{ job.name }}"
+          hx-swap="innerHTML" hx-disabled-elt="find button"
+          method="post" action="/jobs/{{ job.name }}/run">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="quiet" type="submit">Run {{ job.name }} now<span class="spinner"> …</span></button>
+    </form>
+    <div class="fragment" id="job-result-{{ job.name }}"></div>
+  {% endfor %}
+</div>
+
 <div class="card">
   <h2>Recent jobs</h2>
   {% if jobs %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}What to do — hal-mary{% endblock %}
+{% block content %}
+
+{# Grouped, because the kinds answer different questions and expire at
+   different moments: a waiver claim is gone on Wednesday morning and a lineup
+   change is gone at kickoff. Lineup first, because the one card that can cost a
+   whole week is in it. #}
+
+<div class="card">
+  <h2>What to do</h2>
+  {% if total == 0 %}
+    <p><strong>Nothing to do right now.</strong></p>
+    <p class="small muted">
+      hal-mary writes here after it looks at your team — before the draft, on a
+      Tuesday for waiver claims, and on a Sunday morning for your lineup.
+    </p>
+  {% else %}
+    <p class="small muted">
+      {{ outstanding }} still to do, out of {{ total }}.
+    </p>
+  {% endif %}
+</div>
+
+{% for group in groups %}
+  <div class="card">
+    <h2>{{ group.label }}</h2>
+    {% for item in group['items'] %}
+      {% include "partials/advice_item.html" %}
+    {% endfor %}
+  </div>
+{% endfor %}
+{% endblock %}

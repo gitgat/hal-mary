@@ -27,7 +27,8 @@ from draft_fixtures import (
     seed_synced_league,
 )
 
-from hal_mary.jobs.board_build import build_board
+from hal_mary.jobs.board_build import JOB_NAME, build_board
+from hal_mary.jobs.registry import run_job
 from hal_mary.memory import search_notes
 
 PLAYERS = [
@@ -123,9 +124,11 @@ def test_a_failed_call_leaves_the_previous_board_intact_and_records_the_error(tm
     seed_board(conn, SAMPLE_BOARD)
     before = conn.execute("SELECT name FROM board ORDER BY rank").fetchall()
 
-    result = build_board(conn, settings, runner)
+    # Through the registry, because that is what records the run: the job_runs
+    # row is opened and closed in exactly one place, and it is not this module.
+    outcome = run_job(JOB_NAME, conn, settings, runner)
 
-    assert result["ok"] is False
+    assert outcome.ok is False
     after = conn.execute("SELECT name FROM board ORDER BY rank").fetchall()
     assert [row["name"] for row in after] == [row["name"] for row in before]
     run = conn.execute("SELECT status, error FROM job_runs ORDER BY id DESC LIMIT 1").fetchone()
@@ -159,8 +162,9 @@ def test_a_run_that_raises_is_recorded_rather_than_escaping(tmp_path):
 def test_a_successful_run_is_recorded_as_ok(tmp_path):
     conn, settings, runner = build_ready(tmp_path, [ok_result({"players": PLAYERS})])
 
-    build_board(conn, settings, runner)
+    outcome = run_job(JOB_NAME, conn, settings, runner)
 
+    assert outcome.ok is True
     run = conn.execute("SELECT status, summary FROM job_runs ORDER BY id DESC LIMIT 1").fetchone()
     assert run["status"] == "ok"
     assert "3" in run["summary"]

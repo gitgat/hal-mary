@@ -20,6 +20,7 @@ __all__ = [
     "run_server",
     "serve",
     "start_draft_loop",
+    "start_scheduler",
 ]
 
 log = logging.getLogger(__name__)
@@ -102,6 +103,60 @@ def start_draft_loop(app: Any, settings: Any, thread_factory: Any = None) -> Any
     return thread
 
 
+def start_scheduler(app: Any, settings: Any) -> Any:
+    """Run the research jobs beside the web app, on the app's own event loop.
+
+    Started on **lifespan startup**, not here: ``AsyncIOScheduler`` wants a
+    running event loop, and this function is called by uvicorn while it is
+    building the app, before there is one.
+
+    Each run opens its own database connection and its own ``ClaudeRunner``
+    inside its own worker thread — the connection factory is passed down for
+    exactly that reason. The app's event bus goes with it, so a job finishing
+    reaches an open page through ``/events``.
+
+    A scheduler that will not build is logged and nothing more, for the same
+    reason the draft loop is: the page has to render on a box with no
+    credentials, and a research job that never fires is a much smaller problem
+    than an application that will not start.
+    """
+    from hal_mary import db
+    from hal_mary.jobs.scheduler import build_scheduler
+
+    try:
+        scheduler = build_scheduler(
+            settings,
+            connect=lambda: db.connect(settings.db_path),
+            bus=app.state.bus,
+        )
+    except Exception:
+        log.exception("could not build the job scheduler; the web app is serving anyway")
+        app.state.scheduler = None
+        return None
+
+    app.state.scheduler = scheduler
+
+    def _start() -> None:
+        try:
+            scheduler.start()
+            log.info("the job scheduler is running beside the web app")
+        except Exception:
+            log.exception("the job scheduler would not start; the web app is serving anyway")
+
+    def _stop() -> None:
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception:
+            log.exception("the job scheduler would not shut down cleanly")
+
+    # This FastAPI has no ``add_event_handler`` and ``on_event`` is deprecated,
+    # so the router's own lists are the stable seam — the same one the draft
+    # loop uses for its stop.
+    app.router.on_startup.append(_start)
+    app.router.on_shutdown.append(_stop)
+    return scheduler
+
+
 def app_from_env() -> Any:
     """Build the app from ``config.toml`` and ``.env`` — uvicorn's entry point.
 
@@ -126,6 +181,7 @@ def app_from_env() -> Any:
         conn.close()
     app = create_app(settings)
     start_draft_loop(app, settings)
+    start_scheduler(app, settings)
     return app
 
 

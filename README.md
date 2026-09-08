@@ -25,8 +25,14 @@ uv run hal-mary doctor      # is this box able to run hal-mary at all?
 uv run hal-mary espn-check  # check the ESPN cookies work
 uv run hal-mary sync        # pull league state
 uv run hal-mary job board_build   # research the draft board (do this before the draft)
-uv run hal-mary serve       # web app + draft loop; prints the URL to open on a phone
+uv run hal-mary jobs        # what runs on its own, when, and how it went last time
+uv run hal-mary serve       # web app, draft loop and scheduler; prints the URL for a phone
 ```
+
+In season nothing needs running by hand: the scheduler lives in the `serve` process and picks its
+jobs from the phase it is in — a nightly board build before the draft, then news, waivers, lineups
+and the weekly recap after it. `hal-mary job <name>` runs any one of them now, and the status page
+has the same button.
 
 See [`docs/SETUP.md`](docs/SETUP.md) for first-time setup (ESPN credentials, league ids, the
 Claude login), the **runbook below** for running it as a service, [`CLAUDE.md`](CLAUDE.md) for

@@ -452,6 +452,18 @@ def render(
             "scheduling form uses. Set [cowork].timezone in config.toml to your own "
             "IANA zone (for example America/Chicago) and print this again."
         )
+    elif zone_name != settings.scheduler.timezone:
+        # Two settings that must agree, in a place the operator is looking. The
+        # schedules interleave — hal-mary queues the lineup changes and Cowork
+        # performs them — so a drift of a few hours puts the Cowork run in front
+        # of the check that fills its queue, and it finds nothing to do.
+        warnings.append(
+            f"[cowork].timezone is {zone_name} but [scheduler].timezone is "
+            f"{settings.scheduler.timezone}. hal-mary's own jobs run in the second "
+            "and the times below are in the first, so they are not the sequence "
+            "they look like: a lineup run scheduled before the check that fills "
+            "its queue performs nothing. Make them the same zone."
+        )
     if conn.execute("SELECT 1 FROM league_settings WHERE id = 1").fetchone() is None:
         warnings.append(
             "Nothing has synced from ESPN, so every time here is the file's own default "
@@ -553,13 +565,25 @@ def render_text(schedule: Schedule) -> str:
         lines.append("")
 
     name_width = max([len(entry.task.name) for entry in schedule.tasks] + [4])
-    lines.append(f"{'Job'.ljust(name_width)}  {'On':<10} {'When':<28} {'Next run':<26} Mode")
-    lines.append("-" * (name_width + 74))
-    for entry in schedule.tasks:
+    # Measured, not guessed. "When" carries the zone name, and a real IANA zone
+    # ("America/Los_Angeles") is nineteen characters where the old fixed width
+    # was sized for "UTC" — which pushed every column after it out of true in
+    # the one output whose entire job is to be read by a person.
+    whens = [_when(entry, schedule.timezone) for entry in schedule.tasks]
+    when_width = max([len(when) for when in whens] + [len("When")])
+    next_width = max(
+        [len(entry.next_run or "-") for entry in schedule.tasks] + [len("Next run")]
+    )
+    lines.append(
+        f"{'Job'.ljust(name_width)}  {'On':<10} "
+        f"{'When'.ljust(when_width)} {'Next run'.ljust(next_width)} Mode"
+    )
+    lines.append("-" * (name_width + when_width + next_width + 21))
+    for entry, when in zip(schedule.tasks, whens, strict=True):
         state = "enabled" if entry.task.enabled else "off"
         lines.append(
             f"{entry.task.name.ljust(name_width)}  {state:<10} "
-            f"{_when(entry, schedule.timezone):<28} {(entry.next_run or '-'):<26} "
+            f"{when.ljust(when_width)} {(entry.next_run or '-').ljust(next_width)} "
             f"{entry.task.mode}"
         )
     lines.append("")
