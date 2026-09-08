@@ -42,6 +42,16 @@ live_override_seconds = 3600
 # the pick was due. advice_retry_candidates is the shorter second attempt.
 board_size = 200
 research_note_limit = 30
+
+# The largest share of the board any one website may be the deciding source
+# for. Measured defect: the first real build cited a single ranking article for
+# 103 of 200 players, which is a board every other manager in the league can
+# already read for free. At 0.25 no outlet may decide more than 50 of 200, so
+# the ordering has to come from weighing sources against each other rather than
+# from retyping one of them. Raise it and the board drifts back towards being a
+# copy; lower it and the research spends its time hunting for a fourth opinion
+# on a player nobody disagrees about.
+max_source_share = 0.25
 advice_candidates = 14
 advice_retry_candidates = 5
 advice_recent_picks = 8
@@ -74,6 +84,15 @@ advice_budget_s = 60
 # draft_type = "SNAKE"
 # draft_order = [1, 2, 3, 4, 5, 6]
 # my_draft_slot = 6
+#
+# What the season is a race for. ESPN reports these in scheduleSettings; state
+# them here when there is no ESPN, because "how many teams make the playoffs
+# and how the places are decided" changes which board is right and hal-mary
+# says "not known" rather than guessing.
+#
+# playoff_team_count = 4
+# playoff_seeding_rule = "TOTAL_POINTS_SCORED"   # or anything else for won-lost record
+# regular_season_weeks = 14
 #
 # [league.roster_slots]         # one draft round per slot, IR excluded
 # QB = 1

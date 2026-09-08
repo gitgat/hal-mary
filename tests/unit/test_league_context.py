@@ -208,3 +208,71 @@ def test_the_pick_clock_falls_back_to_config_with_no_espn(tmp_path):
     conn = open_db(tmp_path)
 
     assert load_league_context(conn, settings).pick_clock_s == 60
+
+
+def test_the_playoff_shape_comes_from_espn(tmp_path):
+    """`scheduleSettings` decides what the season is actually a race for.
+
+    A board built for "win each week" and a board built for "score the most
+    points over fourteen weeks" are different boards, and which one is right is
+    a league setting rather than a matter of taste. It is read for the same
+    reason the pick clock is: a league that reseeds by record has to move the
+    reasoning, not silently inherit the wrong one.
+    """
+    settings = make_settings(tmp_path)
+    conn = open_db(tmp_path)
+    seed_synced_league(conn)
+
+    league = load_league_context(conn, settings)
+
+    assert league.playoff_team_count == 4
+    assert league.playoff_seeding_rule == "TOTAL_POINTS_SCORED"
+    assert league.regular_season_weeks == 14
+
+
+def test_the_playoff_shape_falls_back_to_config_with_no_espn(tmp_path):
+    toml = LEAGUE_TOML.replace(
+        "my_draft_slot = 6",
+        'my_draft_slot = 6\nplayoff_team_count = 4\n'
+        'playoff_seeding_rule = "TOTAL_POINTS_SCORED"\nregular_season_weeks = 14',
+    )
+    settings = make_settings(tmp_path, toml)
+    conn = open_db(tmp_path)
+
+    league = load_league_context(conn, settings)
+
+    assert league.playoff_team_count == 4
+    assert league.regular_season_weeks == 14
+
+
+def test_playoff_summary_says_in_words_what_the_season_is_a_race_for(tmp_path):
+    """`TOTAL_POINTS_SCORED` is a database value, not a sentence.
+
+    The whole summary is asserted rather than a slice of it: a test that checks
+    only the half its author was thinking about reads as though it checked the
+    sentence and did not.
+    """
+    settings = make_settings(tmp_path)
+    conn = open_db(tmp_path)
+    seed_synced_league(conn)
+
+    summary = load_league_context(conn, settings).playoff_summary
+
+    assert "TOTAL_POINTS_SCORED" not in summary
+    assert "4 of the 6" in summary
+    assert "total points" in summary
+    assert "14" in summary, "how long the race is, not only who wins it"
+    assert "most of the league" in summary, "two thirds getting in changes the strategy"
+
+
+def test_playoff_summary_says_so_when_nothing_has_been_read(tmp_path):
+    """Silence would read as "there are no playoffs", which is never true."""
+    raw = {key: value for key, value in REAL_RAW_SETTINGS.items() if key != "scheduleSettings"}
+    settings = make_settings(tmp_path)
+    conn = open_db(tmp_path)
+    seed_synced_league(conn, raw=raw)
+
+    league = load_league_context(conn, settings)
+
+    assert league.playoff_team_count is None
+    assert "not known" in league.playoff_summary
