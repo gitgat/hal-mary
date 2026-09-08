@@ -555,3 +555,43 @@ class RecordingBus:
 
     def publish(self, event: str, payload: dict) -> None:
         self.published.append((event, payload))
+
+
+def seed_roster(conn, players: list[dict[str, Any]], team_id: int = REAL_MY_TEAM_ID) -> None:
+    """Write ``teams``, ``players`` and ``roster_slots`` rows for one roster.
+
+    In that order, because the foreign keys on ``roster_slots`` are real: a
+    roster row for a player nobody has inserted raises ``IntegrityError``.
+    ``week`` is NULL, which is what ``espn.sync`` writes for "the current
+    snapshot" — see ``CURRENT_ROSTER_WEEK``.
+    """
+    conn.execute(
+        "INSERT OR REPLACE INTO teams (team_id, name, owner, abbrev, draft_slot, updated_at) "
+        "VALUES (?, 'Chaos Theory', 'Caroline', 'CHAO', 6, '2026-09-07T00:00:00+00:00')",
+        (team_id,),
+    )
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO players
+            (player_id, name, position, pro_team, injury_status, updated_at)
+        VALUES (:player_id, :name, :position, :pro_team, :injury_status,
+                '2026-09-07T00:00:00+00:00')
+        """,
+        [
+            {
+                "player_id": row["player_id"],
+                "name": row["name"],
+                "position": row.get("position"),
+                "pro_team": row.get("pro_team"),
+                "injury_status": row.get("injury_status"),
+            }
+            for row in players
+        ],
+    )
+    conn.execute("DELETE FROM roster_slots WHERE team_id = ?", (team_id,))
+    conn.executemany(
+        "INSERT INTO roster_slots (team_id, player_id, slot, week, updated_at) "
+        "VALUES (?, ?, ?, NULL, '2026-09-07T00:00:00+00:00')",
+        [(team_id, row["player_id"], row.get("slot")) for row in players],
+    )
+    conn.commit()

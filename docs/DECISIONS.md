@@ -1305,3 +1305,99 @@ condition, as a test. `test_the_deploy_markers_never_reach_the_suite_it_gates_on
 stub's record of the environment it was handed. The rest of the suite was checked for the same
 class of leak by running all of it under `HAL_MARY_CONFIG`, `HAL_MARY_ENV` and `DB_PATH` pointed at
 a decoy deployment: 1155 passed, unchanged.
+## 2026-09-08 — A job run is recorded in exactly one place
+
+**Decision.** `hal_mary.jobs.registry.run_job` opens and closes the `job_runs` row for every job,
+and nothing else does. `board_build.build_board` — which used to open its own — now returns its
+outcome dict and lets `board_build.run`, the registered entry point, raise `JobFailed` on a failure
+the registry then records.
+
+**Why.** Every job now has one shape, `run(conn, settings, runner, client) -> str`, because that is
+what lets the scheduler, `hal-mary job`, and the button on the status page treat them
+interchangeably. If bookkeeping also lived inside a job, running that job through the registry would
+write two rows: one opened by the job and closed, and one opened by `run_job` — and the status page
+would report a job that started twice and finished once. `tests/unit/test_job_registry.py`'s
+`test_run_job_records_exactly_one_row_for_the_board_build` is the lock on that door.
+
+**`run_job` never re-raises, and neither does its own bookkeeping.** It catches `BaseException`, not
+`Exception`: a `MemoryError` out of a research job on a Sunday morning is still not a reason for the
+web process to stop serving the draft page. `KeyboardInterrupt` and `asyncio.CancelledError` are the
+two that genuinely mean "stop" and are re-raised, because a job that could not be cancelled would be
+a job that outlives a shutdown. A database that cannot even open the `job_runs` row is logged and the
+job runs anyway.
+
+The one thing that *does* raise out of `run_job` is `UnknownJob`, and it happens before a row is
+opened — so a typo never leaves behind a run that looks like it started and never finished.
+
+---
+
+## 2026-09-08 — The bye-week alarm is arithmetic, and it survives a failed research call
+
+**Decision.** `jobs/lineup_check.py` computes, in Python, which players in Caroline's *starting*
+slots are on a bye this week, and writes that as its own `advice` row with the player's name in the
+headline. It writes that row **even when the Claude call fails**, and raises `JobFailed` afterwards.
+A flag is raised if *either* source says bye: the `board.bye_week` researched before the draft, or
+the `bye_week` the model just returned from the live NFL schedule.
+
+**Why.** A started player on a bye scores **zero** — not a low score, nothing. It is the single most
+common mistake somebody makes in their first fantasy season, it is never intentional, and it is
+entirely determined by a roster and a calendar. Making it depend on a web-enabled model call that
+takes 30 to 120 seconds and sometimes times out would mean the one piece of advice hal-mary can
+always give is the one it gives least reliably.
+
+That is also why it is a separate `advice` row rather than a line inside the lineup card. She reads
+these on a phone; a warning three quarters of the way down a card is a warning that gets scrolled
+past. The alarm is written *after* the lineup card so that a newest-first feed puts it on top.
+
+**The asymmetry is deliberate.** Flagging a player whose bye is actually next week costs her the ten
+seconds it takes to look at ESPN. Failing to flag one costs every point that roster slot could have
+scored, and she finds out on Monday. So a disagreement between the two sources raises the flag and
+says which source claimed it, rather than resolving it quietly in favour of either.
+
+**Would revisit if:** a reliable bye-week source exists in the database for every rostered player —
+`players` has no `bye_week` column today, and the board only covers players who were researched
+before the draft. `season.bye_weeks` matches by normalised **name** rather than id for exactly that
+reason: a board row built before the first ESPN sync carries a synthetic negative id that will never
+join to a real roster row.
+
+---
+
+## 2026-09-08 — Which jobs exist at all depends on the phase, and the phase is re-checked daily
+
+**Decision.** Every job declares its phases (`pre_draft`, `draft_live`, `in_season`, `off_season`)
+to `registry.register`. `scheduler.current_phase` derives the current one from the league's draft
+date and the windows under `[scheduler]` in `config.toml`, and `scheduler.apply_phase` makes the
+running `AsyncIOScheduler` hold exactly that phase's enabled, cron'd jobs. A reserved job,
+`_phase_check`, re-evaluates it daily and re-applies.
+
+**Why.** A nightly board build is exactly right the week before the draft and is a paid, web-enabled
+Claude call producing a board for a draft that already happened every morning after it. A lineup
+check the week before has no lineup. Encoding that as one flag per job in `config.toml` would mean
+somebody has to remember to flip five of them on draft night — which is the night nobody is going to
+be editing TOML. The daily re-check is what lets a process started on Monday become an in-season
+process on Wednesday without a restart.
+
+`max_instances=1` and `coalesce=True` on every registered job. A research call can take fifteen
+minutes; a second copy starting on top of it means two `claude` subprocesses, two budgets, and two
+writers into one SQLite file. `coalesce` collapses a backlog — a box that was asleep — into one run
+rather than firing every missed hour in a row.
+
+**With no draft date, a made pick is the evidence.** ESPN can leave `draftSettings.date` null, and
+this league's was null when it was read. `current_phase` then answers `in_season` if any pick names
+somebody and `pre_draft` otherwise — using the same "a pick with no name and no positive player id
+is one of ESPN's pre-populated slots" rule as everything else. It never raises: a process that will
+not start because it could not work out the date is a far worse failure than one that assumes the
+draft has not happened.
+
+---
+
+## 2026-09-08 — The in-season sizes live in `[research]`, not `[season]`
+
+**Decision.** The `[research]` section of `config.toml` carries `free_agent_size`,
+`free_agent_shortlist`, `note_limit`, `note_shelf_life_days` and `waiver_claims`.
+
+**Why.** The obvious name is `[season]`, and it cannot be used: `Settings.season` is already the
+ESPN season *year*, read from the environment, and a second `season` attribute is a `SyntaxError` at
+the call site that builds `Settings` — which is how this was found. `[research]` also reads more
+accurately: these are how much live state the research jobs put in front of Claude, not facts about
+the season.

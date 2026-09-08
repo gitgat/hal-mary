@@ -276,6 +276,9 @@ def test_no_route_escapes_the_password_by_accident(db_path: Path):
         "/chat/send",
         "/chat/remember",
         "/chat/stream/{session_id}",
+        "/advice",
+        "/advice/{advice_id}/done",
+        "/jobs/{name}/run",
     } <= found, (
         f"the route walk found only {sorted(found)}"
     )
@@ -294,9 +297,10 @@ def test_no_route_escapes_the_password_by_accident(db_path: Path):
             ):
                 continue
             # A templated path has to be filled in before it can be requested:
-            # httpx percent-encodes the braces, and the route then either 404s or
-            # 422s on a session id of "{session_id}" — either of which walks
-            # straight past the assertion below while appearing to check it.
+            # httpx percent-encodes the braces, so a path holding `{advice_id}`
+            # or `{session_id}` would be requested with the braces intact and the
+            # route would 404 or 422 — walking straight past the assertion below
+            # while appearing to check it.
             url = re.sub(r"\{[^}]+\}", "1", path)
             for method in sorted(getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}):
                 response = client.request(method, url)
@@ -1305,6 +1309,7 @@ def test_run_server_hands_the_bound_to_uvicorn(monkeypatch, db_path: Path):
 
     assert seen["timeout_graceful_shutdown"] == 7
 
+
 # --- what Cowork did, on the dashboard ---------------------------------------
 
 
@@ -1708,3 +1713,267 @@ async def test_a_second_stream_for_the_same_question_does_not_ask_twice(
         assert conn.execute("SELECT count(*) FROM claude_calls").fetchone()[0] == 1
     finally:
         conn.close()
+# --- /advice ----------------------------------------------------------------
+
+
+def seed_advice(db_path: Path, rows: list[dict]) -> list[int]:
+    """Write advice rows and return their ids, oldest first."""
+    conn = open_conn(db_path)
+    ids = []
+    for row in rows:
+        cur = conn.execute(
+            "INSERT INTO advice (created_at, kind, headline, body, payload_json, "
+            "source_job, done) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                row.get("created_at", db.utc_now()),
+                row["kind"],
+                row["headline"],
+                row.get("body"),
+                row.get("payload_json"),
+                row.get("source_job", "test"),
+                row.get("done", 0),
+            ),
+        )
+        ids.append(cur.lastrowid)
+    conn.commit()
+    conn.close()
+    return ids
+
+
+LINEUP_ADVICE = {
+    "kind": "lineup",
+    "headline": "Week 6: take Ja'Marr Chase out of your lineup — he is on a bye",
+    "body": "A bye week is a week his real team does not play, so he would score zero.",
+    "source_job": "lineup_check",
+}
+WAIVER_ADVICE = {
+    "kind": "waiver",
+    "headline": "Claim: pick up Tank Bigsby, drop Trey McBride",
+    "body": "The man ahead of him is out for the season.",
+    "source_job": "waiver_scan",
+}
+
+
+def test_the_advice_feed_renders_with_nothing_in_it(db_path: Path):
+    """The state on the morning before the draft, and after every restart."""
+    with client_for(db_path) as client:
+        login(client)
+        response = client.get("/advice")
+    assert response.status_code == 200
+    assert "nothing" in response.text.lower()
+
+
+def test_the_advice_feed_shows_the_cards_grouped_by_kind(db_path: Path):
+    seed_advice(db_path, [WAIVER_ADVICE, LINEUP_ADVICE])
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/advice").text
+    assert escape("Ja'Marr Chase") in text
+    assert "Tank Bigsby" in text
+    # Grouped, and named in words — "lineup" and "waiver" are hal-mary's words,
+    # not hers.
+    assert "Your lineup" in text
+    assert "Waiver claims" in text
+
+
+def test_a_bye_week_card_is_not_buried_under_the_others(db_path: Path):
+    """The one card that must be read first is the one about a starter who will
+    score zero. It is written last, so the newest-first feed puts it on top."""
+    seed_advice(
+        db_path,
+        [
+            dict(WAIVER_ADVICE, created_at="2026-10-06T09:00:00+00:00"),
+            dict(LINEUP_ADVICE, created_at="2026-10-06T09:00:01+00:00"),
+        ],
+    )
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/advice").text
+    assert text.index("on a bye") < text.index("Tank Bigsby")
+
+
+def test_marking_a_card_done_persists(db_path: Path):
+    ids = seed_advice(db_path, [WAIVER_ADVICE])
+    with client_for(db_path) as client:
+        login(client)
+        response = post(client, f"/advice/{ids[0]}/done")
+    assert response.status_code in (200, 303)
+    conn = open_conn(db_path)
+    assert conn.execute("SELECT done FROM advice WHERE id = ?", (ids[0],)).fetchone()["done"] == 1
+    conn.close()
+
+
+def test_marking_a_card_done_again_puts_it_back(db_path: Path):
+    """A tick she did not mean is a tick she has to be able to undo."""
+    ids = seed_advice(db_path, [dict(WAIVER_ADVICE, done=1)])
+    with client_for(db_path) as client:
+        login(client)
+        post(client, f"/advice/{ids[0]}/done")
+    conn = open_conn(db_path)
+    assert conn.execute("SELECT done FROM advice WHERE id = ?", (ids[0],)).fetchone()["done"] == 0
+    conn.close()
+
+
+def test_marking_a_card_that_does_not_exist_is_a_404_not_a_500(db_path: Path):
+    with client_for(db_path) as client:
+        login(client)
+        response = post(client, "/advice/9999/done")
+    assert response.status_code == 404
+
+
+def test_the_done_toggle_needs_a_csrf_token(db_path: Path):
+    ids = seed_advice(db_path, [WAIVER_ADVICE])
+    with client_for(db_path) as client:
+        login(client)
+        response = client.post(f"/advice/{ids[0]}/done")
+    assert response.status_code == 403
+    conn = open_conn(db_path)
+    assert conn.execute("SELECT done FROM advice WHERE id = ?", (ids[0],)).fetchone()["done"] == 0
+    conn.close()
+
+
+# --- the scheduler on the status page ---------------------------------------
+
+
+def test_status_lists_every_job_with_its_cadence(db_path: Path):
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/status").text
+    assert "lineup_check" in text
+    assert "0 9 * * 0" in text, "the cadence is what says whether it runs at all"
+
+
+def test_status_says_which_phase_hal_mary_thinks_it_is_in(db_path: Path):
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/status").text
+    assert "before the draft" in text.lower()
+
+
+# --- running a job from the browser -----------------------------------------
+
+
+def test_running_a_job_from_the_browser_reports_its_outcome(db_path: Path):
+    from hal_mary.jobs import registry
+
+    app = build_app(db_path)
+    spec = registry.JobSpec(
+        name="fake_web", run=lambda *_: "did the thing", phases=frozenset({"in_season"})
+    )
+    registry.JOBS["fake_web"] = spec
+    try:
+        with TestClient(app, follow_redirects=False) as client:
+            login(client)
+            response = post(client, "/jobs/fake_web/run", headers={"hx-request": "true"})
+        assert response.status_code == 200
+        assert "did the thing" in response.text
+    finally:
+        registry.JOBS.pop("fake_web", None)
+
+    conn = open_conn(db_path)
+    row = conn.execute("SELECT * FROM job_runs ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    assert row["job"] == "fake_web"
+    assert row["status"] == "ok"
+
+
+def test_running_a_job_that_fails_says_so_rather_than_500ing(db_path: Path):
+    from hal_mary.jobs import registry
+
+    def explode(*_):
+        raise RuntimeError("ESPN fell over")
+
+    app = build_app(db_path)
+    registry.JOBS["fake_web_bad"] = registry.JobSpec(
+        name="fake_web_bad", run=explode, phases=frozenset({"in_season"})
+    )
+    try:
+        with TestClient(app, follow_redirects=False) as client:
+            login(client)
+            response = post(client, "/jobs/fake_web_bad/run", headers={"hx-request": "true"})
+        assert response.status_code == 200
+        assert "ESPN fell over" in response.text
+    finally:
+        registry.JOBS.pop("fake_web_bad", None)
+
+
+def test_running_an_unknown_job_is_a_404(db_path: Path):
+    with client_for(db_path) as client:
+        login(client)
+        response = post(client, "/jobs/not-a-job/run", headers={"hx-request": "true"})
+    assert response.status_code == 404
+
+
+def test_running_a_job_needs_a_csrf_token(db_path: Path):
+    with client_for(db_path) as client:
+        login(client)
+        response = client.post("/jobs/board_build/run", headers={"hx-request": "true"})
+    assert response.status_code == 403
+
+
+def test_the_advice_body_bolds_what_the_job_meant_to_bold(db_path: Path):
+    seed_advice(db_path, [dict(WAIVER_ADVICE, body="**Do this by:** Wednesday morning.")])
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/advice").text
+    assert "<strong>Do this by:</strong>" in text
+    assert "**" not in text
+
+
+def test_the_advice_body_escapes_before_it_decorates(db_path: Path):
+    """These bodies carry text a model wrote from the open web. It is data."""
+    seed_advice(
+        db_path,
+        [dict(WAIVER_ADVICE, body="<script>alert(1)</script> and **bold**")],
+    )
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/advice").text
+    assert "<script>" not in text
+    assert "&lt;script&gt;" in text
+    assert "<strong>bold</strong>" in text
+
+
+# --- the scheduler beside the web app ---------------------------------------
+
+
+def test_the_scheduler_starts_with_the_app_not_while_it_is_being_built(db_path: Path):
+    """``AsyncIOScheduler`` wants a running loop, and ``app_from_env`` runs
+    before uvicorn has one. Starting it eagerly is a crash on boot."""
+    from hal_mary.web import serve as serve_module
+
+    app = build_app(db_path)
+    scheduler = serve_module.start_scheduler(app, make_settings(db_path))
+
+    assert scheduler is not None
+    assert not scheduler.running, "it must not be started before there is a loop"
+    assert app.state.scheduler is scheduler
+
+    with TestClient(app):
+        assert app.state.scheduler.running
+    assert not app.state.scheduler.running, "and it stops with the app"
+
+
+def test_a_scheduler_that_will_not_build_does_not_stop_the_app_serving(db_path: Path, caplog):
+    """A box with no database still has to render the page that says so."""
+    from hal_mary.jobs import scheduler as scheduler_module
+    from hal_mary.web import serve as serve_module
+
+    app = build_app(db_path)
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("no database")
+
+    original = scheduler_module.build_scheduler
+    serve_module_build = serve_module.start_scheduler
+    try:
+        scheduler_module.build_scheduler = explode
+        with caplog.at_level(logging.ERROR):
+            assert serve_module_build(app, make_settings(db_path)) is None
+    finally:
+        scheduler_module.build_scheduler = original
+
+    assert app.state.scheduler is None
+    with TestClient(app) as client:
+        login(client)
+        assert client.get("/status").status_code == 200

@@ -61,6 +61,8 @@ __all__ = [
     "JobConfig",
     "LeagueConfig",
     "PathsConfig",
+    "ResearchConfig",
+    "SchedulerConfig",
     "Settings",
     "WebConfig",
     "load_settings",
@@ -209,6 +211,56 @@ class DraftConfig(_Frozen):
     #: an attempt only if it can finish inside what is left, so the tick is
     #: bounded by construction rather than by arithmetic in a comment.
     advice_budget_s: int = 60
+
+
+class ResearchConfig(_Frozen):
+    """How much live state the four in-season research jobs put in a prompt.
+
+    Sizes, not cadences: the cadences are the ``cron`` strings on each
+    ``[jobs.*]`` entry. Every value is defaulted so an older ``config.toml``
+    without a ``[research]`` section still loads.
+    """
+
+    #: How many free agents to ask ESPN for. ESPN returns them most-owned first,
+    #: so this is "how deep into the wire to look" — and in a six-team league the
+    #: interesting names are further down that list than a twelve-team guide
+    #: would suggest, because far more good players go unowned.
+    free_agent_size: int = 60
+    #: How many of them reach the prompt. Smaller than the pull on purpose: the
+    #: extra rows exist so the job can filter before spending tokens on them.
+    free_agent_shortlist: int = 40
+    #: Stored notes retrieved into an in-season prompt.
+    note_limit: int = 30
+    #: How long a note written by the news sweep stays true, in days. An injury
+    #: report is worth a great deal on Wednesday and is actively misleading three
+    #: weeks later, so these expire rather than waiting to be pruned by age.
+    note_shelf_life_days: int = 14
+    #: How many waiver claims to rank. Past about five she is reading a list
+    #: rather than making a decision.
+    waiver_claims: int = 5
+
+
+class SchedulerConfig(_Frozen):
+    """When hal-mary thinks it is, and how often it re-checks.
+
+    The phase decides which jobs are on the schedule at all — a board build every
+    morning before the draft, a lineup check every Sunday after it — so these
+    windows are what let one long-running process cross draft night without being
+    restarted by hand.
+    """
+
+    #: How long before the draft's start time counts as "the draft is happening".
+    #: Generous, because ESPN draft times slip and the draft page is worth having
+    #: in fast mode early rather than late.
+    draft_window_before_hours: float = 6.0
+    #: And after. Long enough to cover a sixteen-round draft that stalls.
+    draft_window_after_hours: float = 12.0
+    #: How long the season lasts from the draft. After it, the off-season: no
+    #: research jobs run, and nothing has to be turned off by hand.
+    season_days: int = 150
+    #: When to re-evaluate the phase. Daily, in the small hours, so the process
+    #: moves from pre-draft to in-season on its own rather than at a restart.
+    phase_cron: str = "20 4 * * *"
 
 
 class EspnConfig(_Frozen):
@@ -402,8 +454,9 @@ class Settings(_Frozen):
     league: LeagueConfig = LeagueConfig()
     actions: ActionsConfig = ActionsConfig()
     cowork: CoworkConfig = CoworkConfig()
-
     backup: BackupConfig = BackupConfig()
+    research: ResearchConfig = ResearchConfig()
+    scheduler: SchedulerConfig = SchedulerConfig()
     web: WebConfig
     jobs: dict[str, JobConfig]
 
@@ -619,8 +672,9 @@ def load_settings(
         league = LeagueConfig(**raw.get("league", {}))
         actions = ActionsConfig(**raw.get("actions", {}))
         cowork = CoworkConfig(**raw.get("cowork", {}))
-
         backup = BackupConfig(**raw.get("backup", {}))
+        research = ResearchConfig(**raw.get("research", {}))
+        scheduler = SchedulerConfig(**raw.get("scheduler", {}))
         web = WebConfig(**raw.get("web", {}))
     except Exception as exc:
         raise ConfigError(f"{path} is missing or has an invalid section: {exc}") from exc
@@ -642,8 +696,9 @@ def load_settings(
         league=league,
         actions=actions,
         cowork=cowork,
-
         backup=backup,
+        research=research,
+        scheduler=scheduler,
         web=web,
         jobs=jobs,
         espn_s2=values.get("ESPN_S2"),

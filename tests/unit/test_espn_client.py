@@ -693,6 +693,7 @@ def test_espns_own_flags_are_carried_through_as_they_are(settings, fake_espn):
     other.draft_picks()
     assert other.draft_status()["in_progress"] is None, "absent is not False"
 
+
 # --- current_week ----------------------------------------------------------
 
 
@@ -700,12 +701,21 @@ def test_current_week_reads_the_scoring_period(settings, fake_espn):
     """Nothing else in the schema knows which NFL week it is.
 
     The bye-week action producer asks "is this player on bye *right now*", and
-    the only honest answer comes from ESPN rather than from arithmetic over a
-    calendar the code would have to hardcode.
+    every in-season job asks "what week is it". The only honest answer comes
+    from ESPN rather than from arithmetic over a calendar the code would have to
+    hardcode; a wrong answer flags the wrong players — or nobody.
     """
     assert client_for(settings).current_week() == 1
 
 
 def test_current_week_without_cookies_raises_rather_than_guessing(anonymous_settings, no_network):
+    """No cookies at all is a configuration problem, not a week ESPN withheld."""
     with pytest.raises(EspnAuthError):
         client_for(anonymous_settings).current_week()
+
+
+def test_current_week_is_none_rather_than_a_guess_when_espn_will_not_say(settings, fake_espn):
+    """No week beats a guessed one. A calendar-derived week would silently move
+    the bye check onto the wrong players, which is worse than not making it."""
+    fake_espn.status = 401
+    assert client_for(settings).current_week() is None

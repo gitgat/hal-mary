@@ -548,3 +548,26 @@ input[type="text"], select {
 }
 
 #conversations .row a { color: var(--accent); }
+/* The advice feed. One card per thing to do, with the tick beside its heading
+   rather than under the body: she is scanning headings on a phone, and a button
+   she has to scroll past the reasoning to reach is a button she does not press. */
+.advice-item {
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--line);
+}
+.advice-item:first-child { border-top: 0; }
+.advice-item-head {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.advice-item-head h3 { margin: 0; flex: 1 1 auto; min-width: 0; }
+.advice-item-head form { margin: 0; flex: 0 0 auto; }
+.advice-item-head button { width: auto; min-height: 2.4rem; padding: 0 0.8rem; white-space: nowrap; }
+.advice-item-body p { margin: 0.5rem 0; }
+
+/* Done, not gone. A card she has actioned stays where it was so she can see
+   what she has already done — and undo a tick she did not mean. */
+.advice-item--done { opacity: 0.55; }
+.advice-item--done .advice-item-head h3 { text-decoration: line-through; }

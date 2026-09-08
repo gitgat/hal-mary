@@ -401,8 +401,8 @@ class EspnClient:
             "raw_json": json.dumps(raw, sort_keys=True),
         }
 
-    def current_week(self) -> int:
-        """Which NFL week ESPN thinks it is.
+    def current_week(self) -> int | None:
+        """Which NFL week ESPN thinks it is, or ``None`` if it will not say.
 
         Separate from :meth:`league_settings` on purpose. That method answers
         from the small ``mSettings`` response; this one needs the League the
@@ -413,8 +413,30 @@ class EspnClient:
         The library clamps its own ``current_week`` to the final scoring period,
         which is what makes it right in January: the season is over, the roster
         still exists, and "week 19" would put every player on a bye.
+
+        This is the number the whole bye-week check is measured against, so it is
+        read rather than derived. A week worked out from the calendar looks right
+        every year until the season it does not, and a bye warning against the
+        wrong week either flags healthy players or — much worse — flags nobody.
+        So ``None``, not a guess: every caller handles it, and the in-season jobs
+        fall back to the week the model established from the live NFL schedule.
+
+        A box with no cookies at all is the one case that still raises. That is a
+        configuration problem the status page has to report, not a week ESPN
+        declined to give, and every other read on this client raises for it too.
         """
-        return int(self._library().current_week)
+        self._require_config()
+        try:
+            week = getattr(self._library(), "current_week", None)
+        except EspnError:
+            # Expired cookies or an ESPN outage. The caller falls back; every
+            # other read on this client raises for the caller that needs it to.
+            return None
+        try:
+            number = int(week)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
 
     def _draft_slots(self) -> dict[int, int]:
         """team_id -> 1-based draft slot, from ``draftSettings.pickOrder``."""

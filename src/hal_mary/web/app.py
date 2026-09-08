@@ -40,6 +40,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import sqlite3
@@ -49,11 +50,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, FastAPI, Form, Request
+from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from markupsafe import Markup, escape
 from starlette.routing import Route
 
 from hal_mary import chat as chat_engine
@@ -74,6 +76,7 @@ __all__ = [
     "EventStreamResponse",
     "LoginLimiter",
     "MissingPasswordError",
+    "advice_body",
     "age_in_words",
     "create_app",
     "event_stream",
@@ -81,6 +84,11 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+#: The one piece of Markdown the advice bodies use. The jobs write ``**Do this
+#: by:** Wednesday`` because that is the phrase she has to see first on a phone,
+#: and rendering it literally as asterisks is worse than not bolding at all.
+_BOLD = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
 
 WEB_DIR = Path(__file__).resolve().parent
 TEMPLATE_DIR = WEB_DIR / "templates"
@@ -105,6 +113,33 @@ SCRYPT_DKLEN = 32
 
 #: PBKDF2 rounds for the fallback below.
 PBKDF2_ROUNDS = 600_000
+
+#: The kinds of advice, in the order she should read them, and what to call each
+#: group. Never the raw ``kind``: "lineup" and "waiver" are hal-mary's words for
+#: its own jobs, and the heading has to be the thing she is looking at.
+#:
+#: Lineup first because a starter on a bye scores zero and everything else on
+#: this page is smaller than that.
+ADVICE_KINDS = (
+    ("lineup", "Your lineup"),
+    ("waiver", "Waiver claims"),
+    ("draft", "Draft picks"),
+    ("recap", "How last week went"),
+)
+
+#: What each phase is called on the status page. The phase decides which jobs are
+#: scheduled at all, so a page that showed the internal name would be showing the
+#: one fact that explains why nothing has run.
+PHASE_LABELS = {
+    "pre_draft": "Before the draft",
+    "draft_live": "The draft is happening",
+    "in_season": "During the season",
+    "off_season": "The season is over",
+}
+
+#: How many advice cards the feed renders. Enough for the whole week, short
+#: enough that a phone does not render a season.
+ADVICE_LIMIT = 60
 
 #: The syncs whose age the status page reports, and what to call them.
 SYNC_KINDS = (("league", "League and rosters"), ("draft", "Draft picks"))
@@ -452,6 +487,7 @@ def create_app(
 
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
     templates.env.globals["age_in_words"] = age_in_words
+    templates.env.filters["advice_body"] = advice_body
 
     # The MCP endpoint is built before the app because its session manager needs
     # a lifespan, and FastAPI takes that at construction. It is a separate door
@@ -959,6 +995,73 @@ def create_app(
             context = _league_context(conn, settings)
         return page(request, "league.html", **context)
 
+    @private.get("/advice", response_class=HTMLResponse)
+    async def advice_page(request: Request) -> HTMLResponse:
+        """Everything hal-mary has told her to do, newest first, grouped."""
+        with database() as conn:
+            context = _advice_context(conn)
+        return page(request, "advice.html", **context)
+
+    @private.post("/advice/{advice_id}/done")
+    async def advice_done(request: Request, advice_id: int) -> Any:
+        """Tick a card off, or untick it.
+
+        A toggle rather than a one-way flag: a tap she did not mean is a tap she
+        has to be able to undo, and there is no other way back.
+        """
+        with database() as conn:
+            row = _one(conn, "SELECT * FROM advice WHERE id = ?", (advice_id,))
+            if row is None:
+                raise HTTPException(status_code=404, detail="No such piece of advice.")
+            done = 0 if row["done"] else 1
+            conn.execute("UPDATE advice SET done = ? WHERE id = ?", (done, advice_id))
+            conn.commit()
+            updated = _one(conn, "SELECT * FROM advice WHERE id = ?", (advice_id,))
+
+        if request.headers.get("hx-request"):
+            return templates.TemplateResponse(
+                request,
+                "partials/advice_item.html",
+                {"item": _advice_item(updated), "csrf_token": request.state.csrf_token},
+            )
+        return RedirectResponse("/advice", status_code=303)
+
+    @private.post("/jobs/{name}/run")
+    async def run_job_now(request: Request, name: str) -> Any:
+        """Run one job on demand, from a phone.
+
+        ``to_thread`` because a research job is minutes of blocking subprocess
+        and SQLite writes; on the event loop it would freeze every other request,
+        including the draft page's event stream. Its own connection, opened
+        inside that thread, for the same reason the scheduler's runs do.
+
+        A job that fails comes back as a fragment saying so. The only 404 is a
+        name nobody registered — everything the job itself does wrong is a
+        message, because this is the button somebody presses *because* something
+        is already broken.
+        """
+        from hal_mary.jobs.registry import UnknownJob
+        from hal_mary.jobs.registry import get as job_spec
+
+        try:
+            job_spec(name)
+        except UnknownJob as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        outcome = await asyncio.to_thread(_run_job_in_thread, settings, open_conn, name)
+        bus.publish(
+            "job",
+            {"job": name, "ok": outcome.ok, "summary": outcome.summary or outcome.error},
+        )
+
+        if request.headers.get("hx-request"):
+            return templates.TemplateResponse(
+                request,
+                "partials/job_result.html",
+                {"outcome": outcome, "when": age_in_words(db.utc_now())},
+            )
+        return RedirectResponse("/status", status_code=303)
+
     @private.post("/sync")
     async def sync_now(request: Request) -> Any:
         """Pull ESPN again, from the browser.
@@ -1257,6 +1360,7 @@ def _status_context(
             problems.append(f"The last {label.lower()} sync failed {age}: {row['error']}")
 
     return {
+        **_scheduler_context(conn, settings),
         "problems": problems,
         "espn": {"ok": auth_ok, "reason": auth_reason},
         "claude": {"ok": claude_ok, "reason": claude_reason},
@@ -1288,6 +1392,136 @@ def _status_context(
             {"label": label, "path": str(path), "ok": exists}
             for label, path, exists in settings.resolved_paths()
         ],
+    }
+
+
+def _run_job_in_thread(settings: Settings, open_conn: Any, name: str) -> Any:
+    """Run one job on a worker thread, with everything it needs built there.
+
+    Its own connection and its own runner, opened *inside* the thread that uses
+    them — the same rule the scheduler and the draft loop follow. See
+    ``docs/DECISIONS.md``.
+    """
+    from hal_mary.claude_runner import ClaudeRunner
+    from hal_mary.jobs.registry import run_job
+    from hal_mary.jobs.scheduler import default_espn_client
+
+    conn = open_conn()
+    try:
+        return run_job(
+            name, conn, settings, ClaudeRunner(settings, conn), default_espn_client(settings)
+        )
+    finally:
+        conn.close()
+
+
+def advice_body(text: str | None) -> Markup:
+    """An advice body as safe HTML: escaped first, then bold and paragraphs.
+
+    **Escape, then decorate — never the other way round.** These bodies carry
+    player names and reasons that came back from a model over the web, so they
+    are untrusted text. Two things survive, and deliberately nothing else:
+    ``**bold**``, because the jobs use it for the sentence she must not miss,
+    and a blank line, because a wall of text on a phone does not get read.
+    """
+    if not text:
+        return Markup("")
+    safe = str(escape(text))
+    safe = _BOLD.sub(lambda match: f"<strong>{match.group(1)}</strong>", safe)
+    paragraphs = [block.strip().replace("\n", "<br>") for block in safe.split("\n\n")]
+    return Markup("".join(f"<p>{block}</p>" for block in paragraphs if block))
+
+
+def _advice_item(row: sqlite3.Row) -> dict[str, Any]:
+    """One advice row as the template wants it."""
+    return {
+        "id": row["id"],
+        "kind": row["kind"],
+        "headline": row["headline"],
+        "body": row["body"],
+        "source_job": row["source_job"],
+        "created_at": row["created_at"],
+        "done": bool(row["done"]),
+    }
+
+
+def _advice_context(conn: sqlite3.Connection) -> dict[str, Any]:
+    """The advice feed: newest first, grouped by kind, done cards last.
+
+    Grouped rather than one long list because the kinds are answers to different
+    questions and have different deadlines — a waiver claim expires on Wednesday
+    and a lineup change expires at kickoff. Within a group it is strictly newest
+    first, which is what puts the bye-week alarm (written after the lineup card
+    that provoked it) at the top of the page.
+    """
+    rows = _all(conn, "SELECT * FROM advice ORDER BY created_at DESC, id DESC LIMIT ?",
+                (ADVICE_LIMIT,))
+    by_kind: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_kind.setdefault(row["kind"], []).append(_advice_item(row))
+
+    groups = []
+    for kind, label in ADVICE_KINDS:
+        items = by_kind.pop(kind, [])
+        if items:
+            groups.append({"kind": kind, "label": label, "items": items})
+    # Anything with a kind nobody has named yet still shows up, under its own
+    # code, rather than vanishing from the page.
+    for kind, items in sorted(by_kind.items()):
+        groups.append({"kind": kind, "label": kind, "items": items})
+
+    return {
+        "groups": groups,
+        "total": len(rows),
+        "outstanding": sum(1 for row in rows if not row["done"]),
+    }
+
+
+def _scheduler_context(conn: sqlite3.Connection, settings: Settings) -> dict[str, Any]:
+    """Which phase hal-mary thinks it is in, and what that means will run.
+
+    On the status page because "nothing has happened for a week" is almost always
+    this: the phase is wrong, or the job is disabled, or its cron never fires.
+    Reading it should not require reading config.toml over SSH.
+    """
+    from hal_mary.jobs import registry
+    from hal_mary.jobs.scheduler import current_phase
+
+    try:
+        phase = current_phase(conn, settings)
+    except Exception:
+        logger.exception("could not work out the current phase")
+        phase = "pre_draft"
+
+    rows = []
+    for name in registry.all_names():
+        spec = registry.get(name)
+        config = settings.jobs.get(name)
+        last = _one(
+            conn,
+            "SELECT started_at, finished_at, status, summary, error FROM job_runs "
+            "WHERE job = ? ORDER BY id DESC LIMIT 1",
+            (name,),
+        )
+        scheduled = bool(
+            config and config.enabled and config.cron and phase in spec.phases
+        )
+        rows.append(
+            {
+                "name": name,
+                "summary": spec.summary,
+                "cron": (config.cron if config else None),
+                "enabled": bool(config.enabled) if config else False,
+                "phases": ", ".join(sorted(spec.phases)),
+                "scheduled": scheduled,
+                "last": last,
+            }
+        )
+
+    return {
+        "phase": phase,
+        "phase_label": PHASE_LABELS.get(phase, phase),
+        "scheduled_jobs": rows,
     }
 
 

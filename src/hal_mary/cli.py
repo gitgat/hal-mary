@@ -173,32 +173,94 @@ def _cmd_espn_check(_args: argparse.Namespace) -> int:
     return EXIT_ESPN_FAILED
 
 
+def build_optional_client(settings: Any) -> Any:
+    """An ESPN client, or ``None`` when there is nothing to build one from.
+
+    ``None`` rather than an error: every in-season job says what it can still do
+    without ESPN, and hal-mary has to be runnable on a box with no cookies at
+    all. A job that genuinely cannot work without it says so itself.
+    """
+    if _missing_espn_config(settings):
+        return None
+    try:
+        return build_client(settings)
+    except Exception as exc:  # noqa: BLE001 - a client we cannot build is one we do without
+        print(f"warning: could not build an ESPN client ({exc}); running without it",
+              file=sys.stderr)
+        return None
+
+
 def _cmd_job(args: argparse.Namespace) -> int:
     """Run one job on demand.
 
     The board is researched the day before the draft and takes minutes, so it
     needs a way to be started by hand — and to be startable again when it fails
-    at six in the morning. The scheduler is Task 9; this is the command that
-    makes the board buildable today.
+    at six in the morning. In season it is the same command for the lineup check
+    on a Sunday when the scheduler was asleep.
+
+    A disabled job still runs from here. ``enabled = false`` keeps a job off the
+    schedule; it does not mean "refuse to run it", and the one job somebody turns
+    off is exactly the one they later need one more run of.
     """
-    from hal_mary.jobs.registry import JOBS, job_names
+    from hal_mary.jobs.registry import UnknownJob, run_job
 
     settings = load_cli_settings()
-    job = JOBS.get(args.name)
-    if job is None:
-        print(
-            f"unknown job {args.name!r}. This build knows: {job_names()}.",
-            file=sys.stderr,
+    conn = open_db(settings)
+    try:
+        outcome = run_job(
+            args.name,
+            conn,
+            settings,
+            build_runner(settings, conn),
+            build_optional_client(settings),
         )
+    except UnknownJob as exc:
+        print(str(exc), file=sys.stderr)
         return EXIT_NOT_CONFIGURED
 
-    conn = open_db(settings)
-    outcome = job(conn, settings, build_runner(settings, conn))
-
-    if not outcome.get("ok", True):
-        print(f"{args.name} failed: {outcome.get('error')}", file=sys.stderr)
+    if not outcome.ok:
+        print(f"{args.name} failed: {outcome.error}", file=sys.stderr)
         return EXIT_JOB_FAILED
-    print(f"{args.name}: {outcome.get('summary') or 'done'}")
+    print(f"{args.name}: {outcome.summary}")
+    return EXIT_OK
+
+
+def _cmd_jobs(_args: argparse.Namespace) -> int:
+    """List what this build knows how to run, when, and how it went last time.
+
+    The answer to "what does this thing actually do on its own?", which is the
+    question anybody has after finding a process that has been running for two
+    months.
+    """
+    from hal_mary.jobs.registry import all_names, get
+
+    settings = load_cli_settings()
+    conn = open_db(settings)
+
+    rows = []
+    for name in all_names():
+        spec = get(name)
+        config = settings.jobs.get(name)
+        cadence = (config.cron if config else None) or "on demand only"
+        if config is not None and not config.enabled:
+            cadence += " (turned off)"
+        last = conn.execute(
+            "SELECT started_at, status, summary, error FROM job_runs "
+            "WHERE job = ? ORDER BY id DESC LIMIT 1",
+            (name,),
+        ).fetchone()
+        if last is None:
+            outcome = "never run"
+        else:
+            detail = last["summary"] if last["status"] == "ok" else last["error"]
+            outcome = f"{last['started_at'][:16]} {last['status']}: {detail or ''}".rstrip()
+        rows.append((name, ", ".join(sorted(spec.phases)), cadence, outcome))
+
+    width = max((len(row[0]) for row in rows), default=4)
+    for name, phases, cadence, outcome in rows:
+        print(f"{name.ljust(width)}  {cadence}")
+        print(f"{' ' * width}  phase: {phases}")
+        print(f"{' ' * width}  last:  {outcome}")
     return EXIT_OK
 
 
@@ -321,7 +383,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hal-mary", description=DESCRIPTION, epilog=EPILOG)
     subcommands = parser.add_subparsers(
         dest="command",
-        metavar="{sync,espn-check,serve,job,cowork-config,doctor,migrate,backup}",
+        metavar="{sync,espn-check,serve,job,jobs,cowork-config,doctor,migrate,backup}",
     )
 
     sync = subcommands.add_parser("sync", help="pull league state and draft picks from ESPN")
@@ -342,8 +404,13 @@ def build_parser() -> argparse.ArgumentParser:
     serve.set_defaults(handler=_cmd_serve)
 
     job = subcommands.add_parser("job", help="run one job now, by name")
-    job.add_argument("name", help="which job to run, e.g. board_build")
+    job.add_argument("name", help="which job to run, e.g. lineup_check")
     job.set_defaults(handler=_cmd_job)
+
+    jobs = subcommands.add_parser(
+        "jobs", help="list the jobs this build knows, with their cadence and last run"
+    )
+    jobs.set_defaults(handler=_cmd_jobs)
 
     cowork_config = subcommands.add_parser(
         "cowork-config",

@@ -86,6 +86,31 @@ advice_budget_s = 60
 # BE = 7                       # bench
 # IR = 1                       # injured reserve; not drafted
 
+# How much live state the four in-season research jobs put in front of Claude.
+# Sizes only: when each job runs is the `cron` on its [jobs.*] entry below.
+#
+# free_agent_size is how deep into the waiver wire to look. ESPN returns free
+# agents most-owned first, and in a six-team league the interesting names are
+# much further down that list than a twelve-team guide would suggest, because
+# far more good players go unowned. The shortlist is what actually reaches the
+# prompt; the rest are pulled so a job can filter before spending tokens.
+[research]
+free_agent_size = 60
+free_agent_shortlist = 40
+note_limit = 30
+note_shelf_life_days = 14
+waiver_claims = 5
+
+# What phase hal-mary thinks it is in, which decides which jobs are scheduled at
+# all. The windows are generous on purpose: ESPN draft times slip, and having
+# the draft page in fast mode early costs a few polls while being late costs
+# picks. season_days ends the season without anybody turning anything off.
+[scheduler]
+draft_window_before_hours = 6
+draft_window_after_hours = 12
+season_days = 150
+phase_cron = "20 4 * * *"
+
 [espn]
 # Transport limits for the raw ESPN reads. Bounded by the pick clock above: a
 # read that outlives its poll interval silently stops the draft loop, and a
