@@ -107,8 +107,8 @@ def main() -> int:
             )
 
         line = (
-            f"{stamp:<10} {status:<5} {str(detail.get('inProgress')):<7} "
-            f"{str(detail.get('drafted')):<8} {len(picks):<6} {len(real):<5} {latest}"
+            f"{stamp:<10} {status:<5} {detail.get('inProgress')!s:<7} "
+            f"{detail.get('drafted')!s:<8} {len(picks):<6} {len(real):<5} {latest}"
         )
         if len(real) != last_made:
             line += "   <-- CHANGED"

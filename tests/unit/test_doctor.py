@@ -14,13 +14,21 @@ box that may have neither, and the suite blocks both.
 from __future__ import annotations
 
 import json
+import shutil
 import textwrap
 from pathlib import Path
 
 import pytest
 
-from hal_mary.config import load_settings
-from hal_mary.doctor import Check, render, run_checks, worst_exit_code
+from hal_mary.config import Settings, load_settings
+from hal_mary.doctor import (
+    Check,
+    claude_config_path,
+    render,
+    run_checks,
+    unit_path_for,
+    worst_exit_code,
+)
 
 MINIMAL_TOML = """
 [claude]
@@ -450,10 +458,47 @@ def test_a_broken_config_file_is_reported_rather_than_traced(monkeypatch, capsys
     assert "config.toml" in capsys.readouterr().err
 
 
+def _require_claude_code(settings: Settings) -> None:
+    """Skip unless this box has Claude Code installed and logged in.
+
+    A **precondition**, not a softened assertion, and the distinction is the
+    whole point of this helper. The assertion below tolerates one of doctor's
+    two Claude checks being fatal — the developer whose ``claude`` sits
+    somewhere the unit's PATH will not look. It does not tolerate both, because
+    both means there is no Claude Code here at all, and on a machine like that
+    this test has nothing to say: every other check it makes is about the
+    *repository*, and those it should still make.
+
+    So: skipped where the precondition is absent — a CI runner, by design and
+    forever — and unchanged everywhere it holds, which is this workstation and
+    the VM. Widening the tuple in the test instead would make it pass on the
+    runner and stop catching the thing it exists to catch: a fatal check that is
+    about our config rather than about somebody's laptop.
+
+    Asked with doctor's own resolution — the PATH the *unit* will have, then the
+    caller's — so the guard and the check cannot disagree about what "installed"
+    means, and with ``settings.claude.binary`` so neither can drift from
+    ``config.toml``.
+    """
+    home = Path.home()
+    binary = settings.claude.binary
+    if shutil.which(binary, path=unit_path_for(home)) is None and shutil.which(binary) is None:
+        pytest.skip(f"needs Claude Code: {binary!r} is on neither the unit PATH nor this shell's")
+    config = claude_config_path(home)
+    if not config.exists():
+        pytest.skip(f"needs Claude Code logged in as this user: {config} does not exist")
+
+
 def test_the_deployment_config_is_a_healthy_box(tmp_path):
     """The repo's own checkout, with a full .env, has nothing fatal wrong with
-    it except whatever the developer's own machine lacks."""
+    it except whatever the developer's own machine lacks.
+
+    Skipped, never weakened, where Claude Code is absent — see
+    :func:`_require_claude_code` for why those are different things.
+    """
     settings = load_settings(env={**FULL_ENV, "DB_PATH": str(tmp_path / "hal.db")})
+    _require_claude_code(settings)
+
     fatal = [c for c in run_checks(settings) if not c.ok and c.fatal]
 
     assert [c.name for c in fatal] in ([], ["claude binary"], ["claude login"]), textwrap.indent(

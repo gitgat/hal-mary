@@ -53,6 +53,17 @@ gh pr create --fill                      # body: what changed, how verified, tas
 gh pr merge --squash --delete-branch
 ```
 
+`.github/workflows/ci.yml` runs `uv run pytest` and `uv run ruff check src tests scripts` on every
+pull request and every push to `main`, so "`main` stays green" no longer depends on someone
+remembering. It runs with no `.env` and no secrets — a test that needs one is a broken test.
+
+A test that asks about the **box** rather than about this code guards its precondition and skips,
+naming what is missing in the skip reason: `_require_claude_code` in `tests/unit/test_doctor.py`
+and `_why_systemd_verify_cannot_run` in `tests/unit/test_deploy.py`. Skipping for an absent
+precondition is honest — the test still runs, and still bites, on every box that has it. Loosening
+an assertion so it passes everywhere is not, and this repo has spent a day finding tests that
+quietly checked nothing. Do the first; never the second.
+
 Commit messages: imperative subject, body explaining *why*. Every commit made by an agent carries
 the `Co-Authored-By` and `Claude-Session` trailers.
 
