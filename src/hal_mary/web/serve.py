@@ -129,11 +129,28 @@ def app_from_env() -> Any:
     return app
 
 
-def run_server(*, host: str, port: int, reload: bool) -> None:
-    """Hand off to uvicorn. Separated so the CLI is testable without a server."""
+def run_server(*, host: str, port: int, reload: bool, shutdown_timeout_s: int) -> None:
+    """Hand off to uvicorn. Separated so the CLI is testable without a server.
+
+    ``timeout_graceful_shutdown`` is not optional politeness. uvicorn waits for
+    every open connection **before** it runs lifespan shutdown, and lifespan
+    shutdown is where :func:`start_draft_loop` registered ``thread.stop``. The
+    draft page holds ``/events`` open for as long as a phone is looking at it,
+    and that stream never ends on its own — so with no bound, ``SIGTERM`` to a
+    server with one page open never completes, and the draft loop carries on
+    polling ESPN. That is not a corner case: it is the state on draft night, and
+    it is how a deploy leaves a polling thread behind.
+    """
     import uvicorn
 
-    uvicorn.run(APP_FACTORY, factory=True, host=host, port=port, reload=reload)
+    uvicorn.run(
+        APP_FACTORY,
+        factory=True,
+        host=host,
+        port=port,
+        reload=reload,
+        timeout_graceful_shutdown=shutdown_timeout_s,
+    )
 
 
 def serve(settings: Any, *, reload: bool = False) -> int:
@@ -150,5 +167,10 @@ def serve(settings: Any, *, reload: bool = False) -> int:
         print(f"  Not configured yet:  {', '.join(missing)} (see the status page)")
     print("  Stop with Ctrl-C.")
 
-    run_server(host=host, port=port, reload=reload)
+    run_server(
+        host=host,
+        port=port,
+        reload=reload,
+        shutdown_timeout_s=settings.web.shutdown_timeout_s,
+    )
     return 0

@@ -863,6 +863,16 @@ cadence it would have been **five minutes**, and the deploy unit stops the servi
 every release — so each deploy could leave a thread polling ESPN behind, accumulating, every one of
 them behaving perfectly on its own. That turns over-polling into hammering, invisibly.
 
+**And the wait has to be bounded, or none of that runs.** uvicorn waits for every open connection
+*before* it runs lifespan shutdown, and lifespan shutdown is where `start_draft_loop` registered
+`thread.stop`. The draft page holds `/events` open for as long as a phone is looking at it and that
+stream never ends on its own — so with no `timeout_graceful_shutdown`, `SIGTERM` to a server with one
+page open **never completes**, and the loop polls on for the life of the process. Measured: still
+alive 30 seconds after `SIGTERM`, log stuck on "Waiting for connections to close". That is not a
+corner case, it is the state on draft night. `web.shutdown_timeout_s` (5) is passed through
+`run_server`, and the measurement that matters is taken **with a client attached** — without one the
+bug is invisible, which is how it survived the first round of this work.
+
 Measured on the box, 2026-09-08. Before: 6 draft syncs in 25 seconds (the five-second loop), and
 `SIGTERM` to the server process took **0.90s** — bounded by whatever was left of a five-second wait,
 so up to 5s. After: 1 draft sync in 30 seconds, and `SIGTERM` — to the `uv` wrapper, which is what a
@@ -870,3 +880,33 @@ plain `kill` on the job hits — had both it and the server gone in **0.22s**, w
 the 300-second idle wait. Without the threadsafe wake that same shutdown would have waited out the
 idle interval; `test_a_real_loop_thread_stops_well_inside_an_idle_interval` is what fails if it is
 ever removed.
+
+## 2026-09-08 — A hand-entered pick is numbered from the picks, never from the rowid
+
+**Decision.** `record_manual_pick` numbers a pick `store.next_overall_pick(conn)` — one past the
+highest pick that names somebody — and writes it with an upsert. `DraftLoop._update_phase` takes
+`store.picks_made(conn)`, a **count** of picks that name somebody, rather than the highest number.
+
+**Why.** `draft_picks.overall_pick` is an INTEGER PRIMARY KEY, so the old NULL insert took its number
+from SQLite's rowid: one past the highest *row*. Any database that ran a sync before `pick_is_made`
+existed at the client boundary still holds ESPN's 96 pre-populated placeholder rows, and there the
+first hand-entered pick of the draft was numbered **97**. `next_overall_pick` then answered 98,
+`draft_phase(97, 96)` answered `done`, and the draft loop broke out of `run_forever` and never polled
+again.
+
+The failure was total and silent, and every part of the page conspired to hide it: `loop_error` is
+`None` for a thread that exited cleanly, `_watching` renders nothing in the `done` phase, and
+`DraftLoopThread._ask` will not forward "The draft has started" to a dead thread — so there was no
+in-app recovery either. The trigger is the *first* pick entered by hand, which is exactly what
+happens on the night ESPN goes down: the contingency path ended the loop.
+
+**Two locks, deliberately.** The numbering is the cause and is fixed at the source. Counting picks
+rather than reading the highest number removes the whole class: no stray row number, from any future
+path, can make a draft that has barely started look finished. `store.picks_made` and
+`store.next_overall_pick` now say in their docstrings which question each answers — "how far along is
+the draft" and "which slot is next" — because they are only the same number while every pick is
+numbered consecutively from one, and this is what it cost to learn that.
+
+The upsert is not incidental: the slot the pick lands on may be one of the placeholder rows. It can
+only ever be a placeholder or an empty slot, because `next_overall_pick` is one past the last pick
+that names somebody, so a real pick is never overwritten.

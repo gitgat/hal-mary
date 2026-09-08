@@ -489,7 +489,13 @@ class FakeEspnClient:
             "in_progress": self.in_progress,
             "drafted": self.drafted,
             "slots": self.slots,
-            "picks_made": len(self.picks),
+            # The same rule the real client applies: a slot is a pick only once
+            # a real player is attached to it. A test that hands this fake
+            # ESPN's pre-populated placeholder rows must get the same answer
+            # from here that ESPN's own board would give — zero.
+            "picks_made": sum(
+                1 for pick in self.picks if (pick.get("player_id") or 0) > 0 or pick.get("player_name")
+            ),
         }
 
     def draft_schedule(self) -> list[dict[str, Any]]:

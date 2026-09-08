@@ -146,6 +146,13 @@ empty for exactly that reason.
   and no positive player id — counting one puts the next pick at 97, which reads as "the draft is
   over" before it has begun. Research-built board ids start at **-1001** so a `-1` can never collide
   with a real board row.
+- **A hand-entered pick is numbered from the picks, never from the rowid.**
+  `draft_picks.overall_pick` is an INTEGER PRIMARY KEY, so a NULL insert takes one past the highest
+  *row number* — and any database that synced before `pick_is_made` existed still holds ESPN's 96
+  placeholder rows, which made the first pick of the night **97**. `draft_phase(97, 96)` is `done`:
+  the loop stopped for good, on the one night the manual path exists for, with nothing on the page
+  saying so. `record_manual_pick` uses `store.next_overall_pick` and upserts, and the cadence counts
+  picks (`store.picks_made`) rather than reading the highest number. Both locks matter; keep both.
 - **This league's flex slot is spelled `RB/WR/TE`, not `FLEX`.** Prose that explains "a FLEX slot"
   defines a term that appears nowhere on Caroline's screen.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export
@@ -182,6 +189,12 @@ empty for exactly that reason.
   is protected by construction. Rendered forms get the token from `page()` / the fragment renderer;
   a test that posts to a private route goes through `post()` in `tests/unit/test_web.py`, and one
   that posts without a token is testing the 403. See `docs/DECISIONS.md`.
+- **`web.shutdown_timeout_s` is what makes `SIGTERM` work at all.** uvicorn waits for open
+  connections *before* running lifespan shutdown, which is where the draft loop is told to stop —
+  and `/events` never ends while a phone has the page open. Unbounded, a `SIGTERM` to a server with
+  one page open never completes and the loop keeps polling; measured still alive at 30 seconds.
+  `run_server` passes it as `timeout_graceful_shutdown`. Verify shutdown **with a client attached**;
+  without one the bug does not appear.
 - **The draft loop runs on its own thread with its own connection.** `DraftLoopThread` opens the
   connection *inside* the thread — `db.connect` leaves `check_same_thread` on — and
   `web.serve.app_from_env` starts it with the app's own `EventBus`. A loop that will not start is

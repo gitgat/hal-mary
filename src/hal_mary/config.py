@@ -254,6 +254,11 @@ class WebConfig(_Frozen):
     #: password a few thousand times a second.
     login_max_attempts: int = 5
     login_lockout_seconds: float = 60.0
+    #: Seconds uvicorn may spend waiting for open connections on the way down.
+    #: Bounded because ``/events`` never ends on its own and lifespan shutdown —
+    #: which stops the draft loop — runs only once uvicorn stops waiting.
+    #: Defaulted so an older ``config.toml`` without it still loads.
+    shutdown_timeout_s: int = 5
 
 
 class JobConfig(_Frozen):

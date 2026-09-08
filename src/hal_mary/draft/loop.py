@@ -349,9 +349,23 @@ def record_manual_pick(
     tap on the button is one pick told twice, and the second one would otherwise
     come back unmatched on every poll for the rest of the draft.
 
-    ``overall_pick`` is usually left out: SQLite assigns the next number, because
-    ``draft_picks.overall_pick`` is an INTEGER PRIMARY KEY and a NULL insert
-    takes one past the highest.
+    ``overall_pick`` is usually left out, and is then :func:`store.next_overall_pick`
+    — one past the highest pick that actually names somebody.
+
+    **Never the rowid.** ``draft_picks.overall_pick`` is an INTEGER PRIMARY KEY,
+    so a NULL insert takes one past the highest *row number*, and any database
+    that ran a sync before ``pick_is_made`` existed still holds ESPN's 96
+    pre-populated placeholder rows. There the first hand-entered pick of the
+    draft was numbered **97**, which every end-of-draft check in the project
+    reads as "the draft is over": the loop moved to the ``done`` phase, stopped
+    polling for good, and nothing on the page said so — on the night ESPN is
+    down and picks are going in by hand, which is the one night this path
+    exists for. The pick number has to come from the picks.
+
+    The write is an upsert because the slot it lands on may be one of those
+    placeholder rows. It can only ever be a placeholder or an empty slot:
+    ``next_overall_pick`` is one past the last pick that names somebody, so a
+    real pick is never overwritten.
     """
     name = (player_name or "").strip()
     if not name:
@@ -362,16 +376,21 @@ def record_manual_pick(
         log.info("manual pick for %s ignored: the board already has him gone", name)
         return {"recorded": False, "reason": "already drafted", "player_name": name}
 
+    assigned = overall_pick if overall_pick is not None else store.next_overall_pick(conn)
     with db.transaction(conn):
-        cur = conn.execute(
+        conn.execute(
             """
             INSERT INTO draft_picks
                 (overall_pick, team_id, player_id, player_name, seen_at)
             VALUES (?, ?, NULL, ?, ?)
+            ON CONFLICT (overall_pick) DO UPDATE SET
+                team_id     = excluded.team_id,
+                player_id   = excluded.player_id,
+                player_name = excluded.player_name,
+                seen_at     = excluded.seen_at
             """,
-            (overall_pick, team_id, name, db.utc_now()),
+            (assigned, team_id, name, db.utc_now()),
         )
-        assigned = overall_pick if overall_pick is not None else cur.lastrowid
 
     pick = {
         "overall_pick": assigned,
@@ -504,6 +523,20 @@ class DraftLoop:
         self._forced_live_at = None
         return False
 
+    def _expire_override(self) -> None:
+        """Let "The draft has started" lapse on a tick that never reached ESPN.
+
+        Only ever falls back to idle, which is safe by construction: the
+        override is cleared the moment the board itself justifies live or done,
+        so a live override still standing means the board has never said
+        anything else.
+        """
+        if self._forced_live_at is None or self._forced_live():
+            return
+        self._enter_phase(
+            PHASE_IDLE, reason="the override expired and ESPN is not answering"
+        )
+
     def _note_flag_disagreement(self, status: dict[str, Any], picks_made: int) -> None:
         """Say so, once, when ESPN's own flag disagrees with ESPN's own board.
 
@@ -527,8 +560,17 @@ class DraftLoop:
         )
 
     def _update_phase(self, picks_made: int) -> str:
-        """Recompute the cadence from what this tick already read."""
+        """Recompute the cadence from what this tick already read.
+
+        ``picks_made`` is a **count**, never the highest pick number. The two
+        differ exactly when a row is numbered oddly, and one such row —
+        a hand-entered pick that took a rowid past ESPN's placeholder slots —
+        used to make a draft that had barely started read as finished. A count
+        cannot exceed the number of slots unless there really are that many
+        picks.
+        """
         status = self._draft_status()
+        picks_made = max(picks_made, (status or {}).get("picks_made") or 0)
         total = (status or {}).get("slots") or self._total_picks
         phase = draft_phase(picks_made=picks_made, total_slots=total)
         reason = f"{picks_made} of {total} slots on ESPN's board have a player in them"
@@ -656,6 +698,15 @@ class DraftLoop:
             # that redraws with the same content every five seconds.
             log.warning("draft sync failed (%s); the loop continues", exc)
             result["error"] = str(exc)
+            # The phase is not recomputed on a tick that never reached ESPN —
+            # there is nothing fresh to recompute it from. The override is the
+            # exception: it is bounded by the clock, not by the board, and
+            # leaving it to lapse only on a *successful* sync means pressing
+            # "The draft has started" with expired cookies hammers a failing
+            # endpoint every five seconds for the life of the process.
+            self._expire_override()
+            result["phase"] = self._phase
+            result["poll_seconds"] = self.poll_interval
             return result
 
         try:
@@ -674,7 +725,7 @@ class DraftLoop:
         # whatever the advisor did: the cadence is what decides whether there is
         # a next tick at all, and an advisor that raised must not leave the loop
         # polling a finished draft every five seconds forever.
-        result["phase"] = self._update_phase(store.next_overall_pick(self.conn) - 1)
+        result["phase"] = self._update_phase(store.picks_made(self.conn))
         result["poll_seconds"] = self.poll_interval
         return result
 

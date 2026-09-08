@@ -769,3 +769,108 @@ async def test_the_loop_reaches_live_with_no_button_press(tmp_path):
     await loop.run_once()
 
     assert loop.phase == PHASE_LIVE, "nobody pressed anything"
+
+
+# --- the placeholder rows that used to end the draft --------------------------
+#
+# Before `pick_is_made` existed at the client boundary, a sync wrote all 96 of
+# ESPN's pre-populated slots into draft_picks. Those rows are still on any
+# database that ran that code, and `overall_pick` is an INTEGER PRIMARY KEY — so
+# a NULL insert took the next *rowid*, which is 97, not the next pick.
+
+
+def seed_placeholder_picks(conn, count: int = 96) -> None:
+    """ESPN's pre-populated board, as an old sync wrote it: no player, no name."""
+    conn.executemany(
+        "INSERT INTO draft_picks (overall_pick, round_num, round_pick, team_id,"
+        " player_id, player_name, seen_at)"
+        " VALUES (?, ?, ?, ?, -1, NULL, '2026-09-07T00:00:00+00:00')",
+        [
+            (n, (n - 1) // 6 + 1, (n - 1) % 6 + 1, ((n - 1) % 6) + 1)
+            for n in range(1, count + 1)
+        ],
+    )
+    conn.commit()
+
+
+async def test_a_hand_entered_pick_is_numbered_from_the_picks_not_the_rowid(tmp_path):
+    """The first pick of the draft is pick 1, whatever is left in the table."""
+    conn, loop, _, _, _ = loop_ready(tmp_path)
+    seed_placeholder_picks(conn)
+
+    outcome = loop.record_manual_pick(player_name="Ja'Marr Chase")
+
+    assert outcome["overall_pick"] == 1, "97 would read as a finished draft"
+    assert store.next_overall_pick(conn) == 2
+
+
+async def test_a_hand_entered_pick_does_not_end_the_draft(tmp_path):
+    """The draft-night killer: ESPN down, first pick by hand, loop stops for good.
+
+    ``draft_phase(97, 96)`` is ``done``, ``run_forever`` breaks, and nothing on
+    the page says so — ``loop_error`` is ``None`` for a thread that exited
+    cleanly and the cadence line renders nothing once the draft is over.
+    """
+    conn, loop, _, _, _ = loop_ready(tmp_path)
+    seed_placeholder_picks(conn)
+
+    loop.record_manual_pick(player_name="Ja'Marr Chase")
+    await loop.run_once()
+
+    assert loop.phase == PHASE_LIVE
+    assert loop.poll_interval == 5
+
+
+async def test_hand_entered_picks_keep_counting_up_from_espns_last(tmp_path):
+    """ESPN stops updating mid-draft and she carries on by hand."""
+    conn, loop, _, _, _ = loop_ready(tmp_path, picks=picks_through(3))
+    seed_placeholder_picks(conn)
+
+    await loop.run_once()
+    first = loop.record_manual_pick(player_name="Saquon Barkley")
+    second = loop.record_manual_pick(player_name="Brock Bowers")
+
+    assert [first["overall_pick"], second["overall_pick"]] == [4, 5]
+
+
+async def test_the_phase_counts_the_picks_rather_than_the_highest_number(tmp_path):
+    """Defence in depth: however a pick got numbered, ninety-six is ninety-six.
+
+    The numbering fix above removes the cause. This removes the whole class:
+    ``picks_made`` is how many picks there are, so no stray row number can make
+    a draft that has not happened look finished.
+    """
+    conn, loop, client, _, _ = loop_ready(tmp_path)
+    client.picks = []
+    conn.execute(
+        "INSERT INTO draft_picks (overall_pick, player_name, seen_at)"
+        " VALUES (500, 'Somebody', '2026-09-07T00:00:00+00:00')"
+    )
+    conn.commit()
+
+    await loop.run_once()
+
+    assert loop.phase == PHASE_LIVE, "one pick out of 96, whatever its number"
+
+
+async def test_the_override_expires_even_while_espn_is_failing(tmp_path):
+    """A tick that never reaches ESPN still lets the override lapse.
+
+    Otherwise pressing the button with expired cookies retries a failing
+    endpoint every five seconds for as long as the process lives — the phase is
+    only recomputed after a successful sync.
+    """
+    _, loop, client, _, _ = loop_ready(tmp_path)
+    clock = FakeClock()
+    loop._clock = clock
+
+    loop.draft_started()
+    assert loop.poll_interval == 5
+
+    clock.advance(loop.settings.draft.live_override_seconds + 1)
+    client.fail_next = EspnUnavailable("ESPN rejected the cookies")
+    result = await loop.run_once()
+
+    assert result["error"] is not None, "the sync did fail"
+    assert loop.phase == PHASE_IDLE
+    assert loop.poll_interval == 300

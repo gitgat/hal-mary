@@ -111,6 +111,14 @@ login_lockout_seconds = 60.0       # and for how long
 draft_stale_seconds = 30
 live_poll_ms = 10000
 
+# How long uvicorn may wait for open connections before it stops the server
+# anyway. It has to be bounded and it has to be short: uvicorn waits for
+# connections *before* running lifespan shutdown, which is where the draft loop
+# is told to stop — and the draft page holds /events open for as long as a phone
+# has it open. Without this, a phone on the sofa means SIGTERM never finishes,
+# the loop keeps polling ESPN, and a deploy leaves it behind.
+shutdown_timeout_s = 5
+
 [jobs.board_build]
 model = "opus"
 tools = ["WebSearch", "WebFetch"]

@@ -1232,3 +1232,40 @@ def test_status_is_quiet_about_paths_that_are_all_there(db_path: Path):
 
     assert "does not exist" not in text
     assert "no standing-memory" not in text.lower()
+
+
+def test_serve_bounds_the_graceful_shutdown(monkeypatch, db_path: Path):
+    """uvicorn waits for open connections *before* running lifespan shutdown.
+
+    The draft page holds ``/events`` open forever, and ``thread.stop`` is
+    registered on lifespan shutdown — so with no bound, a phone with the page
+    open means the server never shuts down and the draft loop keeps polling ESPN
+    for as long as the process is alive. That is the state on draft night.
+    """
+    from hal_mary import cli
+    from hal_mary.web import serve as serve_module
+
+    started: dict[str, object] = {}
+    settings = make_settings(db_path)
+    monkeypatch.setattr(cli, "load_cli_settings", lambda: settings)
+    monkeypatch.setattr(serve_module, "outbound_ip", lambda: "192.168.1.184")
+    monkeypatch.setattr(serve_module, "run_server", lambda **kwargs: started.update(kwargs) or None)
+
+    assert cli.main(["serve"]) == cli.EXIT_OK
+
+    assert started["shutdown_timeout_s"] == settings.web.shutdown_timeout_s
+    assert 0 < settings.web.shutdown_timeout_s <= 30
+
+
+def test_run_server_hands_the_bound_to_uvicorn(monkeypatch, db_path: Path):
+    """And it reaches uvicorn under the name uvicorn actually reads."""
+    import uvicorn
+
+    from hal_mary.web import serve as serve_module
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: seen.update(kwargs))
+
+    serve_module.run_server(host="0.0.0.0", port=8080, reload=False, shutdown_timeout_s=7)
+
+    assert seen["timeout_graceful_shutdown"] == 7
