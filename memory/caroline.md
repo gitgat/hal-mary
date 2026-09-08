@@ -28,4 +28,9 @@ time; hal-mary reads it fresh on every Claude call and never writes to it.
   flip" is a useful thing to hear.
 - Short. A headline she can read on the pick clock, detail underneath if she wants
   it.
-- She makes every click in ESPN herself. hal-mary advises; it never acts.
+- She makes every click in ESPN herself during the draft. hal-mary advises there and
+  never acts.
+- In season, hal-mary decides a lineup or waiver change and Claude Cowork's browser
+  performs it in ESPN for her. hal-mary still never writes to ESPN itself, and it
+  never hands over a decision — Cowork is given a named player and a named slot and
+  nothing to choose between.

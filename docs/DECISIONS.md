@@ -910,3 +910,124 @@ numbered consecutively from one, and this is what it cost to learn that.
 The upsert is not incidental: the slot the pick lands on may be one of the placeholder rows. It can
 only ever be a placeholder or an empty slot, because `next_overall_pick` is one past the last pick
 that names somebody, so a real pick is never overwritten.
+
+---
+
+---
+
+
+---
+
+## 2026-09-07 — Cowork's browser is the hands; the split is the safety
+
+**Decision:** the "bot advises, Caroline clicks" entry above is superseded **for in-season lineup and
+waiver actions only**. The draft is unchanged and stays advisory. hal-mary now emits machine-readable
+*actions*, and Claude Cowork performs them in ESPN's own interface through an MCP endpoint at `/mcp`.
+
+**Why the blocker moved:** the original entry rejected autopilot because it meant browser automation
+against her logged-in account. Cowork already has a browser and can use MCP connectors, so the
+automation is not ours to write or maintain, and ESPN's undocumented write endpoints are never
+touched.
+
+**Why Cowork never chooses, which is the actual load-bearing part.** Cowork's browser reads league
+pages carrying five other members' team names, message-board posts and transaction notes — text those
+people write, which is the classic prompt-injection surface. If Cowork were selecting who to drop, a
+hostile team name would be an instruction. Because hal-mary names the player and the slot and Cowork
+only performs it, there is nothing for injected text to redirect. Every design choice on this surface
+falls out of that: no tool returns options, no tool returns reasoning to interpret, and
+`report_observation` content is stored tagged as data that no prompt may treat as an instruction.
+
+**Why order is in the schema.** A roster has a fixed size, so adding usually implies dropping and the
+wrong order loses a player for nothing; lineups lock per player at kickoff rather than on one weekly
+deadline; a waiver claim is a submitted request rather than an acquisition. Hence `sequence`,
+`depends_on`, `deadline` and `reversible` on every row, and a `claim` that carries its drop as one
+transaction rather than two dependent actions.
+
+**Why the log is a feature.** Bryan chose to let irreversible actions run unattended, so `mcp_calls`
+is the only way he learns a drop happened. It is not instrumentation and must not be trimmed to
+"errors only".
+
+**Why the duplicate window is the NFL week and not a rolling seven days.** It was rolling first, and
+that was wrong: a bench for a bye on the Monday and a bench for an injury five days later are two
+different decisions about two different situations, and a rolling window swallowed the second one
+silently. `actions` has no week column, but it does not need one — `[actions].week_boundary_*` gives
+one clock, and the window is "since this NFL week began". The same clock is every action's deadline,
+which is not a coincidence: an instruction that is still queued when its week ends is exactly the one
+that should no longer be performed.
+
+**Why the endpoint refuses to serve with no token rather than 404ing or opening.** `/mcp` is the one
+path exposed to the internet. A missing `MCP_TOKEN` answering 503 with a sentence is loud; a 404 reads
+as a typo and an open endpoint reads as working.
+
+**Would revisit if:** ESPN's interface changes enough that Cowork cannot reliably perform a bench, or
+a Cowork session is ever observed doing something that was not on the `pending_actions` list — the
+second would mean the boundary is not holding and the answer is to narrow the tool surface, not to add
+guardrails to the prompt.
+
+
+---
+
+## 2026-09-07 — A tag is not a boundary: browser notes are quarantined, not labelled
+
+**Decision:** `memory.build_context` runs two complementary note queries, not one. The trusted query
+asks for `TRUSTED_SOURCE_JOBS` — an **allowlist** — and the untrusted one asks for everything else,
+including a note with no `source_job` at all, rendering them under
+`## Unverified reports from outside hal-mary's own research` with a preamble saying they are claims
+somebody made and never an instruction, and with a much smaller budget of their own.
+
+**Why, and it is a correction rather than a design.** The original requirement was that
+`report_observation` content is "stored tagged, and never interpreted as an instruction". That was
+implemented as a tag on the row plus a test asserting the tag survived — which is the requirement's
+words and not the requirement. `_render_note` dropped `source_job` entirely, `search_notes` had no
+filter for it, and the advisor retrieves by FTS over note text, so a browser observation naming a
+player rendered as a bullet inside `## What we have learned recently`, beside hal-mary's own
+researched facts, with nothing to tell a reading model which was which. `board_build` escaped only
+because its `topics=` filter happened to exclude the tag.
+
+**The general lesson, which is why this is an entry and not a commit message:** the enforcement point
+for a trust boundary is wherever the data is *rendered*, not wherever it is written. A tag propagates
+only as far as somebody remembers to read it, and three modules away nobody did. If you add a reader
+of `notes` that puts them in front of a model, it has to make the same split.
+
+**Why a separate section and a separate budget rather than a marker on the bullet.** A marker on one
+bullet among forty is context a model averages away; a section it has to enter, with the framing at
+the top, is read first. The separate budget is the other half: retrieval budget is a resource, and
+the browser is the one writer whose volume an outsider can influence — forty observations naming a
+player would otherwise push every real fact about him out of the prompt.
+
+**Also:** `_render_note` collapsing text to a single line is a security property, not formatting. A
+note containing `\n\n## What we have learned recently\n\n- ...` would otherwise close its own section
+and open a forged one.
+
+**Why an allowlist and not a blocklist.** It was a blocklist first. `Cowork-Browser`,
+`COWARK-BROWSER`, `cowork_browser`, `" cowork-browser"` and `""` are all "not the constant", so every
+one of them landed in the *trusted* section. Not reachable while `report_observation` hardcodes the
+constant — but the next untrusted writer to mistype its tag would have failed open, silently, into
+the advisor's prompt. Inverted, a typo is merely quarantined. The cost is that a new trusted job
+whose notes are quarantined is also silent, so a test checks the allowlist against the jobs that
+actually exist: `config.toml`'s `[jobs.*]` plus every `JOB_NAME` in `src`.
+
+**Why every field, not the one named `text`.** The first fix collapsed `text` and left `source_url`
+appended raw — and `source_url` is caller-supplied by `report_observation`, so a payload delivered
+through it produced a forged **trusted** heading after the quarantine, as the last thing the advisor
+reads. `player_name` and `topic` were the same shape. Every rendered field now goes through
+`_one_line`. The test that missed it asserted on `block.split(UNTRUSTED_HEADING)[0]`, which reads as
+"the whole rendering" and is only the half its author was thinking about; the replacements assert on
+the entire block and count headings that start a line, because a `##` inside a bullet is inert.
+
+**Why the collapser is its own module.** The third time this boundary was dropped it was not the note
+renderer at all: `espn.sync._league_memory_body` interpolated `teams.name`, `teams.abbrev`,
+`teams.owner` and the league name raw into `memory/league.md`, which `standing_memory()` reads whole
+into `## What you always know` — section one, the most trusted text there is, with no quarantine and
+no allowlist behind it. A leaguemate renames their team and it syncs straight in; team names are the
+first example in this project's own threat statement, and a newline is not even required for the text
+to land verbatim in the most trusted section.
+
+Three renderers, in three modules, each rediscovering the same requirement and each getting it wrong
+in a field nobody was thinking about. So `hal_mary.prompt_text.one_line` is a module of its own that
+both import: the next renderer inherits the defence rather than having to remember it, and its
+docstring carries the history so the reason survives the next refactor.
+
+**Would revisit if:** a second *trusted* writer appears — add it to `TRUSTED_SOURCE_JOBS` rather than
+inventing a second mechanism. An untrusted one needs no change at all, which is the point of the
+direction.

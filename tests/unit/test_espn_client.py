@@ -692,3 +692,20 @@ def test_espns_own_flags_are_carried_through_as_they_are(settings, fake_espn):
     other = client_for(settings, transport=draft_transport(payload))
     other.draft_picks()
     assert other.draft_status()["in_progress"] is None, "absent is not False"
+
+# --- current_week ----------------------------------------------------------
+
+
+def test_current_week_reads_the_scoring_period(settings, fake_espn):
+    """Nothing else in the schema knows which NFL week it is.
+
+    The bye-week action producer asks "is this player on bye *right now*", and
+    the only honest answer comes from ESPN rather than from arithmetic over a
+    calendar the code would have to hardcode.
+    """
+    assert client_for(settings).current_week() == 1
+
+
+def test_current_week_without_cookies_raises_rather_than_guessing(anonymous_settings, no_network):
+    with pytest.raises(EspnAuthError):
+        client_for(anonymous_settings).current_week()
