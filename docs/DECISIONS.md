@@ -1005,7 +1005,22 @@ one of them landed in the *trusted* section. Not reachable while `report_observa
 constant — but the next untrusted writer to mistype its tag would have failed open, silently, into
 the advisor's prompt. Inverted, a typo is merely quarantined. The cost is that a new trusted job
 whose notes are quarantined is also silent, so a test checks the allowlist against the jobs that
-actually exist: `config.toml`'s `[jobs.*]` plus every `JOB_NAME` in `src`.
+actually exist: `config.toml`'s `[jobs.*]` plus every `*JOB_NAME` constant in `src`, minus the
+writers that are deliberately untrusted.
+
+**The guard had the same shape of blind spot as the thing it guards, and the fix runs the other
+way.** It found writers by their constant, so a writer passing `source_job="whatever"` inline was
+invisible to it: quarantined, which is safe, and silent, which is the one thing the test exists to
+prevent. The obvious repair — teach the harvest to read inline literals — is wrong, and wrong in the
+project's characteristic direction. That harvest feeds an assertion that every name in it *must be
+on the allowlist*, so an untrusted writer using a literal would produce the failure message
+`add these to memory.TRUSTED_SOURCE_JOBS: ['cowork-browser']`, and somebody would. A guard that can
+talk a reader into opening the boundary is worse than the gap it closes. So the omission is made
+impossible instead of detectable: `test_every_writer_names_its_source_job_with_a_constant` parses
+`src` with `ast` (two docstrings say `source_job='chat'`, and a regex cannot tell those from code)
+and fails on any inline literal, and the harvest subtracts `BROWSER_SOURCE_JOB` so it can never
+demand the browser's own tag be trusted — which it could before, via a constant named
+`BROWSER_JOB_NAME`.
 
 **Why every field, not the one named `text`.** The first fix collapsed `text` and left `source_url`
 appended raw — and `source_url` is caller-supplied by `report_observation`, so a payload delivered
@@ -1521,3 +1536,83 @@ processing day less `waiver_lead_minutes`. For this league (Wednesday 10:00) tha
 10:00, safely after the Tuesday 08:00 `waiver_scan`. A league that processed on a Tuesday would
 derive a Monday run — in front of the scan that fills it — and nothing would catch that, because the
 derivation depends on league settings rather than on anything in the repo.
+
+---
+
+## 2026-09-08 — The transcript is owner-only, and a full disk is reported as a disk
+
+**Decision.** `claude.scratch_dir` and its `transcripts/` subdirectory are created `0700` and
+tightened to `0700` if they already exist wider; every transcript is created `0600` by `os.open`
+rather than `Path.open` plus a `chmod`. Separately, an `OSError` escaping the transcript block in
+`ClaudeRunner._execute` is caught and reported as `ok=False` naming the transcript, unless the
+result was already recorded — in which case it is logged and the call still succeeds.
+
+**Why the mode.** A transcript is not a log line, it is the *entire* prompt for one call: her
+roster, the built board, every retrieved note, and any system prompt assembled at runtime that
+exists nowhere else on disk. At the default umask that file is `0644` in a `0755` directory. On a
+single-user VM that is theoretical, and it stops being theoretical the first time anything else runs
+on the box — which is exactly the kind of change nobody re-audits file modes for.
+
+`os.open` with the mode rather than open-then-chmod, because the chmod leaves a window in which the
+file exists at `0644`, and the window is the whole thing being fixed. Existing directories are
+*tightened* rather than left alone because `mkdir(exist_ok=True)` ignores `mode` when the directory
+is already there: without the tighten, only a box that had never run hal-mary before would get the
+narrower mode, and the deployed one never would.
+
+**Why the write guard, and why it was worse than a missing guard.** `mkdir` and `open` were already
+inside a guard whose comment says why — `run()` is called from an APScheduler job and from an SSE
+handler, neither of which has anywhere to put an exception. `handle.write` was not. So an `ENOSPC`
+part way through a call escaped as a raw `OSError`, *and* the `finally` then recorded the row as
+`"stream abandoned by caller"`. That second part is the reason this is an entry: the guard's absence
+costs a crash, but the mislabel costs an afternoon, because it names a different subsystem
+confidently and sends the reader to the SSE client while the box is out of space.
+
+**Why `except OSError` on the block rather than a wrapper around each write.** The block contains
+exactly four unguarded disk touches and they are all the transcript — the header, the stream loop,
+the drain after a timeout, and the flush `with` performs on the way out. Everything else in there
+either carries its own guard (`Popen`) or swallows its own `OSError` (`_kill_group`), so an
+`OSError` arriving at that clause is the disk and cannot be anything else. A wrapper type would have
+been the same guarantee with a class in between.
+
+**Why a failed flush does not fail the call.** By the time `close()` runs the result has been built,
+recorded and yielded. Failing then would throw away a good answer to protect a debugging file, so
+that case logs and returns — and the `recorded` flag is what tells the two apart, which is also what
+stops a second `claude_calls` row being written for one call.
+
+**Would revisit if:** a caller ever needs to distinguish "the model failed" from "the disk failed"
+programmatically rather than by reading the sentence — that wants a field on `ClaudeResult`, not a
+different exception.
+
+---
+
+## 2026-09-08 — Re-reporting an action can correct anything except the fact that it happened
+
+**Decision.** `actions.report` refuses a transition that leaves `done` and allows every other one.
+`failed` → `done`, `skipped` → `done` and `done` → `done` all work; `done` → `failed` and
+`done` → `skipped` raise `ValueError`, which `report_action` turns into a sentence for Cowork.
+
+**Why re-reporting stays open at all.** A Cowork session that loses its place and runs the list again
+has to be able to correct its own earlier report, and a tool that accepts a report only once is a
+tool that strands a row nobody can close. That is the same reasoning as the `LookupError` on an
+unknown id: an action that cannot be closed is re-issued every run for the rest of the season.
+
+**Why `done` is the one direction that is closed.** `done` is a claim about ESPN, not about hal-mary
+— the bench was clicked, the drop went through. A *stale* session reporting a failure after a
+different session already succeeded would un-complete something that really happened, and the action
+would then be handed out and performed a second time. For a `bench` that is noise; for a `drop`,
+`reversible` is false and the second one takes a different player. The asymmetry is the asymmetry of
+the world: a failure can turn out to have been a success, but a success does not turn out not to have
+happened.
+
+**Why the guard is in the `WHERE` clause.** Two sessions reporting at once is the exact scenario the
+rule exists for, so a `SELECT` followed by an `UPDATE` would leave the race it is meant to close. The
+row is read only when nothing moved, and only to say whether the id was wrong or the row was already
+done.
+
+**Why a `ValueError` and not a silent no-op.** Cowork is told the refusal in a sentence it can act on
+— `report_observation` is where a contradiction belongs — because a report that looks accepted and
+was not is how a session concludes it has finished a list it has not.
+
+**Would revisit if:** an action ever genuinely needs undoing from hal-mary's side. That is a new
+verb — an `undo` action emitted like any other, with its own row — not a backwards edit of the one
+that already ran.
