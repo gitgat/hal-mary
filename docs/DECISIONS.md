@@ -1821,7 +1821,7 @@ about this code. CI has no credentials, so it has no real id to search for and s
 reason; Bryan's box and the production VM have one, and there the test runs and bites. Loosening it
 to something that "passes everywhere" would check nothing anywhere.
 
-## 2026-09-08 — ESPN publishes nothing to the read API during a mock draft
+## 2026-09-08 — Mock drafts expose nothing on the read API, which says less than it looks
 
 The question the manual pick path exists for, finally observed rather than assumed. Two independent
 ESPN mock drafts were joined and watched, polling `mDraftDetail` and `mRoster` together:
@@ -1842,6 +1842,13 @@ picks deep after seven minutes, so this is not "the draft had not got going".
 `mRoster` — nothing on the read API moves while the draft runs. And `inProgress: true` says only
 that the lobby is open; it was `true` throughout both, alongside a drawn order and zero picks. That
 flag already decided nothing in `draft_phase` (see the earlier entry); this is the evidence for why.
+
+**Both leagues were then deleted by ESPN** (they 404 a few hours later), and that reframes the
+result. Neither ever exposed a pick on the read API at *any* point — not while drafting, not after
+the draft's natural end, not at all — and then vanished. A league that never persists a single pick
+and is torn down outright may simply not write to the store `mDraftDetail` reads. So the honest
+reading is **"mock leagues expose nothing on this API"**, which is a weaker claim than "ESPN does
+not publish picks live", and the one the evidence actually supports.
 
 **What is still unknown, and matters tonight:** both observations are *mocks*. A mock league is
 ephemeral and may simply not persist picks the way a real one does. Caroline's league is real, and
