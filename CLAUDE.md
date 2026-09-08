@@ -309,6 +309,16 @@ empty for exactly that reason.
   job with a `Web*` tool and asserts it is on the list — a **new** research job that skips this
   fails a test rather than going quiet. Note `{{freshness}}` is a different question: that one says
   how stale *our synced ESPN roster* is, not how old a web source may be.
+- **A live draft that publishes nothing looks exactly like a healthy one, so the page says so.**
+  Whether ESPN populates `draftDetail.picks` *during* a draft is still unverified — a mock that the
+  page confirmed had begun showed zero picks and zero rostered players for as long as it was watched,
+  then ESPN deleted the room. The silent case is the dangerous one because the cadence line ("watching
+  ESPN every 5 seconds") reads as *working* while the real draft moves without her. `DraftLoop.watching`
+  reports `live_seconds` (stamped on the transition into live, never re-stamped) and `picks_seen` (the
+  highest ever read, so a transient zero cannot erase the proof ESPN is publishing); past
+  `draft.silent_after_seconds` the page stops reassuring and points at **Enter a pick by hand**. Only
+  the loop can answer this: the board alone cannot tell "no picks because it has not started" from
+  "no picks because ESPN is not saying", and those want opposite things said.
 - **This league's flex slot is spelled `RB/WR/TE`, not `FLEX`.** Prose that explains "a FLEX slot"
   defines a term that appears nowhere on Caroline's screen.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export

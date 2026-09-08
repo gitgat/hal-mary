@@ -519,7 +519,40 @@ def _watching(
         )
     if phase == PHASE_DONE or seconds is None:
         return None
-    return {"phase": phase, "seconds": seconds, "cadence": cadence_words(seconds)}
+    return {
+        "phase": phase,
+        "seconds": seconds,
+        "cadence": cadence_words(seconds),
+        "silent": _is_silent(settings, phase, reported),
+    }
+
+
+def _is_silent(
+    settings: Settings, phase: str | None, reported: dict[str, Any] | None
+) -> bool:
+    """Has the loop been on draft-night cadence this long with no pick at all?
+
+    The dangerous case, and the reason it is dangerous is that it looks healthy:
+    the cadence line says hal-mary is watching ESPN every few seconds, which
+    reads as *working*, while the real draft moves without her and the board
+    never marks anyone gone.
+
+    Only the running loop can answer — the board alone cannot tell "no picks
+    because the draft has not started" from "no picks because ESPN is not
+    publishing them", and those want opposite things said. With no loop to ask,
+    this is False: a page with nothing polling already says so, and a second
+    warning there would be noise.
+
+    One real pick settles it forever: ESPN is publishing, so nothing is wrong.
+    """
+    if reported is None or phase != PHASE_LIVE:
+        return False
+    if reported.get("picks_seen"):
+        return False
+    live_for = reported.get("live_seconds")
+    if live_for is None:
+        return False
+    return float(live_for) > settings.draft.silent_after_seconds
 
 
 # --- the whole page ----------------------------------------------------------

@@ -194,6 +194,17 @@ class DraftConfig(_Frozen):
     #: ESPN's board still shows no picks. It has to outlive the gap between the
     #: draft opening and pick 1; it expires so a stray tap costs an hour rather
     #: than the rest of the season.
+    #: How long the loop may sit on draft-night cadence with nothing to show
+    #: for it before the page stops saying "watching" and tells her to enter the
+    #: picks by hand.
+    #:
+    #: We do not know whether ESPN publishes picks to the read API while a draft
+    #: runs; a mock that genuinely began showed none for as long as it was
+    #: watched. The silent case is the dangerous one because it looks healthy —
+    #: the cadence line reads as *working* while the real draft moves without
+    #: her. Long enough that a slow first pick is not a false alarm; short
+    #: enough to matter on a 90-second clock.
+    silent_after_seconds: int = 240
     live_override_seconds: int = 3600
     advise_within_picks: int
     #: How many players the pre-draft research job is asked to rank.
