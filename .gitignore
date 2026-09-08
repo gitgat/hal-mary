@@ -30,3 +30,6 @@ logs/
 
 # Claude subprocess working directory (config: claude.scratch_dir)
 .hal-mary-scratch/
+
+# Per-task scratch briefs live in .superpowers/, never in the repo root
+BRIEF.md
