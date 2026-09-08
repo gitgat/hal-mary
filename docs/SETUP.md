@@ -132,7 +132,10 @@ first pick lands, and this is what to do about it:
 
 **If the loop is not running** — no ESPN credentials, a loop that failed to start (the page says so
 in a band across the top), or picks being entered by hand — nothing ever reads the drawn board, so
-step 1 is the *only* thing correcting the order and step 2 is the only thing checking it.
+step 1 is the *only* thing correcting the order and step 2 is the only thing checking it. The draft
+page keeps saying the pick numbers are provisional for as long as that is true, including all the
+way through a hand-entered draft: the note clears when hal-mary has read the order ESPN drew, not
+when the first pick lands.
 
 Do the eyeballing even if the numbers look plausible. A wrong draft order is a *silent* failure: the
 page and the advice card compute her position the same way from the same list, so they agree with

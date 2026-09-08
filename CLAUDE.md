@@ -110,12 +110,17 @@ empty for exactly that reason.
   snake and the divergence had never once been exercised. The **league page reads it too** —
   `teams.draft_slot` is the pre-draft placeholder, re-seeded by every sync, so rendering that column
   under a "Draft order" heading would put one screen in visible contradiction with another.
-- **Until the first pick lands, the order on screen is the placeholder, and the page says so.**
-  ESPN's board can only be read once a real pick exists, so the window between the draft opening and
-  pick 1 is uncorrected — and if Caroline was drawn first overall the placeholder puts her opening
-  pick five away, past `draft.advise_within_picks`, so no card is written for the pick she is on. A
-  `/sync` after the draft opens closes it, which is why `docs/SETUP.md` makes that step
-  unconditional and `partials/turn.html` says "provisional" while `turn.started` is false.
+- **The page says the pick numbers are provisional until the drawn order has been read, and the
+  predicate is `turn.order_drawn`, never `turn.started`.** ESPN's board can only be read once a real
+  pick exists, so the window between the draft opening and pick 1 is uncorrected — and if Caroline
+  was drawn first overall the placeholder puts her opening pick five away, past
+  `draft.advise_within_picks`, so no card is written for the pick she is on. A `/sync` after the
+  draft opens closes that, which is why `docs/SETUP.md` makes that step unconditional. But "the
+  draft has started" is not what makes the numbers trustworthy: with picks entered by hand and
+  nothing polling ESPN, the order is never read and the placeholder runs all night, so a note gated
+  on `started` would vanish at pick 1 in exactly the case that needs it most. `partials/turn.html`
+  gates on the stored order being absent and says something plainer once the draft is running,
+  because by then nothing is on course to correct the numbers by itself.
 - **Never poll a live draft through `espn-api`.** `refresh_draft()` appends to a list cleared only
   in the constructor, and `_fetch_draft` returns early unless `draftDetail.drafted` is true — a flag
   that may only be set once the draft is over. `hal_mary.espn.client.draft_picks()` reads the raw

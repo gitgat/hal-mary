@@ -26,17 +26,34 @@
         Your picks after this one: {{ turn.my_next_picks[1:]|join(' and ') }}.
       {% endif %}
     </p>
-    {% if not turn.started %}
-      {# ESPN draws the draft order when the draft opens, and hal-mary can only
-         read it once a real pick has landed. Until then every number above is
-         the pre-draft placeholder — and if she was drawn first overall, the
-         placeholder puts her opening pick five away, past the advisor's window,
-         so no card is written for the pick she is actually on. Sync re-reads the
-         drawn order, and she should not have to have read the runbook to know
-         that. #}
-      <p class="small muted"><strong>The pick numbers above are provisional</strong> until the
-        first pick is made — ESPN sets the draft order when the draft opens. Tap
-        <strong>Sync from ESPN now</strong> on the status page once the draft room opens.</p>
+    {% if not turn.order_drawn %}
+      {# Gated on the drawn order being absent, NOT on the draft not having
+         started. What makes the numbers above trustworthy is hal-mary having
+         read ESPN's own board; "the draft has started" is a different fact, and
+         the two come apart in the case the no-ESPN contingency exists for —
+         picks entered by hand, nothing polling ESPN, the order never read. There
+         the placeholder runs the whole night, and a note that vanished at pick 1
+         would be the silently-wrong failure this design exists to remove.
+
+         Two sentences, because the two states differ in what she can expect.
+         Before the draft, the order simply has not been drawn yet and will be.
+         After it, the order should have been readable and was not: nothing is on
+         course to fix the numbers by itself, and the sentence must not pretend
+         otherwise. Either way she is told what to tap — if ESPN drew her first
+         overall the placeholder puts her opening pick five away, past the
+         advisor's window, so no card is written for the pick she is on. #}
+      {% if turn.started %}
+        <p class="small muted"><strong>The pick numbers above are still provisional.</strong>
+          hal-mary has not been able to read the order ESPN drew, so these are the pre-draft
+          placeholder and nothing is correcting them on its own. Tap
+          <strong>Sync from ESPN now</strong> on the status page, then check who is on the clock
+          here against ESPN's draft room.</p>
+      {% else %}
+        <p class="small muted"><strong>The pick numbers above are provisional.</strong> ESPN sets
+          the draft order when the draft opens; these stop being a placeholder as soon as hal-mary
+          reads the order ESPN drew. Tap <strong>Sync from ESPN now</strong> on the status page once
+          the draft room opens.</p>
+      {% endif %}
     {% endif %}
   {% endif %}
 </div>

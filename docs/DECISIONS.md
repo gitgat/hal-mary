@@ -777,5 +777,16 @@ page says four picks out. That is the worst moment available to have nothing on 
 
 A `/sync` after the draft opens closes it, because `pickOrder` has been drawn for real by then. So
 that sync is an unconditional first step in `docs/SETUP.md` rather than a fallback for when
-something looks wrong, and `partials/turn.html` says the numbers are provisional, and what to tap,
-while `turn.started` is false. A person reading the page should not have to have read the runbook.
+something looks wrong, and `partials/turn.html` says the numbers are provisional, and what to tap.
+A person reading the page should not have to have read the runbook.
+
+**And that note is gated on `turn.order_drawn`, not on `turn.started`.** "The draft has started" is
+not what makes the numbers trustworthy; hal-mary having read ESPN's board and stored the drawn order
+is. The two come apart in precisely the case the no-ESPN contingency exists for — picks entered by
+hand, nothing polling ESPN, the order never written — where the placeholder is in charge for the
+whole night. A note gated on `started` would disappear at pick 1 there, leaving numbers nobody has
+any reason to doubt and nothing on course to correct them: the silently-wrong class this entire
+entry exists to remove, reintroduced by its own mitigation. Gated on the stored order, the note says
+"provisional" exactly while the numbers are provisional. Past the first pick it also says something
+plainer, because by then the order should have been readable and was not, and the sentence must not
+promise a fix that is not coming.
