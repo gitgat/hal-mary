@@ -5,8 +5,12 @@ maintained by triggers, and an in-memory shortcut would not exercise the same
 migration path production runs.
 """
 
+import ast
 import logging
+import re
+import tomllib
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -736,19 +740,57 @@ def test_standing_memory_files_on_a_missing_directory_is_empty(tmp_path):
 NOTES_HEADING_TEXT = "What we have learned recently"
 
 
+SRC_ROOT = Path(__file__).resolve().parents[2] / "src"
+
+#: Matches ``JOB_NAME`` and the prefixed forms of it — ``RETRY_JOB_NAME`` is
+#: already one. The plain name was the whole pattern, and a job whose constant
+#: carries a prefix was invisible to it.
+JOB_NAME_CONSTANT = re.compile(r'^[A-Z0-9_]*JOB_NAME = "([^"]+)"', re.MULTILINE)
+
+
 @pytest.fixture
 def shipped_job_names() -> set[str]:
-    """Every source_job this codebase writes: config's [jobs.*] plus JOB_NAME."""
-    import re
-    import tomllib
-    from pathlib import Path
+    """Every *trusted* source_job this codebase writes.
 
-    root = Path(__file__).resolve().parents[2]
+    ``config.toml``'s ``[jobs.*]`` plus every ``*JOB_NAME`` constant in ``src``,
+    **minus the writers that are deliberately untrusted.**
+
+    The subtraction is not tidying. This set feeds an assertion that every name
+    in it must be on ``TRUSTED_SOURCE_JOBS``, so anything the harvest picks up is
+    something a future reader will be told to add to the allowlist. A harvest
+    that can reach an untrusted writer's tag — a constant named
+    ``BROWSER_JOB_NAME``, say — is a guard that instructs someone to open the
+    boundary it exists to defend. Naming the exception here keeps the harvest
+    from ever being able to.
+    """
+    root = SRC_ROOT.parent
     raw = tomllib.loads((root / "config.toml").read_text(encoding="utf-8"))
     names = set(raw.get("jobs", {}))
-    for path in (root / "src").rglob("*.py"):
-        names.update(re.findall(r'^JOB_NAME = "([^"]+)"', path.read_text(encoding="utf-8"), re.MULTILINE))
-    return names
+    for path in SRC_ROOT.rglob("*.py"):
+        names.update(JOB_NAME_CONSTANT.findall(path.read_text(encoding="utf-8")))
+    return names - {memory.BROWSER_SOURCE_JOB}
+
+
+def source_job_literals() -> list[str]:
+    """Every ``source_job=<a string right there>`` written in ``src``.
+
+    Parsed rather than grepped: ``source_job='chat'`` appears in two docstrings
+    describing what chat writes, and a regex cannot tell that from code.
+    """
+    found = []
+    for path in sorted(SRC_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            for keyword in node.keywords:
+                if keyword.arg != "source_job":
+                    continue
+                if isinstance(keyword.value, ast.Constant) and isinstance(
+                    keyword.value.value, str
+                ):
+                    found.append(f"{path.relative_to(SRC_ROOT)}:{keyword.lineno}")
+    return found
 
 
 HOSTILE = (
@@ -902,6 +944,44 @@ def test_every_job_this_codebase_runs_is_on_the_trusted_list(shipped_job_names):
     """
     missing = sorted(shipped_job_names - memory.TRUSTED_SOURCE_JOBS)
     assert missing == [], f"add these to memory.TRUSTED_SOURCE_JOBS: {missing}"
+
+
+def test_every_writer_names_its_source_job_with_a_constant(shipped_job_names):
+    """The blind spot in the guard above, closed at the other end.
+
+    ``test_every_job_this_codebase_runs_is_on_the_trusted_list`` finds writers by
+    their ``*JOB_NAME`` constant. A writer that passes ``source_job="whatever"``
+    inline is invisible to it — its notes would be quarantined, which is the safe
+    direction, but the test whose entire job is to make that omission loud would
+    say nothing at all. So the omission is made impossible instead of detectable:
+    every writer names a constant, and the constant is what the harvest sees.
+
+    Deliberately *not* fixed by teaching the harvest to read inline literals.
+    That harvest feeds "must be on the allowlist", so widening it that way means
+    an untrusted writer using a literal produces a test failure instructing the
+    next reader to add its tag to ``TRUSTED_SOURCE_JOBS``. A guard that can talk
+    someone into opening the boundary is worse than the blind spot it closes.
+    """
+    literals = source_job_literals()
+
+    assert literals == [], (
+        "these write notes with an inline source_job literal, where the allowlist "
+        f"guard cannot see them: {literals}. Name a module constant instead — "
+        "*JOB_NAME for one of hal-mary's own jobs, which the guard then checks "
+        "against memory.TRUSTED_SOURCE_JOBS, or its own constant for a writer "
+        "that must stay quarantined, like memory.BROWSER_SOURCE_JOB."
+    )
+
+
+def test_the_guard_cannot_demand_the_browsers_tag_be_trusted(shipped_job_names):
+    """The harvest must not be able to instruct someone to open the boundary.
+
+    ``shipped_job_names`` drives an assertion that every name in it belongs on
+    the allowlist. If the browser's own tag could ever land in that set, the
+    failure message would read "add cowork-browser to TRUSTED_SOURCE_JOBS" — and
+    somebody would.
+    """
+    assert memory.BROWSER_SOURCE_JOB not in shipped_job_names
 
 
 def test_the_browser_is_not_on_the_trusted_list(shipped_job_names):

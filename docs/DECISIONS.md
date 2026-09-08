@@ -1005,7 +1005,22 @@ one of them landed in the *trusted* section. Not reachable while `report_observa
 constant — but the next untrusted writer to mistype its tag would have failed open, silently, into
 the advisor's prompt. Inverted, a typo is merely quarantined. The cost is that a new trusted job
 whose notes are quarantined is also silent, so a test checks the allowlist against the jobs that
-actually exist: `config.toml`'s `[jobs.*]` plus every `JOB_NAME` in `src`.
+actually exist: `config.toml`'s `[jobs.*]` plus every `*JOB_NAME` constant in `src`, minus the
+writers that are deliberately untrusted.
+
+**The guard had the same shape of blind spot as the thing it guards, and the fix runs the other
+way.** It found writers by their constant, so a writer passing `source_job="whatever"` inline was
+invisible to it: quarantined, which is safe, and silent, which is the one thing the test exists to
+prevent. The obvious repair — teach the harvest to read inline literals — is wrong, and wrong in the
+project's characteristic direction. That harvest feeds an assertion that every name in it *must be
+on the allowlist*, so an untrusted writer using a literal would produce the failure message
+`add these to memory.TRUSTED_SOURCE_JOBS: ['cowork-browser']`, and somebody would. A guard that can
+talk a reader into opening the boundary is worse than the gap it closes. So the omission is made
+impossible instead of detectable: `test_every_writer_names_its_source_job_with_a_constant` parses
+`src` with `ast` (two docstrings say `source_job='chat'`, and a regex cannot tell those from code)
+and fails on any inline literal, and the harvest subtracts `BROWSER_SOURCE_JOB` so it can never
+demand the browser's own tag be trusted — which it could before, via a constant named
+`BROWSER_JOB_NAME`.
 
 **Why every field, not the one named `text`.** The first fix collapsed `text` and left `source_url`
 appended raw — and `source_url` is caller-supplied by `report_observation`, so a payload delivered
