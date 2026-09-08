@@ -530,6 +530,76 @@ def test_the_turn_counter_does_not_render_after_the_last_pick(db_path: Path, set
     assert "draft is finished" in body
 
 
+def test_the_page_says_the_draft_order_is_provisional_until_the_first_pick(
+    db_path: Path, settings
+):
+    """The residual gap in Task 15, said out loud on the page.
+
+    ESPN draws the order when the draft opens, and hal-mary can only read it off
+    the board once a real pick has landed. In between, every number on this page
+    comes from the pre-draft placeholder — and if ESPN drew Caroline first
+    overall, the placeholder puts her next pick five away, past the advisor's
+    window, so she gets no card at all for her opening pick while the page says
+    four picks out. That is the worst possible moment to have nothing, and a
+    person reading the page should not have to have read the runbook.
+    """
+    seed_league(db_path)
+    with signed_in(db_path, settings) as client:
+        body = text_of(client.get("/draft").text).lower()
+
+    assert "provisional" in body
+    assert "sync" in body, "and what to do about it"
+    assert "order espn drew" in body, "and what makes it stop being provisional"
+
+
+def test_the_note_clears_only_when_the_drawn_order_has_actually_been_read(
+    db_path: Path, settings
+):
+    """A caveat that never clears is a caveat nobody reads.
+
+    What makes the numbers trustworthy is hal-mary having read ESPN's board, not
+    the draft having started — so this clears on the stored order, and it clears
+    even before the first pick, because by then there is nothing left to warn
+    about.
+    """
+    from hal_mary.draft import store
+
+    seed_league(db_path)
+    conn = open_conn(db_path)
+    store.store_draft_order(conn, [1, 6, 5, 4, 3, 2])
+    conn.close()
+
+    with signed_in(db_path, settings) as client:
+        body = text_of(client.get("/draft").text).lower()
+
+    assert "provisional" not in body
+
+
+def test_the_note_stays_all_night_when_nothing_ever_reads_espns_board(
+    db_path: Path, settings
+):
+    """The scenario the whole no-ESPN contingency exists for.
+
+    Picks entered by hand, nothing polling ESPN, the drawn order never stored —
+    so the placeholder is in charge for the whole draft. Gating this note on "the
+    draft has started" would have made it vanish at pick 1, which is precisely
+    the silently-wrong failure this task was created to remove: numbers nobody
+    has any reason to doubt, and nothing on course to correct them.
+
+    Past the first pick the sentence has to be plainer than the pre-draft one.
+    The order should have been readable by now and has not been read; saying
+    "until the first pick lands" would promise a fix that is not coming.
+    """
+    seed_league(db_path)
+    seed_picks(db_path, [(1, 1, "Player 1"), (2, 2, "Player 2")])
+    with signed_in(db_path, settings) as client:
+        body = text_of(client.get("/draft").text).lower()
+
+    assert "provisional" in body
+    assert "sync" in body, "and what to tap"
+    assert "until the first pick" not in body, "that moment has passed"
+
+
 def test_the_page_works_when_the_league_is_unknown(db_path: Path, settings):
     """No sync, no [league] config: there is no turn to report, but a page."""
     conn = open_conn(db_path)

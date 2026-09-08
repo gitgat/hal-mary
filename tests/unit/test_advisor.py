@@ -38,9 +38,11 @@ from draft_fixtures import (
 )
 
 from hal_mary import claude_runner, memory
+from hal_mary.draft import advisor as advisor_module
 from hal_mary.draft.advisor import _fits, advise
 from hal_mary.events import EventBus
 from hal_mary.league import load_league_context
+from hal_mary.web.draft_page import _advice_card
 
 ADVICE = {
     "pick": "Saquon Barkley",
@@ -683,3 +685,62 @@ def test_a_budget_too_small_for_the_first_attempt_still_runs_the_retry(tmp_path,
     )
     assert result["source"] == "claude"
     assert result["attempts"] == 1
+
+
+def test_the_outer_fallback_card_still_knows_which_of_her_picks_it_is_for(tmp_path):
+    """The last route to the wrong-pick label on a card.
+
+    ``advise``'s outer catch is the promise that a failure *outside* the two
+    Claude attempts — a locked database, a malformed row — still leaves a card on
+    the screen. It used to store ``my_next_picks: []``, and the draft page reads
+    that field to decide which of *her* picks a card is advice for. With it
+    empty the page falls back to ``next_overall_pick``, which is the pick that
+    was on the clock when the advisor ran, not hers — so the card announces it is
+    out of date, on her turn, every turn. Same root as Task 7b's bug, on the one
+    card that had no test.
+    """
+    conn, settings, runner, bus = advisor_ready(tmp_path, [ok_result(ADVICE)])
+
+    def explode(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    original = advisor_module._reason
+    advisor_module._reason = explode
+    try:
+        result = advise(conn, settings, runner, bus, next_overall_pick=4)
+    finally:
+        advisor_module._reason = original
+
+    assert result["source"] == "fallback"
+    assert result["pick"], "the promise is that there is always a card"
+    # She picks 6th of 6, so with pick 4 on the clock her next pick is 6.
+    assert result["my_next_picks"][:1] == [6], "the card is labelled for *her* pick"
+    assert result["picks_until_mine"] == 2
+
+    card = _advice_card({**result, "created_at": "2026-09-07T00:00:00+00:00"}, 6, False)
+    assert card["written_for"] == 6
+    assert card["stale"] is False, "a card written for her next pick is not stale"
+
+
+def test_the_outer_fallback_says_nothing_rather_than_guessing_her_pick(tmp_path, caplog):
+    """The most likely reason the outer catch fired is that the league could not
+    be read — so working out which pick the card is for must not raise a second
+    time and lose the card it exists to guarantee."""
+    conn, settings, runner, bus = advisor_ready(tmp_path, [ok_result(ADVICE)])
+    conn.execute("DELETE FROM league_settings")
+    conn.commit()
+
+    def explode(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    original = advisor_module._reason
+    advisor_module._reason = explode
+    try:
+        with caplog.at_level(logging.WARNING):
+            result = advise(conn, settings, runner, bus, next_overall_pick=4)
+    finally:
+        advisor_module._reason = original
+
+    assert result["pick"], "a card, still"
+    assert result["my_next_picks"] == [], "and no invented pick number"
+    assert result["picks_until_mine"] is None

@@ -17,10 +17,13 @@ drafted. A drafted row always has a timestamp; that is the invariant.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from typing import Any
 
 from hal_mary import db
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     "all_picks",
@@ -32,6 +35,8 @@ __all__ = [
     "recent_picks",
     "record_unmatched",
     "replace_board",
+    "store_draft_order",
+    "stored_draft_order",
     "unmatched_picks",
 ]
 
@@ -244,3 +249,67 @@ def next_overall_pick(conn: sqlite3.Connection) -> int:
         f"SELECT MAX(overall_pick) AS highest FROM draft_picks WHERE {_IDENTIFIED}"
     ).fetchone()
     return int(row["highest"] or 0) + 1
+
+
+# --- the order ESPN drew when the draft opened -------------------------------
+
+
+def stored_draft_order(conn: sqlite3.Connection) -> list[int]:
+    """Team ids by first-round slot, as ESPN's own draft board reported them.
+
+    Empty until the draft opens and the loop reads that board — which is the
+    honest answer, because until then the order has not been drawn. See
+    ``migrations/004_draft_order.sql`` for why this is a table of its own.
+
+    Never raises on an unmigrated database: this is read on the pick-clock path
+    by :func:`hal_mary.league.load_league_context`, and "nothing stored" degrades
+    to the pre-draft ``pickOrder``, which is what happened before this existed.
+    """
+    try:
+        rows = conn.execute("SELECT team_id FROM draft_order ORDER BY slot").fetchall()
+    except sqlite3.Error:  # pragma: no cover - an unmigrated database
+        return []
+    return [int(row["team_id"]) for row in rows]
+
+
+def store_draft_order(conn: sqlite3.Connection, team_ids: list[int]) -> bool:
+    """Record round one's slot-to-team mapping, **once**. Returns whether it wrote.
+
+    Write-once by construction: an order already stored is left exactly as it is,
+    so a later read that disagreed — ESPN is unofficial, and a loop restarted
+    mid-draft reads the board again — cannot move Caroline's pick window while
+    she is looking at it. The order is drawn once, so it is stored once.
+
+    An empty list writes nothing rather than clearing what is there: "ESPN
+    returned a board we could not read" must never demote a good stored order
+    back to the placeholder.
+
+    A second reading that **disagrees** is refused like any other, and logged.
+    The single property this whole design protects is that the page, the card
+    and the loop are reading the same order; when the source itself gives two
+    answers, that is the one moment the property is in doubt, and it must not
+    pass in silence. The warning names both orders so a person can tell which
+    one ESPN's draft room agrees with — the stored one is what every screen is
+    showing.
+    """
+    ids = [int(team_id) for team_id in team_ids]
+    if not ids:
+        return False
+    already = stored_draft_order(conn)
+    if already:
+        if already != ids:
+            log.warning(
+                "ESPN's draft board now reads %s, but the order stored when the draft opened "
+                "is %s; keeping the stored one, which is what the draft page and the advice "
+                "card are using",
+                ids,
+                already,
+            )
+        return False
+    now = db.utc_now()
+    with db.transaction(conn):
+        conn.executemany(
+            "INSERT OR IGNORE INTO draft_order (slot, team_id, recorded_at) VALUES (?, ?, ?)",
+            [(slot, team_id, now) for slot, team_id in enumerate(ids, start=1)],
+        )
+    return True
