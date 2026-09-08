@@ -199,7 +199,7 @@ def test_cowork_config_prints_the_schedule_for_this_league(wired, capsys):
             VALUES (1, 2026, 7654321, 'The Invented League', 6, '{}', ?, ?, 5)
             """,
             (
-                '{"acquisitionSettings": {"waiverProcessDays": ["THURSDAY"], "waiverHours": 3}}',
+                '{"acquisitionSettings": {"waiverProcessDays": ["THURSDAY"], "waiverHours": 24, "waiverProcessHour": 3}}',
                 "2026-10-01T12:00:00+00:00",
             ),
         )

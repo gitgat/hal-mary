@@ -149,7 +149,8 @@ def populate(db_path: Path, *, week: int | None = CURRENT_WEEK) -> None:
                     {
                         "acquisitionSettings": {
                             "waiverProcessDays": ["WEDNESDAY"],
-                            "waiverHours": 10,
+                            "waiverHours": 24,
+                            "waiverProcessHour": 10,
                         }
                     }
                 ),
