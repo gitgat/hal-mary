@@ -57,6 +57,7 @@ Fill in:
 | `TEAM_ID` | Caroline's team id |
 | `SEASON` | the season year, e.g. `2026` |
 | `WEB_PASSWORD` | a password for the web app; anyone on the network who knows it can read the league |
+| `MCP_TOKEN` | a bearer token for the `/mcp` endpoint, which is how Claude Cowork and Claude Desktop reach hal-mary. **Optional, and deliberately not `WEB_PASSWORD`** — two doors, two keys. `openssl rand -hex 32`. Leave it unset and `/mcp` answers 503 to everything; absent never means open. See [`COWORK.md`](COWORK.md) and the MCP section of the runbook. |
 | `DB_PATH` | where the database lives. Leave it empty and it defaults to `~/hal-mary-data/hal.db` — on local disk and outside the checkout, which is what you want. A *relative* value is resolved against the directory holding `config.toml`, **not** the working directory, which puts the database inside the checkout; `hal-mary doctor` reports that. |
 
 ### Every path is resolved against `config.toml`, not the working directory
@@ -158,7 +159,7 @@ page and the advice card compute her position the same way from the same list, s
 each other while both being wrong, and no banner fires. A human comparing two screens is the only
 thing that catches it.
 
-## 6. Running it as a service
+## 7. Running it as a service
 
 Everything above is for a developer's checkout. For the production VM — creating it, installing the
 systemd unit, reading logs, rotating the ESPN cookies mid-season, backups and rollback — see the

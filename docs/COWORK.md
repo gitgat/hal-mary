@@ -52,7 +52,7 @@ dashboard, not the status page, not `/events`.
 above the `http_status:404` default:
 
 ```yaml
-  - hostname: halmary.thehalf.io
+  - hostname: mcp.thehalf.io
     service: http://traefik-public:80
 ```
 
@@ -69,23 +69,25 @@ router's rule pins the path so nothing else on the app is reachable:
 ```yaml
 http:
   routers:
-    halmary-mcp:
-      rule: "Host(`halmary.thehalf.io`) && Path(`/mcp`)"
+    halmary-mcp-public:
+      rule: "Host(`mcp.thehalf.io`) && PathPrefix(`/mcp`)"
       entryPoints:
         - web
-      service: halmary-mcp
+      service: halmary-mcp-public
       middlewares:
         - edge-ratelimit
         - edge-headers
 
   services:
-    halmary-mcp:
+    halmary-mcp-public:
       loadBalancer:
         servers:
           - url: "http://<the hal-mary VM's IP>:8080"
+        passHostHeader: true
 ```
 
-`Path(`/mcp`)` is exact, not a prefix. Every other path on the app answers 404 from the edge, which is
+The `PathPrefix` is the whole boundary. Every other path on the app — the dashboard, `/draft`,
+`/chat`, `/events` — has no router on that hostname and answers 404 from the edge, which is
 the point: the bearer token is the guard on `/mcp`, and nothing else is even routed.
 
 Then force-update Traefik — its file provider does not reliably hot-reload over NFS:
@@ -97,8 +99,8 @@ docker service update --force traefik-public_traefik-public
 **Move 3 — create the proxied CNAME:**
 
 ```bash
-~/swarm-config/scripts/cf-tunnel-route.sh halmary.thehalf.io      # dry run
-~/swarm-config/scripts/cf-tunnel-route.sh halmary.thehalf.io --apply
+~/swarm-config/scripts/cf-tunnel-route.sh mcp.thehalf.io      # dry run
+~/swarm-config/scripts/cf-tunnel-route.sh mcp.thehalf.io --apply
 ```
 
 Proxied is mandatory; an unproxied `cfargotunnel.com` record resolves to nothing.
@@ -106,8 +108,8 @@ Proxied is mandatory; an unproxied `cfargotunnel.com` record resolves to nothing
 **Check it before going near claude.ai:**
 
 ```bash
-curl -sS -o /dev/null -w '%{http_code}\n' https://halmary.thehalf.io/mcp     # expect 401
-curl -sS https://halmary.thehalf.io/mcp \
+curl -sS -o /dev/null -w '%{http_code}\n' https://mcp.thehalf.io/mcp     # expect 401
+curl -sS https://mcp.thehalf.io/mcp \
   -H "Authorization: Bearer $MCP_TOKEN" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
@@ -126,7 +128,7 @@ Settings → Connectors → **Add custom connector**.
 | Field | Value |
 | --- | --- |
 | Name | `hal-mary` |
-| URL | `https://halmary.thehalf.io/mcp` |
+| URL | `https://mcp.thehalf.io/mcp` |
 | Authentication | Bearer token / custom header |
 | Header | `Authorization: Bearer <the MCP_TOKEN value>` |
 
