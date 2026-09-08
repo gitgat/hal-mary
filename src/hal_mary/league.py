@@ -98,9 +98,67 @@ class LeagueContext:
     #: purpose: a hand-written week goes stale in seven days and would have the
     #: lineup jobs reasoning about a week that has already been played.
     current_week: int | None = None
+    #: What the season is a race for, from ``scheduleSettings``. How many teams
+    #: reach the playoffs, how the seeds are ordered, and how many weeks the
+    #: regular season runs. The board depends on all three: a league where most
+    #: teams qualify and the seeds go by points scored rewards the roster that
+    #: scores the most over the whole season, not the one that wins any
+    #: particular week — and a published ranking cannot know which league this
+    #: is. ``None`` means it has not been read, which is said out loud rather
+    #: than defaulted, because a default here is a silent strategy.
+    playoff_team_count: int | None = None
+    playoff_seeding_rule: str | None = None
+    regular_season_weeks: int | None = None
     roster_slots: dict[str, int] = field(default_factory=dict)
     draft_order: list[int] = field(default_factory=list)
     draft_order_labels: list[str] = field(default_factory=list)
+
+    @property
+    def playoff_summary(self) -> str:
+        """What the season is a race for, in words Caroline could repeat.
+
+        ``TOTAL_POINTS_SCORED`` is a database value. Whether two thirds of the
+        league makes the playoffs on points scored or a quarter makes it on
+        win-loss record is the difference between drafting for the highest
+        weekly total and drafting to beat one opponent, so it is spelled out
+        like :func:`_scoring_summary` rather than passed through as a code.
+        """
+        if not self.playoff_team_count or not self.team_count:
+            return (
+                "How many teams make the playoffs, and how the places are decided, "
+                "are not known. Do not assume either one."
+            )
+        weeks = (
+            f"The regular season runs {self.regular_season_weeks} weeks."
+            if self.regular_season_weeks
+            else "How many weeks the regular season runs is not known."
+        )
+        share = self.playoff_team_count / self.team_count
+        crowd = (
+            "That is most of the league, so missing out entirely takes a bad season "
+            "rather than one bad week."
+            if share >= 0.5
+            else "That is a minority of the league, so a slow start is hard to recover from."
+        )
+        rule = (self.playoff_seeding_rule or "").upper()
+        if rule == "TOTAL_POINTS_SCORED":
+            seeding = (
+                "The places are decided by total points scored across the season, not by "
+                "won-lost record — so the season is a race to score as many points as "
+                "possible in total, and a week won narrowly is worth no more than a week lost "
+                "narrowly."
+            )
+        elif rule:
+            seeding = (
+                "The places are decided by won-lost record, so beating the one opponent she "
+                "is drawn against each week is what counts."
+            )
+        else:
+            seeding = "How the places are decided is not known."
+        return (
+            f"{self.playoff_team_count} of the {self.team_count} teams make the playoffs. "
+            f"{crowd} {seeding} {weeks}"
+        )
 
     @property
     def total_picks(self) -> int:
@@ -186,6 +244,25 @@ def _pick_clock(raw: dict[str, Any]) -> int | None:
     except (TypeError, ValueError):
         return None
     return seconds if seconds > 0 else None
+
+
+def _schedule_settings(raw: dict[str, Any]) -> dict[str, Any]:
+    """``scheduleSettings``, or an empty dict when the payload has none.
+
+    Read defensively for the same reason ``_pick_clock`` is: a partial or older
+    sync must degrade to "we do not know what the season is a race for", which
+    the summary says out loud, rather than to a confident wrong answer.
+    """
+    value = raw.get("scheduleSettings")
+    return value if isinstance(value, dict) else {}
+
+
+def _positive_int(value: Any) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
 
 
 def _scoring_summary(points: float | None) -> str:
@@ -366,6 +443,9 @@ def load_league_context(conn: sqlite3.Connection, settings: Settings) -> LeagueC
     draft_type = (row["draft_type"] if row is not None else None) or config.draft_type
     rounds = config.rounds or _rounds_from_slots(roster_slots)
 
+    schedule = _schedule_settings(raw)
+    seeding_rule = schedule.get("playoffSeedingRule") or config.playoff_seeding_rule
+
     return LeagueContext(
         source=source,
         season=(row["season"] if row is not None else None) or settings.season,
@@ -383,6 +463,13 @@ def load_league_context(conn: sqlite3.Connection, settings: Settings) -> LeagueC
         pick_clock_s=_pick_clock(raw) or config.pick_clock_s,
         rounds=rounds,
         current_week=_current_week(row),
+        playoff_team_count=(
+            _positive_int(schedule.get("playoffTeamCount")) or config.playoff_team_count
+        ),
+        playoff_seeding_rule=str(seeding_rule) if seeding_rule else None,
+        regular_season_weeks=(
+            _positive_int(schedule.get("matchupPeriodCount")) or config.regular_season_weeks
+        ),
         my_team_id=my_team_id,
         my_draft_slot=my_slot,
         roster_slots=roster_slots,

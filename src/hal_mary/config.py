@@ -198,6 +198,14 @@ class DraftConfig(_Frozen):
     advise_within_picks: int
     #: How many players the pre-draft research job is asked to rank.
     board_size: int = 200
+    #: The largest share of the board any one website may be the deciding
+    #: source for. A dial rather than a constant because it is the difference
+    #: between a board that is research and a board that is one outlet's
+    #: ranking retyped: the first build cited a single article for 103 of 200
+    #: players, which is a board every other manager in the league can already
+    #: see. ``board_build`` renders it as a player count, because a fraction is
+    #: something the model would have to multiply out before it could obey it.
+    max_source_share: float = 0.25
     #: Notes retrieved into the (slow, pre-draft) research prompt.
     research_note_limit: int = 30
     #: Board rows shown to the advisor on the clock, and on its shorter retry.
@@ -316,6 +324,15 @@ class LeagueConfig(_Frozen):
     #: Seconds on the clock per pick. Every draft-night budget is sized against
     #: it, so it is worth being able to state by hand when ESPN is unavailable.
     pick_clock_s: int | None = None
+    #: What the season is a race for. How many teams reach the playoffs, how
+    #: the seeds are ordered (ESPN's own wording, e.g. ``TOTAL_POINTS_SCORED``)
+    #: and how many weeks the regular season runs. A league where most teams
+    #: get in and the seeds go by points scored rewards a different board from
+    #: one where a quarter get in on win-loss record, so it is stated rather
+    #: than assumed — and stateable by hand, because every other league fact is.
+    playoff_team_count: int | None = None
+    playoff_seeding_rule: str | None = None
+    regular_season_weeks: int | None = None
     my_draft_slot: int | None = None
     draft_order: list[int | str] = []
     roster_slots: dict[str, int] = {}

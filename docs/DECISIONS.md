@@ -1639,3 +1639,61 @@ shapes, not an example. An example passed by construction, because the derivatio
 wherever the scan is: moving the scan could not make it fail. The property test also has to assert
 the batch is the *next* one — "between the scan and the batch" is satisfied by aiming a week out,
 and the first version of the test passed with the batch chosen by `max` instead of `min`.
+
+---
+
+## 2026-09-08 — The draft board's research is capped per source, and the league's shape is arithmetic
+
+**Decision.** Three changes to the pre-draft board build, all aimed at one measured defect.
+
+1. `draft.max_source_share` in `config.toml` caps how much of the board any one website may be the
+   deciding source for. `board_build` renders it as a **player count** (`{{max_source_players}}` —
+   50 of 200 at the shipped 0.25), not as a fraction.
+2. `LeagueContext` now carries `playoff_team_count`, `playoff_seeding_rule` and
+   `regular_season_weeks`, read from ESPN's `scheduleSettings` with a `[league]` fallback, and
+   renders them as one plain-English sentence in `playoff_summary`.
+3. `board_build` computes replacement level in Python — how many players are drafted in total, and
+   how many of each kind start league-wide in any week — and hands the model the numbers.
+
+**The measurement that forced it.** The first real board, built 2026-09-08T03:52Z, had 200 tiered
+rows with a note and a source each: real research, not the fallback. But of those 200 source URLs,
+**103 were one ESPN ranking article**, 61 were one average-draft-position page and 26 one injury
+round-up — 190 of 200 from three pages. Against that article's own published top 40 the board's rank
+correlation was **0.879**, with a median displacement of four places. The departures were good and
+specific (a rookie dropped 19 places on a 50/50 ankle, a back dropped 16 on a groin injury with a
+two-to-three-week estimate, each cited), but the *spine* of the order was one outlet's list with
+corrections applied. Every other manager in the league can read that article.
+
+**Why a cap on the source rather than a rule about the ranking.** "Do not copy" is unfalsifiable and
+unenforceable; "no single website may be the cited source for more than 50 of 200 players" is
+neither. It also fails in the right direction: a model that cannot lean on one page has to go and
+read a fourth, and disagreement between sources is the thing that produces an independent order.
+
+**Why a player count and not a share.** The model would otherwise have to multiply the fraction by
+the board size before it could obey the rule, which is arithmetic offered to something that is being
+asked to do research. Python owns the arithmetic in this application; that rule does not stop at the
+database boundary.
+
+**Why replacement level is computed here and not left to the prompt.** How many players get drafted
+at all, and how many start each week, is the one fact no published ranking can carry — every one of
+them is written for a different number of teams — and it is bookkeeping, which is Python's half of
+the split. Handing over "96 players are drafted in total; 12 running backs start across the whole
+league in any given week" is a fact. Asking a model to derive it from a roster table mid-research is
+an invitation to derive it wrong and then rank from the wrong number.
+
+**Why the playoff shape is read rather than assumed.** Four of six teams here qualify and the seeds
+are ordered by `TOTAL_POINTS_SCORED`, so the season is a race to score points in total rather than a
+sequence of weeks to win. That inverts the usual published advice about chasing a high ceiling, and
+it is a league setting rather than a matter of taste — so it is read from `scheduleSettings`, said
+in words a beginner can repeat, and reported as **"not known"** when nothing has been read. A default
+here would be a silent strategy.
+
+**What deliberately did not change.** The board schema. `BOARD_SCHEMA` and the `board` table are
+untouched, so `source_url` still means one link — redefined by the prompt as *the page that decided
+this player's place*, which is what makes the cap measurable after the fact from the `notes` table.
+Adding a per-player source array would have needed a migration on the eve of a draft to hold data
+nothing reads yet.
+
+**Would revisit if:** the cap starts binding on a player everyone genuinely agrees about, and the
+research spends its budget hunting a fourth opinion nobody needed. The dial is in `config.toml` for
+that reason.

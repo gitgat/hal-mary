@@ -36,6 +36,11 @@ from hal_mary.draft.board import normalize_name
 from hal_mary.jobs.registry import JobFailed, register
 from hal_mary.league import LeagueContext, load_league_context
 
+# Slot wording lives in exactly one place and this is a reader of it, the same
+# way ``hal_mary.chat`` is. A prompt handed bare slot codes writes notes in bare
+# slot codes, and "RB/WR/TE" is not a phrase Caroline can act on.
+from hal_mary.web.positions import SLOT_LABELS, slot_sort_key
+
 __all__ = ["BOARD_SCHEMA", "JOB_NAME", "PROMPT_FILE", "build_board", "run"]
 
 log = logging.getLogger(__name__)
@@ -225,6 +230,9 @@ def _prompt_values(league: LeagueContext, draft_config: Any) -> dict[str, Any]:
         "scoring_type": league.scoring_type or "unknown",
         "draft_type": (league.draft_type or "snake").lower(),
         "roster_slots": _slot_lines(league),
+        "league_shape": _shape_lines(league),
+        "playoff_summary": league.playoff_summary,
+        "max_source_players": int(draft_config.board_size * draft_config.max_source_share),
         "rounds": league.rounds,
         "total_picks": league.total_picks,
         "my_draft_slot": league.my_draft_slot,
@@ -236,7 +244,48 @@ def _prompt_values(league: LeagueContext, draft_config: Any) -> dict[str, Any]:
 
 
 def _slot_lines(league: LeagueContext) -> str:
-    return "\n".join(f"  - {slot}: {count}" for slot, count in league.roster_slots.items())
+    """The roster, named the way Caroline's own screen names it.
+
+    The code stays beside the words rather than replacing them — ESPN shows the
+    code, so it is worth recognising — but it is never the only label, which is
+    the rule ``web/positions.py`` exists to hold.
+    """
+    ordered = sorted(league.roster_slots.items(), key=lambda item: slot_sort_key(item[0]))
+    return "\n".join(
+        f"  - {SLOT_LABELS.get(slot, slot)} (ESPN calls this slot `{slot}`): {count}"
+        for slot, count in ordered
+    )
+
+
+def _shape_lines(league: LeagueContext) -> str:
+    """Replacement level, worked out here rather than left to the model.
+
+    This is the arithmetic no published ranking can carry, because every
+    published ranking is written for some other number of teams. How many
+    players are drafted at all, and how many of each kind actually start in any
+    given week, is what decides whether a position is scarce — and it is
+    bookkeeping, which is Python's half of this application.
+
+    Bench and injured-reserve slots are excluded from the weekly counts on
+    purpose: a bench player scores nothing, so the number that sets replacement
+    level is the number of *starting* slots across the league.
+    """
+    lines = [
+        (
+            f"- {league.total_picks} players are drafted in total "
+            f"({league.team_count} teams x {league.rounds} rounds). Every other player in "
+            "the NFL is unowned when the draft ends, and can be picked up free at any "
+            "point in the season."
+        ),
+    ]
+    starters = sorted(league.starting_slots.items(), key=lambda item: slot_sort_key(item[0]))
+    for slot, count in starters:
+        league_wide = count * league.team_count
+        lines.append(
+            f"- {SLOT_LABELS.get(slot, slot)}: {count} per team, so {league_wide} start "
+            "across the whole league in any given week."
+        )
+    return "\n".join(lines)
 
 
 # --- parsing and normalising -------------------------------------------------

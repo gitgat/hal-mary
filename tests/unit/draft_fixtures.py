@@ -127,6 +127,16 @@ REAL_RAW_SETTINGS = {
         # stat 53 is "each reception"; 1.0 is what makes this a full-PPR league.
         "scoringItems": [{"statId": 53, "points": 1.0}],
     },
+    # Field for field from the live payload. Four of six teams make the
+    # playoffs and the seeds are ordered by points scored rather than by
+    # record, which is what makes the season a race to score rather than a
+    # sequence of weeks to win.
+    "scheduleSettings": {
+        "matchupPeriodCount": 14,
+        "playoffTeamCount": 4,
+        "playoffSeedingRule": "TOTAL_POINTS_SCORED",
+        "playoffReseed": False,
+    },
 }
 
 #: A ``[league]`` block for ``config.toml`` describing the same league, for the

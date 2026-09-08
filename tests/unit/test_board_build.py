@@ -293,3 +293,86 @@ def test_memory_is_passed_through_extra_context_not_concatenated(tmp_path):
     assert json.dumps(runner.calls[0]["extra_context"]) not in json.dumps(
         runner.calls[0]["prompt"]
     )
+
+
+def test_the_prompt_states_how_many_players_are_drafted_and_how_many_start(tmp_path):
+    """Replacement level is arithmetic, and Python does the arithmetic.
+
+    It is the fact a published ranking cannot carry, because every published
+    ranking is written for a different number of teams. Ninety-six players are
+    drafted here and every other player in the league is free all season; a
+    model that is not told that ranks a scarce position as though it were
+    scarce.
+    """
+    conn, settings, runner = build_ready(tmp_path, [ok_result({"players": PLAYERS})])
+
+    build_board(conn, settings, runner)
+    prompt = runner.calls[0]["prompt"]
+
+    assert "96 players are drafted in total" in prompt
+    assert "12 start" in prompt, "two running back slots across six teams"
+    assert "6 start" in prompt, "one quarterback slot across six teams"
+
+
+def test_the_prompt_names_the_roster_slots_in_words_not_only_in_codes(tmp_path):
+    """`web/positions.py` is the one place a slot is named, and the prompt is a
+    reader of it. A prompt fed bare codes writes notes in bare codes."""
+    conn, settings, runner = build_ready(tmp_path, [ok_result({"players": PLAYERS})])
+
+    build_board(conn, settings, runner)
+    prompt = runner.calls[0]["prompt"]
+
+    assert "Another running back, receiver or tight end" in prompt
+    assert "Quarterback" in prompt
+    assert "Injured reserve" in prompt
+
+
+def test_the_prompt_carries_the_playoff_shape(tmp_path):
+    conn, settings, runner = build_ready(tmp_path, [ok_result({"players": PLAYERS})])
+
+    build_board(conn, settings, runner)
+    prompt = runner.calls[0]["prompt"]
+
+    assert "4 of the 6" in prompt
+    assert "total points" in prompt
+
+
+def test_the_prompt_caps_how_much_of_the_board_one_website_may_decide(tmp_path):
+    """The measured defect this rewrite exists for: a single ranking article was
+    the cited source for 103 of 200 players. The cap is a config dial, and it
+    reaches the model as a number of players rather than as a fraction it would
+    have to multiply out itself."""
+    conn, settings, runner = build_ready(tmp_path, [ok_result({"players": PLAYERS})])
+
+    build_board(conn, settings, runner)
+    prompt = runner.calls[0]["prompt"]
+
+    share = settings.draft.max_source_share
+    cap = int(settings.draft.board_size * share)
+    assert f"{cap} of the {settings.draft.board_size}" in prompt
+    assert cap < settings.draft.board_size // 2, "a cap that allows a majority is not a cap"
+
+
+def test_the_prompt_file_refuses_to_let_one_outlet_decide_the_order():
+    text = (REPO / "prompts" / "board_build.md").read_text(encoding="utf-8").lower()
+
+    assert "independent" in text
+    assert "disagree" in text, "two lists that disagree is the information"
+    assert "{{max_source_players}}" in text
+
+
+def test_the_prompt_file_asks_about_synergy_between_picks():
+    """What Bryan asked for by name: a pick is not judged alone, it is judged
+    against the roster it joins."""
+    text = (REPO / "prompts" / "board_build.md").read_text(encoding="utf-8").lower()
+
+    for required in ("stack", "handcuff", "bye week", "already"):
+        assert required in text, f"prompts/board_build.md never mentions {required!r}"
+
+
+def test_the_prompt_file_says_where_a_synergy_is_only_extra_risk():
+    """Cargo-culting tournament strategy into a season-long league is the
+    failure mode a prompt that only praised stacking would produce."""
+    text = (REPO / "prompts" / "board_build.md").read_text(encoding="utf-8").lower()
+
+    assert "variance" in text or "swing" in text or "riskier" in text
