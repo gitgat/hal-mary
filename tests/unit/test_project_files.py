@@ -14,6 +14,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from hal_mary.config import ENV_KEYS, load_settings
 
 REPO = Path(__file__).resolve().parents[2]
@@ -174,3 +176,37 @@ def test_no_tracked_file_is_a_symlink():
 
     links = [line.split("\t", 1)[1] for line in listing if line.startswith("120000")]
     assert not links, f"tracked symlinks: {links}"
+
+
+def test_no_tracked_file_carries_the_real_league_id():
+    """The league id is an identifier for a private league, like a SWID.
+
+    This one nearly went in. The commit that taught the fixture recorder to
+    substitute the league id used the *real* id as the example payload in its
+    own test — the leak, written into the test that exists to prevent it. A
+    number is not obviously a secret the way `ESPN_S2=AEB...` is, so nothing
+    reading the diff flinched.
+
+    This is a question about the **box**, not about this code: it can only be
+    asked where the real id is configured. On a box without one it skips and
+    says so, and on Bryan's box and the production VM it runs and bites. Names
+    and ids in git history cannot be removed by a later commit, so the check
+    has to happen before the commit, not after.
+    """
+    league_id = load_settings().league_id
+    if not league_id:
+        pytest.skip("no LEAGUE_ID configured on this box; nothing to search for")
+
+    result = subprocess.run(
+        ["git", "grep", "-I", "-l", "-F", str(league_id)],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    # `git grep` exits 1 for "no matches", which is the answer we want, and 2+
+    # for "I could not look" — which must not read as a clean bill of health.
+    assert result.returncode in (0, 1), f"git grep failed: {result.stderr.strip()}"
+
+    tracked = result.stdout.split()
+    assert not tracked, f"the real league id appears in tracked files: {tracked}"

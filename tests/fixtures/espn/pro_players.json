@@ -1,25 +1,87 @@
 [
   {
-    "id": 3139477,
-    "fullName": "Patrick Mahomes",
-    "defaultPositionId": 1,
-    "proTeamId": 12,
-    "active": true,
-    "droppable": true,
+    "id": 4685278,
+    "fullName": "Luther Burden III",
+    "defaultPositionId": 3,
+    "proTeamId": 3,
     "eligibleSlots": [
-      0,
+      3,
+      4,
+      5,
+      23,
       7,
       20,
       21
     ]
   },
   {
-    "id": 4362628,
-    "fullName": "Bijan Robinson",
+    "id": 15818,
+    "fullName": "Keenan Allen",
+    "defaultPositionId": 3,
+    "proTeamId": 11,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 15847,
+    "fullName": "Travis Kelce",
+    "defaultPositionId": 4,
+    "proTeamId": 12,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685415,
+    "fullName": "Travis Hunter",
+    "defaultPositionId": 3,
+    "proTeamId": 30,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21,
+      12,
+      14,
+      15
+    ]
+  },
+  {
+    "id": 4832800,
+    "fullName": "Denzel Boston",
+    "defaultPositionId": 3,
+    "proTeamId": 5,
+    "eligibleSlots": [
+      25,
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685382,
+    "fullName": "Omarion Hampton",
     "defaultPositionId": 2,
-    "proTeamId": 1,
-    "active": true,
-    "droppable": true,
+    "proTeamId": 24,
     "eligibleSlots": [
       2,
       3,
@@ -30,15 +92,27 @@
     ]
   },
   {
-    "id": 4241389,
-    "fullName": "Ja'Marr Chase",
-    "defaultPositionId": 3,
-    "proTeamId": 4,
-    "active": true,
-    "droppable": true,
+    "id": 4259545,
+    "fullName": "D'Andre Swift",
+    "defaultPositionId": 2,
+    "proTeamId": 3,
     "eligibleSlots": [
-      4,
+      2,
       3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4701936,
+    "fullName": "Matthew Golden",
+    "defaultPositionId": 3,
+    "proTeamId": 9,
+    "eligibleSlots": [
+      3,
+      4,
       5,
       23,
       7,
@@ -47,15 +121,546 @@
     ]
   },
   {
-    "id": 3116365,
-    "fullName": "Travis Kelce",
-    "defaultPositionId": 4,
-    "proTeamId": 12,
-    "active": true,
-    "droppable": true,
+    "id": 3915416,
+    "fullName": "DJ Moore",
+    "defaultPositionId": 3,
+    "proTeamId": 2,
     "eligibleSlots": [
-      6,
+      3,
+      4,
       5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685472,
+    "fullName": "Tetairoa McMillan",
+    "defaultPositionId": 3,
+    "proTeamId": 29,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3915511,
+    "fullName": "Joe Burrow",
+    "defaultPositionId": 1,
+    "proTeamId": 4,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4882093,
+    "fullName": "Bhayshul Tuten",
+    "defaultPositionId": 2,
+    "proTeamId": 30,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685512,
+    "fullName": "Jadarian Price",
+    "defaultPositionId": 2,
+    "proTeamId": 26,
+    "eligibleSlots": [
+      25,
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685702,
+    "fullName": "Quinshon Judkins",
+    "defaultPositionId": 2,
+    "proTeamId": 5,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4374302,
+    "fullName": "Amon-Ra St. Brown",
+    "defaultPositionId": 3,
+    "proTeamId": 8,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4702555,
+    "fullName": "Jonah Coleman",
+    "defaultPositionId": 2,
+    "proTeamId": 7,
+    "eligibleSlots": [
+      25,
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3916148,
+    "fullName": "Tony Pollard",
+    "defaultPositionId": 2,
+    "proTeamId": 10,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 16737,
+    "fullName": "Mike Evans",
+    "defaultPositionId": 3,
+    "proTeamId": 25,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 16800,
+    "fullName": "Davante Adams",
+    "defaultPositionId": 3,
+    "proTeamId": 14,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4047365,
+    "fullName": "Josh Jacobs",
+    "defaultPositionId": 2,
+    "proTeamId": 9,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4686361,
+    "fullName": "Cam Little",
+    "defaultPositionId": 5,
+    "proTeamId": 30,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3916387,
+    "fullName": "Lamar Jackson",
+    "defaultPositionId": 1,
+    "proTeamId": 33,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3916433,
+    "fullName": "Jakobi Meyers",
+    "defaultPositionId": 3,
+    "proTeamId": 30,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4047650,
+    "fullName": "DK Metcalf",
+    "defaultPositionId": 3,
+    "proTeamId": 23,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4047646,
+    "fullName": "A.J. Brown",
+    "defaultPositionId": 3,
+    "proTeamId": 17,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4686658,
+    "fullName": "Mike Washington Jr.",
+    "defaultPositionId": 2,
+    "proTeamId": 13,
+    "eligibleSlots": [
+      25,
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 17372,
+    "fullName": "Chris Boswell",
+    "defaultPositionId": 5,
+    "proTeamId": 23,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 17427,
+    "fullName": "Cairo Santos",
+    "defaultPositionId": 5,
+    "proTeamId": 3,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4572680,
+    "fullName": "Tucker Kraft",
+    "defaultPositionId": 4,
+    "proTeamId": 9,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3917315,
+    "fullName": "Kyler Murray",
+    "defaultPositionId": 1,
+    "proTeamId": 16,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4360078,
+    "fullName": "Alec Pierce",
+    "defaultPositionId": 3,
+    "proTeamId": 11,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3917792,
+    "fullName": "Daniel Jones",
+    "defaultPositionId": 1,
+    "proTeamId": 11,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4032473,
+    "fullName": "Rashid Shaheed",
+    "defaultPositionId": 3,
+    "proTeamId": 26,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4360310,
+    "fullName": "Trevor Lawrence",
+    "defaultPositionId": 1,
+    "proTeamId": 30,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4360234,
+    "fullName": "Evan McPherson",
+    "defaultPositionId": 5,
+    "proTeamId": 4,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4360248,
+    "fullName": "Kyle Pitts Sr.",
+    "defaultPositionId": 4,
+    "proTeamId": 1,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4360569,
+    "fullName": "Jordan Mason",
+    "defaultPositionId": 2,
+    "proTeamId": 16,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 5081397,
+    "fullName": "Dylan Sampson",
+    "defaultPositionId": 2,
+    "proTeamId": 5,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4360689,
+    "fullName": "Tyler Shough",
+    "defaultPositionId": 1,
+    "proTeamId": 18,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3918298,
+    "fullName": "Josh Allen",
+    "defaultPositionId": 1,
+    "proTeamId": 2,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4426338,
+    "fullName": "Bo Nix",
+    "defaultPositionId": 1,
+    "proTeamId": 7,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4426348,
+    "fullName": "Jayden Daniels",
+    "defaultPositionId": 1,
+    "proTeamId": 28,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4426354,
+    "fullName": "George Pickens",
+    "defaultPositionId": 3,
+    "proTeamId": 6,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4360761,
+    "fullName": "Michael Wilson",
+    "defaultPositionId": 3,
+    "proTeamId": 22,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4426502,
+    "fullName": "Drake London",
+    "defaultPositionId": 3,
+    "proTeamId": 1,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4426385,
+    "fullName": "Zach Charbonnet",
+    "defaultPositionId": 2,
+    "proTeamId": 26,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4426388,
+    "fullName": "Jameson Williams",
+    "defaultPositionId": 3,
+    "proTeamId": 8,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4361050,
+    "fullName": "Isaiah Likely",
+    "defaultPositionId": 4,
+    "proTeamId": 19,
+    "eligibleSlots": [
+      5,
+      6,
       23,
       7,
       20,
@@ -64,13 +669,12 @@
   },
   {
     "id": 4426515,
-    "fullName": "Sam LaPorta",
-    "defaultPositionId": 4,
-    "proTeamId": 8,
-    "active": true,
-    "droppable": true,
+    "fullName": "Puka Nacua",
+    "defaultPositionId": 3,
+    "proTeamId": 14,
     "eligibleSlots": [
-      6,
+      3,
+      4,
       5,
       23,
       7,
@@ -79,18 +683,766 @@
     ]
   },
   {
-    "id": 4569618,
-    "fullName": "Puka Nacua",
+    "id": 4262921,
+    "fullName": "Justin Jefferson",
     "defaultPositionId": 3,
-    "proTeamId": 14,
-    "active": true,
-    "droppable": true,
+    "proTeamId": 16,
     "eligibleSlots": [
-      4,
       3,
+      4,
       5,
       23,
       7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4688813,
+    "fullName": "Josh Downs",
+    "defaultPositionId": 3,
+    "proTeamId": 11,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4361307,
+    "fullName": "Trey McBride",
+    "defaultPositionId": 4,
+    "proTeamId": 22,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3116165,
+    "fullName": "Chris Godwin Jr.",
+    "defaultPositionId": 3,
+    "proTeamId": 27,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4689114,
+    "fullName": "Jaxson Dart",
+    "defaultPositionId": 1,
+    "proTeamId": 19,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4361432,
+    "fullName": "Romeo Doubs",
+    "defaultPositionId": 3,
+    "proTeamId": 17,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4361370,
+    "fullName": "Chris Olave",
+    "defaultPositionId": 3,
+    "proTeamId": 18,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4361579,
+    "fullName": "Javonte Williams",
+    "defaultPositionId": 2,
+    "proTeamId": 6,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4361529,
+    "fullName": "Isiah Pacheco",
+    "defaultPositionId": 2,
+    "proTeamId": 8,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3116365,
+    "fullName": "Mark Andrews",
+    "defaultPositionId": 4,
+    "proTeamId": 33,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4574716,
+    "fullName": "Harrison Mevis",
+    "defaultPositionId": 5,
+    "proTeamId": 14,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4427366,
+    "fullName": "Breece Hall",
+    "defaultPositionId": 2,
+    "proTeamId": 20,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4361741,
+    "fullName": "Brock Purdy",
+    "defaultPositionId": 1,
+    "proTeamId": 25,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4869645,
+    "fullName": "Caleb Douglas",
+    "defaultPositionId": 3,
+    "proTeamId": 15,
+    "eligibleSlots": [
+      25,
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4362081,
+    "fullName": "Cameron Dicker",
+    "defaultPositionId": 5,
+    "proTeamId": 24,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4362238,
+    "fullName": "Chase Brown",
+    "defaultPositionId": 2,
+    "proTeamId": 4,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4362249,
+    "fullName": "Jayden Reed",
+    "defaultPositionId": 3,
+    "proTeamId": 9,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4575131,
+    "fullName": "Jacory Croskey-Merritt",
+    "defaultPositionId": 2,
+    "proTeamId": 28,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 5083076,
+    "fullName": "Harold Fannin Jr.",
+    "defaultPositionId": 4,
+    "proTeamId": 5,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4689936,
+    "fullName": "Jake Bates",
+    "defaultPositionId": 5,
+    "proTeamId": 8,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3117256,
+    "fullName": "Dalton Schultz",
+    "defaultPositionId": 4,
+    "proTeamId": 34,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3117251,
+    "fullName": "Christian McCaffrey",
+    "defaultPositionId": 2,
+    "proTeamId": 25,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 5083315,
+    "fullName": "Kenyon Sadiq",
+    "defaultPositionId": 4,
+    "proTeamId": 20,
+    "eligibleSlots": [
+      25,
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4362619,
+    "fullName": "Chris Rodriguez Jr.",
+    "defaultPositionId": 2,
+    "proTeamId": 30,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4362628,
+    "fullName": "Ja'Marr Chase",
+    "defaultPositionId": 3,
+    "proTeamId": 4,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4034949,
+    "fullName": "Eddy Pineiro",
+    "defaultPositionId": 5,
+    "proTeamId": 25,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4870653,
+    "fullName": "KC Concepcion",
+    "defaultPositionId": 3,
+    "proTeamId": 5,
+    "eligibleSlots": [
+      25,
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4723086,
+    "fullName": "Colston Loveland",
+    "defaultPositionId": 4,
+    "proTeamId": 3,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4428331,
+    "fullName": "Rashee Rice",
+    "defaultPositionId": 3,
+    "proTeamId": 12,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4379399,
+    "fullName": "James Cook III",
+    "defaultPositionId": 2,
+    "proTeamId": 2,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4870808,
+    "fullName": "Jeremiyah Love",
+    "defaultPositionId": 2,
+    "proTeamId": 22,
+    "eligibleSlots": [
+      25,
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4870795,
+    "fullName": "Makai Lemon",
+    "defaultPositionId": 3,
+    "proTeamId": 21,
+    "eligibleSlots": [
+      25,
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4608686,
+    "fullName": "Kyle Monangai",
+    "defaultPositionId": 2,
+    "proTeamId": 3,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4870847,
+    "fullName": "Ja'Kobi Lane",
+    "defaultPositionId": 3,
+    "proTeamId": 33,
+    "eligibleSlots": [
+      25,
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4871023,
+    "fullName": "Carnell Tate",
+    "defaultPositionId": 3,
+    "proTeamId": 10,
+    "eligibleSlots": [
+      25,
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4428557,
+    "fullName": "Tyjae Spears",
+    "defaultPositionId": 2,
+    "proTeamId": 10,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4248528,
+    "fullName": "Christian Watson",
+    "defaultPositionId": 3,
+    "proTeamId": 9,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3150744,
+    "fullName": "Chase McLaughlin",
+    "defaultPositionId": 5,
+    "proTeamId": 27,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 2577417,
+    "fullName": "Dak Prescott",
+    "defaultPositionId": 1,
+    "proTeamId": 6,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4428718,
+    "fullName": "Tre Tucker",
+    "defaultPositionId": 3,
+    "proTeamId": 13,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4035538,
+    "fullName": "David Montgomery",
+    "defaultPositionId": 2,
+    "proTeamId": 34,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3052587,
+    "fullName": "Baker Mayfield",
+    "defaultPositionId": 1,
+    "proTeamId": 27,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3953687,
+    "fullName": "Brandon Aubrey",
+    "defaultPositionId": 5,
+    "proTeamId": 6,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4035687,
+    "fullName": "Michael Pittman Jr.",
+    "defaultPositionId": 3,
+    "proTeamId": 23,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4429013,
+    "fullName": "Tank Bigsby",
+    "defaultPositionId": 2,
+    "proTeamId": 21,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4429025,
+    "fullName": "Quentin Johnston",
+    "defaultPositionId": 3,
+    "proTeamId": 24,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4429023,
+    "fullName": "MarShawn Lloyd",
+    "defaultPositionId": 2,
+    "proTeamId": 9,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4429059,
+    "fullName": "Woody Marks",
+    "defaultPositionId": 2,
+    "proTeamId": 34,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4429160,
+    "fullName": "De'Von Achane",
+    "defaultPositionId": 2,
+    "proTeamId": 15,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4429096,
+    "fullName": "Blake Corum",
+    "defaultPositionId": 2,
+    "proTeamId": 14,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4429205,
+    "fullName": "Jordan Addison",
+    "defaultPositionId": 3,
+    "proTeamId": 16,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4036133,
+    "fullName": "T.J. Hockenson",
+    "defaultPositionId": 4,
+    "proTeamId": 16,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4036378,
+    "fullName": "Jordan Love",
+    "defaultPositionId": 1,
+    "proTeamId": 9,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4429615,
+    "fullName": "Zay Flowers",
+    "defaultPositionId": 3,
+    "proTeamId": 33,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 2971573,
+    "fullName": "Ka'imi Fairbairn",
+    "defaultPositionId": 5,
+    "proTeamId": 34,
+    "eligibleSlots": [
+      17,
       20,
       21
     ]
@@ -100,8 +1452,106 @@
     "fullName": "Jahmyr Gibbs",
     "defaultPositionId": 2,
     "proTeamId": 8,
-    "active": true,
-    "droppable": true,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4430027,
+    "fullName": "Sam LaPorta",
+    "defaultPositionId": 4,
+    "proTeamId": 8,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4430539,
+    "fullName": "Brenton Strange",
+    "defaultPositionId": 4,
+    "proTeamId": 30,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4430807,
+    "fullName": "Bijan Robinson",
+    "defaultPositionId": 2,
+    "proTeamId": 1,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4430834,
+    "fullName": "Jalen McMillan",
+    "defaultPositionId": 3,
+    "proTeamId": 27,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4430737,
+    "fullName": "Kyren Williams",
+    "defaultPositionId": 2,
+    "proTeamId": 14,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4430878,
+    "fullName": "Jaxon Smith-Njigba",
+    "defaultPositionId": 3,
+    "proTeamId": 26,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3054850,
+    "fullName": "Alvin Kamara",
+    "defaultPositionId": 2,
+    "proTeamId": 18,
     "eligibleSlots": [
       2,
       3,
@@ -116,11 +1566,9 @@
     "fullName": "Rome Odunze",
     "defaultPositionId": 3,
     "proTeamId": 3,
-    "active": true,
-    "droppable": true,
     "eligibleSlots": [
-      4,
       3,
+      4,
       5,
       23,
       7,
@@ -129,14 +1577,1840 @@
     ]
   },
   {
-    "id": 15818,
-    "fullName": "Justin Tucker",
-    "defaultPositionId": 5,
+    "id": 4431452,
+    "fullName": "Drake Maye",
+    "defaultPositionId": 1,
+    "proTeamId": 17,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4431459,
+    "fullName": "Tyler Warren",
+    "defaultPositionId": 4,
+    "proTeamId": 11,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4366031,
+    "fullName": "Tank Dell",
+    "defaultPositionId": 3,
+    "proTeamId": 34,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4431611,
+    "fullName": "Caleb Williams",
+    "defaultPositionId": 1,
+    "proTeamId": 3,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4595348,
+    "fullName": "Malik Nabers",
+    "defaultPositionId": 3,
+    "proTeamId": 19,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4038441,
+    "fullName": "Justice Hill",
+    "defaultPositionId": 2,
     "proTeamId": 33,
-    "active": true,
-    "droppable": true,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3121023,
+    "fullName": "Dallas Goedert",
+    "defaultPositionId": 4,
+    "proTeamId": 21,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4038815,
+    "fullName": "Rico Dowdle",
+    "defaultPositionId": 2,
+    "proTeamId": 23,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4890973,
+    "fullName": "Ashton Jeanty",
+    "defaultPositionId": 2,
+    "proTeamId": 13,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4678008,
+    "fullName": "Jonathon Brooks",
+    "defaultPositionId": 2,
+    "proTeamId": 29,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3121422,
+    "fullName": "Terry McLaurin",
+    "defaultPositionId": 3,
+    "proTeamId": 28,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4038941,
+    "fullName": "Justin Herbert",
+    "defaultPositionId": 1,
+    "proTeamId": 24,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3055899,
+    "fullName": "Harrison Butker",
+    "defaultPositionId": 5,
+    "proTeamId": 12,
     "eligibleSlots": [
       17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4710714,
+    "fullName": "De'Zhaun Stribling",
+    "defaultPositionId": 3,
+    "proTeamId": 25,
+    "eligibleSlots": [
+      25,
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4596334,
+    "fullName": "Keaton Mitchell",
+    "defaultPositionId": 2,
+    "proTeamId": 24,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4612826,
+    "fullName": "Ladd McConkey",
+    "defaultPositionId": 3,
+    "proTeamId": 24,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4596448,
+    "fullName": "Bucky Irving",
+    "defaultPositionId": 2,
+    "proTeamId": 27,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4432620,
+    "fullName": "Parker Washington",
+    "defaultPositionId": 3,
+    "proTeamId": 30,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4432577,
+    "fullName": "C.J. Stroud",
+    "defaultPositionId": 1,
+    "proTeamId": 34,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4432773,
+    "fullName": "Brian Thomas Jr.",
+    "defaultPositionId": 3,
+    "proTeamId": 30,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4432665,
+    "fullName": "Brock Bowers",
+    "defaultPositionId": 4,
+    "proTeamId": 13,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4432710,
+    "fullName": "TreVeyon Henderson",
+    "defaultPositionId": 2,
+    "proTeamId": 17,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4432708,
+    "fullName": "Marvin Harrison Jr.",
+    "defaultPositionId": 3,
+    "proTeamId": 22,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3040151,
+    "fullName": "George Kittle",
+    "defaultPositionId": 4,
+    "proTeamId": 25,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3925357,
+    "fullName": "Calvin Ridley",
+    "defaultPositionId": 3,
+    "proTeamId": 10,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4597500,
+    "fullName": "Adonai Mitchell",
+    "defaultPositionId": 3,
+    "proTeamId": 20,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4695883,
+    "fullName": "Jalen Coker",
+    "defaultPositionId": 3,
+    "proTeamId": 29,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3139477,
+    "fullName": "Patrick Mahomes",
+    "defaultPositionId": 1,
+    "proTeamId": 12,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4040715,
+    "fullName": "Jalen Hurts",
+    "defaultPositionId": 1,
+    "proTeamId": 21,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 2976212,
+    "fullName": "Stefon Diggs",
+    "defaultPositionId": 3,
+    "proTeamId": 28,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4385690,
+    "fullName": "Dalton Kincaid",
+    "defaultPositionId": 4,
+    "proTeamId": 2,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4696981,
+    "fullName": "Cam Skattebo",
+    "defaultPositionId": 2,
+    "proTeamId": 19,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3042519,
+    "fullName": "Aaron Jones Sr.",
+    "defaultPositionId": 2,
+    "proTeamId": 16,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4697815,
+    "fullName": "Rachaad White",
+    "defaultPositionId": 2,
+    "proTeamId": 28,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4697745,
+    "fullName": "Tyler Loop",
+    "defaultPositionId": 5,
+    "proTeamId": 33,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3043078,
+    "fullName": "Derrick Henry",
+    "defaultPositionId": 2,
+    "proTeamId": 33,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4567048,
+    "fullName": "Kenneth Walker III",
+    "defaultPositionId": 2,
+    "proTeamId": 12,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4567104,
+    "fullName": "Will Reichard",
+    "defaultPositionId": 5,
+    "proTeamId": 16,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 12483,
+    "fullName": "Matthew Stafford",
+    "defaultPositionId": 1,
+    "proTeamId": 14,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4239993,
+    "fullName": "Tee Higgins",
+    "defaultPositionId": 3,
+    "proTeamId": 4,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4239996,
+    "fullName": "Travis Etienne Jr.",
+    "defaultPositionId": 2,
+    "proTeamId": 18,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4567750,
+    "fullName": "Emeka Egbuka",
+    "defaultPositionId": 3,
+    "proTeamId": 27,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3912547,
+    "fullName": "Sam Darnold",
+    "defaultPositionId": 1,
+    "proTeamId": 26,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3126486,
+    "fullName": "Deebo Samuel Sr.",
+    "defaultPositionId": 3,
+    "proTeamId": 25,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4371733,
+    "fullName": "Kenny Gainwell",
+    "defaultPositionId": 2,
+    "proTeamId": 27,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4683062,
+    "fullName": "Xavier Worthy",
+    "defaultPositionId": 3,
+    "proTeamId": 12,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4568490,
+    "fullName": "RJ Harvey",
+    "defaultPositionId": 2,
+    "proTeamId": 7,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3929645,
+    "fullName": "Juwan Johnson",
+    "defaultPositionId": 4,
+    "proTeamId": 18,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3929630,
+    "fullName": "Saquon Barkley",
+    "defaultPositionId": 2,
+    "proTeamId": 21,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4372016,
+    "fullName": "Jaylen Waddle",
+    "defaultPositionId": 3,
+    "proTeamId": 7,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4241389,
+    "fullName": "CeeDee Lamb",
+    "defaultPositionId": 3,
+    "proTeamId": 6,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4241416,
+    "fullName": "Chuba Hubbard",
+    "defaultPositionId": 2,
+    "proTeamId": 29,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4880281,
+    "fullName": "Jordyn Tyson",
+    "defaultPositionId": 3,
+    "proTeamId": 18,
+    "eligibleSlots": [
+      25,
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4569173,
+    "fullName": "Rhamondre Stevenson",
+    "defaultPositionId": 2,
+    "proTeamId": 17,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4241463,
+    "fullName": "Jerry Jeudy",
+    "defaultPositionId": 3,
+    "proTeamId": 5,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4241474,
+    "fullName": "Brian Robinson Jr.",
+    "defaultPositionId": 2,
+    "proTeamId": 1,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4241478,
+    "fullName": "DeVonta Smith",
+    "defaultPositionId": 3,
+    "proTeamId": 21,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4258173,
+    "fullName": "Nico Collins",
+    "defaultPositionId": 3,
+    "proTeamId": 34,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16005,
+    "fullName": "Browns D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 5,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16007,
+    "fullName": "Broncos D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 7,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16008,
+    "fullName": "Lions D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 8,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16009,
+    "fullName": "Packers D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 9,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16012,
+    "fullName": "Chiefs D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 12,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16014,
+    "fullName": "Rams D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 14,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16017,
+    "fullName": "Patriots D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 17,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16021,
+    "fullName": "Eagles D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 21,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16023,
+    "fullName": "Steelers D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 23,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16024,
+    "fullName": "Chargers D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 24,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16026,
+    "fullName": "Seahawks D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 26,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16027,
+    "fullName": "Buccaneers D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 27,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16030,
+    "fullName": "Jaguars D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 30,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16033,
+    "fullName": "Ravens D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 33,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": -16034,
+    "fullName": "Texans D/ST",
+    "defaultPositionId": 16,
+    "proTeamId": 34,
+    "eligibleSlots": [
+      16,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4569587,
+    "fullName": "Wan'Dale Robinson",
+    "defaultPositionId": 3,
+    "proTeamId": 10,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4569618,
+    "fullName": "Garrett Wilson",
+    "defaultPositionId": 3,
+    "proTeamId": 20,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4241985,
+    "fullName": "J.K. Dobbins",
+    "defaultPositionId": 2,
+    "proTeamId": 7,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4569987,
+    "fullName": "Jaylen Warren",
+    "defaultPositionId": 2,
+    "proTeamId": 23,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4242335,
+    "fullName": "Jonathan Taylor",
+    "defaultPositionId": 2,
+    "proTeamId": 11,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4242355,
+    "fullName": "Jake Ferguson",
+    "defaultPositionId": 4,
+    "proTeamId": 6,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4570037,
+    "fullName": "Terrance Ferguson",
+    "defaultPositionId": 4,
+    "proTeamId": 14,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4242512,
+    "fullName": "Malik Willis",
+    "defaultPositionId": 1,
+    "proTeamId": 15,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4373626,
+    "fullName": "Tyler Allgeier",
+    "defaultPositionId": 2,
+    "proTeamId": 22,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3046439,
+    "fullName": "Hunter Henry",
+    "defaultPositionId": 4,
+    "proTeamId": 17,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3128429,
+    "fullName": "Courtland Sutton",
+    "defaultPositionId": 3,
+    "proTeamId": 7,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 2473037,
+    "fullName": "Jason Myers",
+    "defaultPositionId": 5,
+    "proTeamId": 26,
+    "eligibleSlots": [
+      17,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4373678,
+    "fullName": "Khalil Shakir",
+    "defaultPositionId": 3,
+    "proTeamId": 2,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3046779,
+    "fullName": "Jared Goff",
+    "defaultPositionId": 1,
+    "proTeamId": 8,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685266,
+    "fullName": "Jaishawn Barham",
+    "defaultPositionId": 11,
+    "proTeamId": 6,
+    "eligibleSlots": [
+      10,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685261,
+    "fullName": "Germie Bernard",
+    "defaultPositionId": 3,
+    "proTeamId": 23,
+    "eligibleSlots": [
+      25,
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4242899,
+    "fullName": "DJ Davidson",
+    "defaultPositionId": 9,
+    "proTeamId": 28,
+    "eligibleSlots": [
+      8,
+      11,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3915189,
+    "fullName": "Roquan Smith",
+    "defaultPositionId": 11,
+    "proTeamId": 33,
+    "eligibleSlots": [
+      10,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685279,
+    "fullName": "Jaydon Blue",
+    "defaultPositionId": 2,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4259300,
+    "fullName": "Tre Avery",
+    "defaultPositionId": 12,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      12,
+      14,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685287,
+    "fullName": "Jihaad Campbell",
+    "defaultPositionId": 11,
+    "proTeamId": 21,
+    "eligibleSlots": [
+      10,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4259305,
+    "fullName": "Bo Melton",
+    "defaultPositionId": 3,
+    "proTeamId": 9,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4259308,
+    "fullName": "Raheem Blackshear",
+    "defaultPositionId": 2,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4799994,
+    "fullName": "Brett Thorson",
+    "defaultPositionId": 7,
+    "proTeamId": 16,
+    "eligibleSlots": [
+      25,
+      18,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 15795,
+    "fullName": "DeAndre Hopkins",
+    "defaultPositionId": 3,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685305,
+    "fullName": "Brandon Cleveland",
+    "defaultPositionId": 9,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      25,
+      8,
+      11,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3128720,
+    "fullName": "Nick Chubb",
+    "defaultPositionId": 2,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3128715,
+    "fullName": "Lorenzo Carter",
+    "defaultPositionId": 10,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      9,
+      11,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4259324,
+    "fullName": "Travis Vokolek",
+    "defaultPositionId": 4,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 15807,
+    "fullName": "Cordarrelle Patterson",
+    "defaultPositionId": 2,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685307,
+    "fullName": "Kevin Coleman Jr.",
+    "defaultPositionId": 3,
+    "proTeamId": 15,
+    "eligibleSlots": [
+      25,
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685315,
+    "fullName": "Dani Dennis-Sutton",
+    "defaultPositionId": 10,
+    "proTeamId": 9,
+    "eligibleSlots": [
+      9,
+      11,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685201,
+    "fullName": "Tanner McKee",
+    "defaultPositionId": 1,
+    "proTeamId": 21,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 15835,
+    "fullName": "Zach Ertz",
+    "defaultPositionId": 4,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      5,
+      6,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 15841,
+    "fullName": "Johnathan Hankins",
+    "defaultPositionId": 9,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      8,
+      11,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 15846,
+    "fullName": "John Jenkins",
+    "defaultPositionId": 9,
+    "proTeamId": 33,
+    "eligibleSlots": [
+      8,
+      11,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 15851,
+    "fullName": "Tyrann Mathieu",
+    "defaultPositionId": 13,
+    "proTeamId": 18,
+    "eligibleSlots": [
+      13,
+      14,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4570546,
+    "fullName": "Swayze Bozeman",
+    "defaultPositionId": 11,
+    "proTeamId": 4,
+    "eligibleSlots": [
+      10,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685232,
+    "fullName": "Jaden Hicks",
+    "defaultPositionId": 13,
+    "proTeamId": 12,
+    "eligibleSlots": [
+      13,
+      14,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3915239,
+    "fullName": "Josh Hines-Allen",
+    "defaultPositionId": 10,
+    "proTeamId": 30,
+    "eligibleSlots": [
+      9,
+      11,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4259252,
+    "fullName": "James Pierre",
+    "defaultPositionId": 12,
+    "proTeamId": 16,
+    "eligibleSlots": [
+      12,
+      14,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 15863,
+    "fullName": "Darius Slay",
+    "defaultPositionId": 12,
+    "proTeamId": 2,
+    "eligibleSlots": [
+      12,
+      14,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 15864,
+    "fullName": "Geno Smith",
+    "defaultPositionId": 1,
+    "proTeamId": 20,
+    "eligibleSlots": [
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685248,
+    "fullName": "David Bailey",
+    "defaultPositionId": 10,
+    "proTeamId": 20,
+    "eligibleSlots": [
+      9,
+      11,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4570561,
+    "fullName": "Eric Gray",
+    "defaultPositionId": 2,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685247,
+    "fullName": "Braelon Allen",
+    "defaultPositionId": 2,
+    "proTeamId": 20,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685246,
+    "fullName": "Kaytron Allen",
+    "defaultPositionId": 2,
+    "proTeamId": 28,
+    "eligibleSlots": [
+      25,
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4373956,
+    "fullName": "Jonah Laulu",
+    "defaultPositionId": 9,
+    "proTeamId": 13,
+    "eligibleSlots": [
+      8,
+      11,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 15880,
+    "fullName": "Robert Woods",
+    "defaultPositionId": 3,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685402,
+    "fullName": "Domani Jackson",
+    "defaultPositionId": 12,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      25,
+      12,
+      14,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685400,
+    "fullName": "Shemar James",
+    "defaultPositionId": 11,
+    "proTeamId": 6,
+    "eligibleSlots": [
+      10,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4832846,
+    "fullName": "Demond Claiborne",
+    "defaultPositionId": 2,
+    "proTeamId": 16,
+    "eligibleSlots": [
+      25,
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685397,
+    "fullName": "Jordan James",
+    "defaultPositionId": 2,
+    "proTeamId": 25,
+    "eligibleSlots": [
+      2,
+      3,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685408,
+    "fullName": "Will Johnson",
+    "defaultPositionId": 12,
+    "proTeamId": 22,
+    "eligibleSlots": [
+      12,
+      14,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685413,
+    "fullName": "Cade Klubnik",
+    "defaultPositionId": 1,
+    "proTeamId": 20,
+    "eligibleSlots": [
+      25,
+      0,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4570738,
+    "fullName": "Ke'Shawn Williams",
+    "defaultPositionId": 3,
+    "proTeamId": 4,
+    "eligibleSlots": [
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 15928,
+    "fullName": "Sam Martin",
+    "defaultPositionId": 7,
+    "proTeamId": 29,
+    "eligibleSlots": [
+      18,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3915297,
+    "fullName": "Will Harris",
+    "defaultPositionId": 13,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      13,
+      14,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4685441,
+    "fullName": "Kendrick Law",
+    "defaultPositionId": 3,
+    "proTeamId": 8,
+    "eligibleSlots": [
+      25,
+      3,
+      4,
+      5,
+      23,
+      7,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4046353,
+    "fullName": "Stantley Thomas-Oliver III",
+    "defaultPositionId": 12,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      12,
+      14,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 4374148,
+    "fullName": "Viliami Fehoko Jr.",
+    "defaultPositionId": 9,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      8,
+      11,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3915282,
+    "fullName": "Zach Allen",
+    "defaultPositionId": 9,
+    "proTeamId": 7,
+    "eligibleSlots": [
+      8,
+      11,
+      15,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3915398,
+    "fullName": "Tommy Townsend",
+    "defaultPositionId": 7,
+    "proTeamId": 10,
+    "eligibleSlots": [
+      18,
+      20,
+      21
+    ]
+  },
+  {
+    "id": 3915396,
+    "fullName": "Darrell Taylor",
+    "defaultPositionId": 10,
+    "proTeamId": 0,
+    "eligibleSlots": [
+      9,
+      11,
+      15,
       20,
       21
     ]
