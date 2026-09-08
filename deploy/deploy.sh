@@ -2,7 +2,7 @@
 #
 # Redeploy hal-mary on the VM it already runs on.
 #
-#   ssh bryan@hal-mary.thehalf.io          # the FQDN, never the bare short name
+#   ssh you@halmary.example.com          # the FQDN, never the bare short name
 #   ~/hal-mary/deploy/deploy.sh
 #
 # Idempotent, and it refuses to do damage. Every step that could put a broken

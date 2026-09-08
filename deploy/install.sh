@@ -2,7 +2,7 @@
 #
 # First-time setup of hal-mary on a freshly provisioned VM.
 #
-#   ssh bryan@hal-mary.thehalf.io          # the FQDN, never the bare short name
+#   ssh you@halmary.example.com          # the FQDN, never the bare short name
 #   ~/hal-mary/deploy/install.sh
 #
 # Run deploy/provision-vm.sh first (node, claude, uv, sqlite3, linger, the data
@@ -125,7 +125,7 @@ uv sync || die "uv sync failed"
 
 # By IP, deliberately. On this VM `hostname -f` answers `hal-mary`, which has no
 # DNS record: it falls through Pi-hole's wildcard onto the keepalived ingress VIP
-# and lands on the swarm manager. Printing `ssh bryan@hal-mary` in the most
+# and lands on the swarm manager. Printing `ssh you@halmary` in the most
 # likely failure message would be handing someone the exact command this project
 # documented after it went wrong once already.
 BOX_ADDRESS="$(hostname -I 2>/dev/null | awk '{print $1}')"

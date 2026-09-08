@@ -165,6 +165,10 @@ def test_no_build_artifact_is_tracked():
         # stray artifact.
         or (name.endswith(".png") and not name.startswith("docs/screenshots/"))
         or name.endswith(".pyc")
+        # A database, or any copy of one. The live database holds real
+        # leaguemates' names, so a backup committed to the repo is the same
+        # disclosure wearing a timestamp. One reached `main` on 2026-09-08.
+        or ".db" in name
     ]
     assert not forbidden, f"build artifacts are tracked: {forbidden}"
 

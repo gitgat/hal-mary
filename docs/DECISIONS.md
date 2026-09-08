@@ -148,7 +148,7 @@ that same payload.
 
 ## 2026-09-07 — Deployment targets the VM by FQDN, never the short name
 
-**Decision:** everything that reaches the production VM uses `hal-mary.thehalf.io` or its IP.
+**Decision:** everything that reaches the production VM uses `halmary.example.com` or its IP.
 
 **Why:** the bare short name `hal-mary` has no DNS record. It falls through Pi-hole's wildcard for the
 domain and resolves to the keepalived ingress VIP, which currently answers as `birdo` — the swarm

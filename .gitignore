@@ -40,3 +40,14 @@ logs/
 
 # Per-task scratch briefs live in .superpowers/, never in the repo root
 BRIEF.md
+
+# Databases and their backups, wherever they land. The live one carries real
+# leaguemates' names; a copy of it in the repo is the same disclosure with an
+# extra step. One was committed on 2026-09-08 and had to be removed from
+# history, which is the expensive way to learn this.
+hal.db
+hal.db-wal
+hal.db-shm
+*.db
+*.db.backup-*
+backups/

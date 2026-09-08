@@ -917,7 +917,7 @@ def test_the_re_exec_cannot_loop(box: Box):
 
 
 def test_install_never_prints_an_ssh_command_to_a_bare_short_name(installable: Box):
-    """`hostname -f` returns `hal-mary` on the VM, and `ssh bryan@hal-mary`
+    """`hostname -f` returns `hal-mary` on the VM, and `ssh you@halmary`
     resolves through Pi-hole's wildcard onto the ingress VIP and lands on birdo,
     the swarm manager. This is the failure message most likely to be printed —
     'claude is not logged in' — so it is the one that must not say that."""

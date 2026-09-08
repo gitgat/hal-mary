@@ -186,12 +186,12 @@ sse_heartbeat_s = 15.0             # comment frame that keeps a phone's stream o
 # Which upstream addresses may set X-Forwarded-Proto / X-Forwarded-For.
 #
 # Empty means nothing is in front of us, which is right for the LAN address.
-# Behind the homelab's Traefik (https://chaos-theory.thehalf.io) this must name
+# Behind the homelab's Traefik (https://dashboard.example.com) this must name
 # the proxy: uvicorn otherwise trusts 127.0.0.1 only and drops the headers in
 # silence, so the app sees scheme "http" on an https site and sets the session
 # cookie WITHOUT Secure. The page works; the cookie is downgraded. Set this to
 # the ingress address, or "*" when nothing but the proxy can reach the port.
-forwarded_allow_ips = "192.168.1.163"   # birdo, the host Traefik runs on
+forwarded_allow_ips = "192.0.2.20"   # birdo, the host Traefik runs on
 auth_check_seconds = 3600          # how often the status page re-checks the ESPN cookies
 login_max_attempts = 5             # wrong passwords from one device before it is locked out
 login_lockout_seconds = 60.0       # and for how long

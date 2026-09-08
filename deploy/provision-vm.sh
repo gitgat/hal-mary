@@ -9,7 +9,7 @@
 #     `--setting-sources "" --strict-mcp-config`, so every call ignores installed plugins, skills and
 #     MCP servers by design. Installing them would cost provisioning time and change nothing.
 #
-# Run from dev-scratch:  ssh bryan@hal-mary.thehalf.io 'bash -s' < deploy/provision-vm.sh
+# Run from dev-scratch:  ssh you@halmary.example.com 'bash -s' < deploy/provision-vm.sh
 set -euo pipefail
 
 log() { printf '\n=== %s\n' "$*"; }
@@ -64,7 +64,7 @@ cat <<'EOF'
 
 Remaining step, and only a human can do it:
 
-    ssh bryan@hal-mary.thehalf.io
+    ssh you@halmary.example.com
     claude          # log in interactively, once
 
 The service inherits that subscription session. There is no API key to configure, and hal-mary

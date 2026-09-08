@@ -162,7 +162,7 @@ hal-mary runs on its own VM as a **systemd user service**. Everything below is d
 
 | What | Where |
 |---|---|
-| The box | `bryan@hal-mary.thehalf.io` — `192.168.1.205` |
+| The box | `you@halmary.example.com` — `192.0.2.10` |
 | The checkout | `~/hal-mary` |
 | The database | `~/hal-mary-data/hal.db` (plus `-wal` and `-shm` beside it) — the default when `DB_PATH` is empty |
 | Backups | `~/hal-mary-data/backups/hal-<timestamp>.db`, nightly |
@@ -170,18 +170,18 @@ hal-mary runs on its own VM as a **systemd user service**. Everything below is d
 | The unit files | `~/.config/systemd/user/hal-mary*.{service,timer}` |
 | Their source | `~/hal-mary/deploy/` — edited there, copied across by `install.sh` |
 | Logs | the systemd journal; there is no log file |
-| The web app | `https://chaos-theory.thehalf.io` (Traefik, LAN-only) or `http://192.168.1.205:8080` direct |
-| The MCP endpoint | `https://mcp.thehalf.io/mcp` — a different door with a different key; see §7 |
+| The web app | `https://dashboard.example.com` (Traefik, LAN-only) or `http://192.0.2.10:8080` direct |
+| The MCP endpoint | `https://mcp.example.com/mcp` — a different door with a different key; see §7 |
 
-### Always use the FQDN or the IP. Never `ssh bryan@hal-mary`.
+### Always use the FQDN or the IP. Never `ssh you@halmary`.
 
 The short name `hal-mary` has **no DNS record**. It falls through Pi-hole's wildcard
-(`address=/thehalf.io/192.168.1.163`) and lands on `192.168.1.254` — the keepalived ingress VIP,
+(`address=/example.com/192.0.2.20`) and lands on `192.0.2.254` — the keepalived ingress VIP,
 which answers as **`birdo`, the swarm manager**. It connects. It gives you a shell. It is the wrong
 machine, and running install steps there would put a long-running service onto the cluster's control
 plane, on a Raspberry Pi booting from an SD card.
 
-This has already happened once during this project. Use `hal-mary.thehalf.io` or `192.168.1.205`.
+This has already happened once during this project. Use `halmary.example.com` or `192.0.2.10`.
 The short name will start working only when someone adds a real DNS record for it.
 
 (The polarity is the opposite of the warning in `swarm-config/docs/dev-scratch-swarm-access.md`,
@@ -197,7 +197,7 @@ Seven steps, in order. Steps 1.3 and 1.5 are the two no script can do for you.
 ### 1.1 Create the VM
 
 A Proxmox VM, Ubuntu 24.04, x86_64. The one already built has 8 cores, 6 GB RAM and 28 GB of disk,
-which is comfortable. Give it a static lease at `192.168.1.205` and an SSH key — it accepts
+which is comfortable. Give it a static lease at `192.0.2.10` and an SSH key — it accepts
 **publickey only**, password authentication is off, so `ssh-copy-id` cannot bootstrap it. The key
 has to go on from the Proxmox console.
 
@@ -210,7 +210,7 @@ still surviving only one loss, which is strictly worse.
 From dev-scratch:
 
 ```bash
-ssh bryan@hal-mary.thehalf.io 'bash -s' < deploy/provision-vm.sh
+ssh you@halmary.example.com 'bash -s' < deploy/provision-vm.sh
 ```
 
 Idempotent, safe to re-run. Installs node 22, Claude Code, `uv`, `sqlite3`, `git` and `jq`; enables
@@ -221,13 +221,13 @@ Deliberately no Docker and no Claude Code plugins — hal-mary invokes `claude` 
 `--setting-sources "" --strict-mcp-config`, so every call ignores installed plugins and MCP servers
 by design.
 
-**Working:** `ssh bryan@hal-mary.thehalf.io 'ls ~/hal-mary-data && ~/.local/bin/uv --version'`
+**Working:** `ssh you@halmary.example.com 'ls ~/hal-mary-data && ~/.local/bin/uv --version'`
 answers without error.
 
 ### 1.3 Log `claude` in — the one step no script can do
 
 ```bash
-ssh bryan@hal-mary.thehalf.io
+ssh you@halmary.example.com
 claude          # follow the login flow, once
 ```
 
@@ -273,7 +273,7 @@ answers 503 to everything, which is the correct closed state.
 belongs. Writing it out explicitly is still clearer:
 
 ```
-DB_PATH=/home/bryan/hal-mary-data/hal.db
+DB_PATH=/home/you/hal-mary-data/hal.db
 ```
 
 What must not happen is a *relative* value. Every configured path is resolved against the directory
@@ -318,14 +318,14 @@ curl -fsS http://127.0.0.1:8080/healthz               # {"status":"ok"}
 systemctl --user list-timers hal-mary-backup.timer    # a NEXT time, not a blank
 ```
 
-Then open `https://chaos-theory.thehalf.io` on a phone on the LAN — or
-`http://192.168.1.205:8080` if Traefik is not up — log in with `WEB_PASSWORD`, and press
+Then open `https://dashboard.example.com` on a phone on the LAN — or
+`http://192.0.2.10:8080` if Traefik is not up — log in with `WEB_PASSWORD`, and press
 **Sync** on the status page. The problems box at the top of `/status` should be empty afterwards.
 
 Last, seed the board so there is something to advise from:
 
 ```bash
-ssh bryan@hal-mary.thehalf.io 'cd ~/hal-mary && uv run hal-mary job board_build'
+ssh you@halmary.example.com 'cd ~/hal-mary && uv run hal-mary job board_build'
 ```
 
 ---
@@ -437,7 +437,7 @@ the sync ages stop moving.
 1. **Confirm it is the cookies and not the service.**
 
    ```bash
-   ssh bryan@hal-mary.thehalf.io
+   ssh you@halmary.example.com
    cd ~/hal-mary
    uv run hal-mary espn-check
    ```
@@ -500,7 +500,7 @@ feed and nothing else. Cookies are a between-drafts job.
 ## 4. Deploying a change
 
 ```bash
-ssh bryan@hal-mary.thehalf.io
+ssh you@halmary.example.com
 ~/hal-mary/deploy/deploy.sh
 ```
 
@@ -708,7 +708,7 @@ side of that boundary. With `MCP_TOKEN` unset the endpoint answers **503** — a
 
 | From | URL | Path |
 |---|---|---|
-| Anywhere, including outside the house | `https://mcp.thehalf.io/mcp` | Cloudflare tunnel → `traefik-public` |
+| Anywhere, including outside the house | `https://mcp.example.com/mcp` | Cloudflare tunnel → `traefik-public` |
 | On the LAN | the same URL | UniFi wildcard → the internal Traefik |
 
 Both are routed with `PathPrefix(/mcp)` and nothing else, so `/draft`, `/chat` and the dashboard
@@ -718,7 +718,7 @@ the dashboard from the same port, so a router matching the bare host would publi
 Read the token (it is never printed into a doc, a commit, or a log):
 
 ```bash
-ssh bryan@hal-mary.thehalf.io "grep '^MCP_TOKEN=' ~/hal-mary/.env | cut -d= -f2-"
+ssh you@halmary.example.com "grep '^MCP_TOKEN=' ~/hal-mary/.env | cut -d= -f2-"
 ```
 
 ### Claude Code
@@ -726,7 +726,7 @@ ssh bryan@hal-mary.thehalf.io "grep '^MCP_TOKEN=' ~/hal-mary/.env | cut -d= -f2-
 Claude Code speaks HTTP natively, so it needs no bridge:
 
 ```bash
-claude mcp add --transport http hal-mary https://mcp.thehalf.io/mcp \
+claude mcp add --transport http hal-mary https://mcp.example.com/mcp \
   --header "Authorization: Bearer <MCP_TOKEN>"
 ```
 
@@ -751,7 +751,7 @@ So Desktop reaches a remote server through the `mcp-remote` bridge. Edit
     "hal-mary": {
       "command": "/opt/homebrew/bin/npx",
       "args": [
-        "-y", "mcp-remote", "https://mcp.thehalf.io/mcp",
+        "-y", "mcp-remote", "https://mcp.example.com/mcp",
         "--header", "Authorization:${HAL_MARY_AUTH}"
       ],
       "env": {
@@ -782,10 +782,10 @@ and `cowork_schedule`.
 
 ```bash
 # Does the endpoint answer at all? 401 here is CORRECT — it means it is reachable and gated.
-curl -s -o /dev/null -w '%{http_code}\n' https://mcp.thehalf.io/mcp
+curl -s -o /dev/null -w '%{http_code}\n' https://mcp.example.com/mcp
 
 # Does the token work? A 200 and a JSON result means the server is fine and the problem is client-side.
-curl -s -X POST https://mcp.thehalf.io/mcp \
+curl -s -X POST https://mcp.example.com/mcp \
   -H "Authorization: Bearer <MCP_TOKEN>" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
@@ -810,7 +810,7 @@ The token ends up in plaintext in the Desktop config, so rotate it if that file 
 if it has been pasted anywhere:
 
 ```bash
-ssh bryan@hal-mary.thehalf.io "cd ~/hal-mary && \
+ssh you@halmary.example.com "cd ~/hal-mary && \
   sed -i \"s|^MCP_TOKEN=.*|MCP_TOKEN=\$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 40)|\" .env && \
   systemctl --user restart hal-mary"
 ```
