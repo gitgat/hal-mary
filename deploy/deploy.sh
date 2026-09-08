@@ -130,9 +130,22 @@ step "database migrations"
 uv run hal-mary migrate || die "migrations failed — the service has NOT been restarted"
 
 # --- 6. the suite ------------------------------------------------------------
+#
+# Scrubbed, so that the suite this gates on is the suite CI runs. By the time
+# control reaches here the re-exec above has put HAL_MARY_REEXEC=1 and
+# HAL_MARY_PREVIOUS in the environment — and tests/unit/test_deploy.py spawns
+# *this script* as a subprocess. Those subprocesses inherited both, skipped the
+# re-exec they exist to test, and failed; the suite went red and the deploy
+# refused to restart the service.
+#
+# That refusal was correct. The bug was that the suite was red for a reason that
+# only existed in here, which made the condition permanent: no deploy could ever
+# complete. The tests scrub every HAL_MARY_* variable on their own side, which is
+# the general guard; this is the specific one — what this script sets, this
+# script takes back off before handing over.
 
 step "uv run pytest"
-uv run pytest ||
+env -u HAL_MARY_REEXEC -u HAL_MARY_PREVIOUS uv run pytest ||
   die "the test suite is red. Nothing has been restarted; the service is still
      running the previous code. Deploying a red build to the box that advises on
      a live draft is not acceptable."

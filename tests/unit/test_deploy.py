@@ -22,6 +22,7 @@ import configparser
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -31,12 +32,22 @@ DEPLOY = REPO / "deploy"
 SCRIPTS = sorted(DEPLOY.glob("*.sh"))
 UNITS = sorted(p for p in DEPLOY.iterdir() if p.suffix in {".service", ".timer"})
 
+#: The two variables ``deploy.sh`` sets on *itself*, in the re-exec after the
+#: pull. Every stub records them alongside its arguments, because they are the
+#: ones that made this file fail on the box and nowhere else.
+DEPLOY_MARKERS = ("HAL_MARY_REEXEC", "HAL_MARY_PREVIOUS")
+
 #: Every stub logs to ``$STUB_LOG/<name>.log``, one invocation per line, and
 #: exits nonzero when ``$STUB_LOG/fail-<token>`` exists for any argument token —
 #: which is how a test says "pytest fails" or "doctor fails" without knowing how
-#: the script spells the command.
+#: the script spells the command. It also logs the environment the script handed
+#: it, in ``$STUB_LOG/<name>.env.log``, one line per invocation: what
+#: ``uv run pytest`` inherits is the whole point of one of the tests below, and a
+#: separate file keeps the argument log something tests can match on verbatim.
 STUB = """#!/bin/sh
 printf '%s\\n' "$*" >> "$STUB_LOG/{name}.log"
+printf '%s\\tHAL_MARY_REEXEC=%s\\tHAL_MARY_PREVIOUS=%s\\n' \\
+    "$*" "${{HAL_MARY_REEXEC:-}}" "${{HAL_MARY_PREVIOUS:-}}" >> "$STUB_LOG/{name}.env.log"
 for token in "$@"; do
     if [ -f "$STUB_LOG/fail-$token" ]; then
         echo "{name} $token failed (stub)" >&2
@@ -77,6 +88,18 @@ class Box:
     def log(self, name: str) -> list[str]:
         path = self.stub_log / f"{name}.log"
         return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+    def marker_log(self, name: str) -> list[tuple[str, dict[str, str]]]:
+        """One ``(arguments, {marker: value})`` pair per invocation of a stub."""
+        path = self.stub_log / f"{name}.env.log"
+        if not path.exists():
+            return []
+        seen = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            args, *assignments = line.split("\t")
+            markers = dict(assignment.split("=", 1) for assignment in assignments)
+            seen.append((args, markers))
+        return seen
 
     # -- the repository ------------------------------------------------------
 
@@ -146,8 +169,22 @@ class Box:
     # -- running the scripts -------------------------------------------------
 
     def env(self, **overrides: str) -> dict[str, str]:
+        """The environment a script runs under here — this box's, not the operator's.
+
+        Every inherited ``HAL_MARY_*`` variable is dropped before this box's own
+        are put back. ``deploy.sh`` re-execs itself with ``HAL_MARY_REEXEC=1``
+        and ``HAL_MARY_PREVIOUS=<sha>`` and then runs this suite; without the
+        scrub, the subprocesses spawned below inherited both, skipped the
+        re-exec they exist to test, and failed — so the deploy refused to
+        restart the service, permanently. See the tests at the foot of this file.
+
+        By prefix, not by name. The markers are what bit, but an operator with
+        ``HAL_MARY_SKIP_DOCTOR`` exported, or a shell carrying the unit's
+        ``HAL_MARY_CONFIG``, would steer this box just as invisibly, and so
+        would whatever variable either script grows next.
+        """
         return {
-            **os.environ,
+            **{key: value for key, value in os.environ.items() if not key.startswith("HAL_MARY_")},
             "HOME": str(self.home),
             "PATH": f"{self.stub_bin}:{os.environ['PATH']}",
             "STUB_LOG": str(self.stub_log),
@@ -989,3 +1026,96 @@ def test_skipping_the_preflight_on_deploy_still_shows_what_was_ignored(box: Box)
     assert result.returncode == 0, result.stdout + result.stderr
     assert any("doctor" in line for line in box.log("uv")), "it still ran"
     assert "IGNORED" in result.stdout + result.stderr
+
+
+# --- the deploy's own environment must not reach the suite it gates on -------
+#
+# This is the bug that stopped a real deploy, and it is worth spelling out
+# because every part of it behaved correctly. deploy.sh re-execs itself after the
+# pull with HAL_MARY_REEXEC=1 (so it does not loop) and HAL_MARY_PREVIOUS=<sha>
+# (so the rollback SHA survives). It then runs `uv run pytest` — this file —
+# which spawns deploy.sh subprocesses. Those inherited both markers, skipped the
+# re-exec they exist to test, and failed. The suite was red, so deploy.sh refused
+# to restart the service, exactly as designed. The condition was permanent: the
+# deploy could never complete.
+#
+# Both halves are asserted here, because either alone leaves the trap. The tests
+# must not inherit the markers no matter how the suite was invoked, and deploy.sh
+# must not hand them to the suite in the first place.
+
+
+def test_the_fabricated_box_inherits_no_hal_mary_variable_it_did_not_set(
+    box: Box, monkeypatch: pytest.MonkeyPatch
+):
+    """The half that makes these tests honest.
+
+    Scrubbed by prefix rather than by name: the markers are what bit, but an
+    operator with HAL_MARY_SKIP_DOCTOR exported, or a shell under the systemd
+    unit's HAL_MARY_CONFIG, would steer the fabricated box just as invisibly —
+    and the next variable either script grows would too.
+    """
+    for leaked in ("HAL_MARY_REEXEC", "HAL_MARY_PREVIOUS", "HAL_MARY_SKIP_DOCTOR"):
+        monkeypatch.setenv(leaked, "1")
+    monkeypatch.setenv("HAL_MARY_CONFIG", "/somewhere/else/config.toml")
+
+    env = box.env()
+
+    assert {key for key in env if key.startswith("HAL_MARY_")} == {
+        "HAL_MARY_HOME",
+        "HAL_MARY_UNIT_DIR",
+        "HAL_MARY_DATA_DIR",
+        "HAL_MARY_HEALTH_URL",
+        "HAL_MARY_HEALTH_TIMEOUT",
+    }
+
+
+def test_the_deploy_markers_never_reach_the_suite_it_gates_on(box: Box):
+    """The half that makes the gate meaningful: the suite deploy.sh runs is the
+    same suite CI runs, not one steered by the re-exec that is running it."""
+    box.push_upstream_commit()
+
+    result = box.run_in_checkout("deploy.sh")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    suite_runs = [markers for args, markers in box.marker_log("uv") if "pytest" in args]
+    assert suite_runs, f"deploy.sh never ran the suite: {box.marker_log('uv')}"
+    for markers in suite_runs:
+        assert markers == dict.fromkeys(DEPLOY_MARKERS, ""), (
+            "uv run pytest inherited deploy.sh's own markers; the tests it runs "
+            "spawn deploy.sh and will skip the re-exec they are testing"
+        )
+
+
+def test_the_deploy_tests_pass_with_the_markers_already_in_the_environment():
+    """The reproduction, run as a test: the exact condition that was red on the
+    VM and green everywhere else.
+
+    A real pytest subprocess, because the fault was in what a subprocess
+    inherits, and no in-process assertion can stand in for that. The three tests
+    named are the three that failed on the box; naming them rather than running
+    the whole file is what keeps this from recursing into itself.
+    """
+    broke_on_the_vm = (
+        "test_the_previous_commit_is_printed_so_a_rollback_is_possible",
+        "test_deploy_re_reads_itself_after_the_pull",
+        "test_the_re_exec_keeps_the_rollback_sha_from_before_the_pull",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            *(f"{__file__}::{name}" for name in broke_on_the_vm),
+        ],
+        cwd=str(REPO),
+        capture_output=True,
+        text=True,
+        env={**os.environ, "HAL_MARY_REEXEC": "1", "HAL_MARY_PREVIOUS": "0" * 40},
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
