@@ -1218,6 +1218,10 @@ claims to have answered, while an unanswered question is a thing the page can of
 
 ## 2026-09-08 — CI enforces a green `main`; two tests are honestly red
 
+---
+
+## 2026-09-08 — CI enforces a green `main`, and a test about the box skips rather than fails
+
 **Decision.** `.github/workflows/ci.yml` runs `uv sync --frozen`, `uv run pytest` and
 `uv run ruff check src tests scripts` on every pull request and every push to `main`, on
 `ubuntu-latest`, with no secrets of any kind. `ruff format --check` runs beside them as advisory
@@ -1227,22 +1231,37 @@ only. Actions are pinned to exact tags, not floating majors.
 every merge. Nothing enforced it, so the hard rule in `CLAUDE.md` was a comment with a person behind
 it. It is now a required signal that outlives the session.
 
-**What running it in a clean environment found.** With `env -i` and no `.env` in the checkout, ten
-tests failed that pass on this workstation. Eight were one real bug: `deploy/install.sh` runs under
-`set -u` and read `$USER`, which an interactive login sets and a `sudo -u`, a cron job, a container
-shell and a systemd unit do not — `install.sh` now derives it with `id -un`. The other two are tests
-describing the developer's box rather than this code, and they are left failing on purpose because a
-test that asserts the wrong thing should say so out loud:
+**What running it in a clean environment found.** With `env -i`, a fresh `HOME` and no `.env` in the
+checkout, ten tests failed that pass on this workstation. Eight were one real bug: `deploy/install.sh`
+runs under `set -u` and read `$USER`, which an interactive login sets and a `sudo -u`, a cron job, a
+container shell and a systemd unit do not. It died *after* writing the unit files and *before*
+enabling linger and starting the service — a half-install that leaves units which never start and
+never survive a reboot, invisible from a developer shell. `install.sh` now derives the name with
+`id -un`.
 
-* `tests/unit/test_doctor.py::test_the_deployment_config_is_a_healthy_box` tolerates *one* of
-  `claude binary` / `claude login` being fatal. A machine with no Claude Code at all — every CI
-  runner — reports both. The fix is to accept any subset of those two, which keeps the assertion's
-  real content: nothing *else* is fatal.
-* `tests/unit/test_deploy.py::test_systemd_accepts_every_unit` skips only when `systemd-analyze` is
-  missing. The binary is present on a GitHub runner but `systemd-analyze verify --user` needs a
-  usable user manager (`XDG_RUNTIME_DIR`) and an executable at the unit's `ExecStart`
-  (`~/.local/bin/uv`, which `setup-uv` does not create). The fix is to widen the skip to those two
-  preconditions.
+**The other two, and the rule they encode.** They were not asserting anything about this code. They
+assert things about the *machine*: that Claude Code is installed and logged in, and that
+`systemd-analyze verify --user` has a runtime directory and a real program at every `ExecStart`.
+Those hold on a developer box and on the VM and are false on a CI runner by design. They now guard
+that precondition and skip, naming what is missing:
+
+* `tests/unit/test_doctor.py::_require_claude_code` resolves `settings.claude.binary` the way
+  doctor does — the unit's PATH, then the caller's — and checks `claude_config_path`. Same source of
+  truth as the check itself, so guard and check cannot disagree.
+* `tests/unit/test_deploy.py::_why_systemd_verify_cannot_run` names three preconditions, not one.
+  `systemd-analyze` on PATH is only the first, and it is the one a runner *does* have — which is why
+  checking it alone produced a red build that said nothing about this repository. The other two are
+  `XDG_RUNTIME_DIR` (without it verify dies at "Failed to initialize manager" before reading a unit)
+  and an executable at each unit's `ExecStart`, read out of the unit files rather than written down,
+  so the guard cannot drift. On a runner `uv` lives in the actions tool cache, not `~/.local/bin`.
+
+**The distinction, stated so it survives.** A test skipped for an absent **precondition** is honest:
+it still runs, and still bites, everywhere the precondition holds. A test whose **assertion** was
+loosened until it passed everywhere checks nothing anywhere. Widening the doctor test's tuple to
+tolerate both Claude checks would have been the second kind, and would have cost the thing that test
+exists for — catching a fatal check that is about our config rather than about somebody's laptop.
+A suite that is red by construction is worse than no CI, because it teaches everyone to ignore the
+build; a suite that lies is worse still. Neither, here.
 
 **`ruff format` is advisory.** The tree was never formatted: 44 of 70 files would change. Formatting
 the world is its own commit, taken deliberately — not a side effect of adding CI. Make the step

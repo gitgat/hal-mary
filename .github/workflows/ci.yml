@@ -13,12 +13,14 @@
 # live test that spawns the real `claude` binary skips unless HAL_MARY_LIVE is
 # set to an on value.
 #
-# KNOWN RED, and honestly so — two tests assert facts about a *developer's
-# workstation* rather than about this code, and fail on any machine without
-# Claude Code and a systemd user session. They are findings, not things to
-# paper over; see the task 11 report for the one-line fixes:
-#   tests/unit/test_doctor.py::test_the_deployment_config_is_a_healthy_box
-#   tests/unit/test_deploy.py::test_systemd_accepts_every_unit
+# Two tests skip here rather than run: they ask about the *box* — is Claude Code
+# installed and logged in, does `systemd-analyze verify --user` have a runtime
+# directory and a real program at every ExecStart — and the answer on a runner
+# is no, by design. Their guards name the missing precondition in the skip
+# reason. That is a different thing from weakening an assertion, and the
+# helpers next to those tests say which is which:
+#   tests/unit/test_doctor.py::_require_claude_code
+#   tests/unit/test_deploy.py::_why_systemd_verify_cannot_run
 
 name: CI
 
