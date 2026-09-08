@@ -256,6 +256,15 @@ empty for exactly that reason.
   `cowork.waiver_settings` returns every day, and `_derive_waivers` aims at the batch that follows
   hal-mary's own waiver scan, because a claim run in front of the scan that fills its queue submits
   nothing, reports success, and is silent about it.
+- **`git add -A` has committed build artifacts three times; two tests now stop it.** `.gitignore`
+  said `.venv/`, and a trailing slash ignores a **directory** of that name but not a **symlink** of
+  it — so a `.venv -> <repo>/.venv` link made to share one interpreter across git worktrees was
+  committed, and every later checkout replaced the real virtualenv with a link to itself. Every
+  `uv run` then died with `Too many levels of symbolic links`, which looks nothing like its cause.
+  `.playwright-mcp/` browser dumps and a screenshot rode in the same way.
+  `tests/unit/test_project_files.py` now pins both: nothing tracked may be a build artifact, and
+  **nothing tracked may be a symlink at all** (`git ls-files -s` mode `120000`) — the second is the
+  one that generalises, because the next stray link will not be called `.venv`.
 - **This league's flex slot is spelled `RB/WR/TE`, not `FLEX`.** Prose that explains "a FLEX slot"
   defines a term that appears nowhere on Caroline's screen.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export
