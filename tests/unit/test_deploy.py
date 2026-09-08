@@ -1119,3 +1119,52 @@ def test_the_deploy_tests_pass_with_the_markers_already_in_the_environment():
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# --- the PATH a non-interactive ssh actually has ------------------------------
+
+
+def test_deploy_finds_uv_when_the_login_shell_did_not_export_it(box: Box):
+    """`ssh box ~/hal-mary/deploy/deploy.sh` must work, not just an interactive run.
+
+    Ubuntu's default ``.bashrc`` returns early for a non-interactive shell, so
+    ``~/.local/bin`` is missing under ``ssh host 'cmd'`` and ``uv`` is not found
+    — the same asymmetry ``doctor.UNIT_PATH`` exists for. The failure is nasty
+    because of its ORDER: the script has already run ``git pull`` by then, so
+    the checkout moves to the new commit while the dependencies and the running
+    service stay on the old one, and nothing says so.
+    """
+    # uv exists only where a login shell would have found it.
+    local_bin = box.home / ".local" / "bin"
+    local_bin.mkdir(parents=True, exist_ok=True)
+    (local_bin / "uv").write_text(
+        f'#!/usr/bin/env bash\necho "uv $*" >> "{box.stub_log}/uv"\nexit 0\n'
+    )
+    (local_bin / "uv").chmod(0o755)
+    (box.stub_bin / "uv").unlink(missing_ok=True)
+
+    # A PATH with no uv anywhere on it, the way `ssh host 'cmd'` arrives on
+    # Ubuntu: the operator's own PATH would smuggle the real one back in and
+    # the test would pass without the script doing anything.
+    result = box.run("deploy.sh", PATH=f"{box.stub_bin}:/usr/bin:/bin")
+
+    assert "uv: command not found" not in result.stdout + result.stderr, (
+        "deploy.sh did not put ~/.local/bin on PATH:\n" + result.stdout + result.stderr
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_deploy_sh_uses_the_same_path_as_the_unit(tmp_path: Path):
+    """One definition of "where the tools are", not three.
+
+    `doctor.UNIT_PATH` and `Environment=PATH=` in the unit are already pinned to
+    each other. deploy.sh is the third place that has to agree, and it is the
+    one nobody notices is wrong until a deploy half-applies.
+    """
+    from hal_mary.doctor import UNIT_PATH
+
+    script = (DEPLOY / "deploy.sh").read_text()
+    for entry in UNIT_PATH:
+        if entry.startswith("~/"):
+            needle = entry.replace("~/", "$HOME/")
+            assert needle in script, f"deploy.sh never puts {needle} on PATH"
