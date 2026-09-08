@@ -106,3 +106,38 @@ uv run hal-mary serve
 ```
 
 The startup line prints the LAN URL. Open it on a phone on the same network, or over the VPN.
+
+## 6. Draft night
+
+The draft order is the one thing hal-mary cannot know before the draft opens. This league's
+`draftSettings.orderType` is `DRAFT_START`, so ESPN draws the order at the moment the draft begins
+and everything before that is a placeholder.
+
+hal-mary handles this itself: on the first poll that sees a real pick, the draft loop reads ESPN's
+own draft board, stores the order it finds, and the draft page, the advice card and the loop all use
+it from then on.
+
+**But it can only read that board once a real pick has landed**, and there is a window before then —
+between the draft opening and pick 1 — in which every number on the page is still the pre-draft
+placeholder. That window is the dangerous one. If ESPN draws Caroline **first overall**, the
+placeholder puts her opening pick five away, past the advisor's window, so no advice card is written
+at all while the page says four picks out. The draft page says the numbers are provisional until the
+first pick lands, and this is what to do about it:
+
+**Do this every draft, not only when something looks wrong:**
+
+1. Hit **Sync from ESPN now** (status page) **once, the moment the draft opens.** A sync re-reads
+   `pickOrder`, which ESPN has drawn for real by then, so it closes the window before pick 1.
+2. Then eyeball "on the clock" on the draft page against ESPN's draft room for two picks.
+
+**If the loop is not running** — no ESPN credentials, a loop that failed to start (the page says so
+in a band across the top), or picks being entered by hand — nothing ever reads the drawn board, so
+step 1 is the *only* thing correcting the order and step 2 is the only thing checking it. The draft
+page keeps saying the pick numbers are provisional for as long as that is true, including all the
+way through a hand-entered draft: the note clears when hal-mary has read the order ESPN drew, not
+when the first pick lands.
+
+Do the eyeballing even if the numbers look plausible. A wrong draft order is a *silent* failure: the
+page and the advice card compute her position the same way from the same list, so they agree with
+each other while both being wrong, and no banner fires. A human comparing two screens is the only
+thing that catches it.

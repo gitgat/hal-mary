@@ -37,6 +37,7 @@ from typing import Any
 
 from hal_mary.config import LeagueConfig, Settings
 from hal_mary.draft import board as board_math
+from hal_mary.draft import store
 
 __all__ = ["LeagueContext", "LeagueUnknown", "load_league_context"]
 
@@ -246,14 +247,51 @@ def _config_order(config: LeagueConfig) -> tuple[list[int], list[str]]:
     return list(range(1, len(entries) + 1)), [str(entry) for entry in entries]
 
 
-def _espn_order(row: sqlite3.Row, raw: dict[str, Any], conn: sqlite3.Connection) -> list[int]:
+def _espn_order(
+    row: sqlite3.Row,
+    raw: dict[str, Any],
+    conn: sqlite3.Connection,
+    team_count: int | None = None,
+) -> list[int]:
     """Team ids by first-round slot, from ESPN, best source first.
 
-    ``draftSettings.orderType`` on this league is ``DRAFT_START``, which suggests
-    the order may only be assigned when the draft begins — so ``pickOrder`` is
-    provisional and the draft loop re-reads it when the draft goes live. This is
-    the pre-draft best guess, not a cached truth.
+    ``draftSettings.orderType`` on this league is ``DRAFT_START``: ESPN assigns
+    the real order at the moment the draft opens, so the ``pickOrder`` a
+    pre-draft sync stored is a placeholder — and nothing re-runs ``sync_league``
+    during a draft, so it would stay frozen all night unless something overrode
+    it.
+
+    The ``draft_order`` table is that override. The draft loop reads ESPN's own
+    slot-to-team board on the first poll that sees a real pick and writes round
+    one's mapping there, once; from then on this returns the order ESPN actually
+    drew. Preferring it *here* is the whole design: the draft page, the advisor
+    and the loop all reach their pick windows through :class:`LeagueContext`, so
+    they read one source and cannot disagree about which picks are hers.
+
+    Handing the loop's already-computed window to the advisor instead would leave
+    the page on the arithmetic and the card on the schedule — and a card labelled
+    from a different source than the page reads as stale on every turn, which is
+    the bug Task 7b removed.
+
+    The stored order is a **correction, not an authority**: one that does not fit
+    the league is discarded here rather than allowed downstream. It is written
+    once and never revised, so a row of the wrong length — a partial write, a
+    hand-edited database, a board for some other league — would otherwise raise
+    :class:`LeagueUnknown` for the rest of the draft and take the countdown, the
+    advisor and the roster card with it. Falling back to the placeholder is wrong
+    by a few picks; raising is wrong by the whole page.
     """
+    drawn = store.stored_draft_order(conn)
+    if drawn and team_count and len(drawn) != int(team_count):
+        log.warning(
+            "the stored draft order has %d team(s) but the league has %s; "
+            "ignoring it and using the pick order the sync stored",
+            len(drawn),
+            team_count,
+        )
+    elif drawn:
+        return drawn
+
     order = (raw.get("draftSettings", {}) or {}).get("pickOrder") or []
     ids = [int(team_id) for team_id in order if isinstance(team_id, int | str) and str(team_id).lstrip("-").isdigit()]
     if ids:
@@ -286,7 +324,7 @@ def load_league_context(conn: sqlite3.Connection, settings: Settings) -> LeagueC
     } or dict(config.roster_slots)
 
     config_order, config_labels = _config_order(config)
-    order = _espn_order(row, raw, conn) if row is not None else []
+    order = _espn_order(row, raw, conn, team_count) if row is not None else []
     labels = [str(team_id) for team_id in order]
     if not order:
         order, labels = config_order, config_labels

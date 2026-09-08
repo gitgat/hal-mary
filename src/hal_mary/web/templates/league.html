@@ -35,7 +35,14 @@
         </span>
       </div>
     {% endfor %}
-    <p class="small muted">The number is the pick order in round one. It reverses every round.</p>
+    {% if order_is_final %}
+      <p class="small muted">The number is the pick order in round one. It reverses every round.
+        This is the order ESPN drew when the draft opened.</p>
+    {% else %}
+      <p class="small muted">The number is the pick order in round one. It reverses every round.</p>
+      <p class="small muted"><strong>This order is provisional.</strong> ESPN draws the real one at
+        the moment the draft opens, so these numbers are a placeholder until the first pick lands.</p>
+    {% endif %}
   {% else %}
     <p class="muted">No teams yet.</p>
   {% endif %}

@@ -696,3 +696,97 @@ evidence of life and costs nothing to read.
 than "Working out your pick", and a failed loop is a band across the top naming the reason and
 pointing at manual entry — which still works. The same reasoning applies to anything else the page
 infers about work in progress: state what would make it false, and check that.
+
+---
+
+## 2026-09-07 — One draft order, stored in its own table, read by all three consumers
+
+**Decision.** On the first successful `_read_schedule` — the poll that first sees a real pick — the
+draft loop persists round one of ESPN's own draft board into a new `draft_order` table, once.
+`league._espn_order` prefers that stored order over `draftSettings.pickOrder`, so the draft page, the
+advisor and the loop all derive Caroline's pick window from `LeagueContext.draft_order` and cannot
+disagree about which picks are hers.
+
+**Why.** `draftSettings.orderType` on this league is `DRAFT_START`: ESPN draws the order when the
+draft opens, and the `pickOrder` the pre-draft sync stored is a placeholder — in this league the
+identity permutation `[1,2,3,4,5,6]`, which is a 1-in-720 coincidence as a real draw. Nothing re-runs
+`sync_league` during a draft (only the CLI and the `/sync` button), so that placeholder is frozen for
+the whole night.
+
+The failure it produced was silent, which is what made it worse than an ordinary wrong number. The
+page and the advisor run the *same* snake arithmetic over the *same* field, so on divergence they do
+not contradict each other — they agree and are wrong together, with no staleness flag and nothing on
+screen to notice. Caroline reads "4 picks until yours" while she is on the clock, and the prompt
+asserts the same false position, so the recommendation is reasoning from it too.
+
+**Why a table rather than a column on `league_settings`.** `sync._write_league_settings` is an
+`INSERT OR REPLACE` of the whole row, so a column there is erased by the next `hal-mary sync` — and
+re-populated from ESPN's stale pre-draft `pickOrder`, which is the value the stored order exists to
+override. Someone tapping `/sync` mid-draft would silently undo the fix. The separate table is also
+the honest shape: this is not a setting ESPN reports, it is an observation the loop made at a
+particular moment, and `recorded_at` says when.
+
+**Why write-once.** The order is drawn once. A loop restarted mid-draft reads the board again, and
+ESPN is unofficial enough that a second answer could differ; moving her pick window while she is
+looking at it is worse than keeping a slightly older reading. `store.store_draft_order` refuses to
+overwrite, and an empty or malformed first round writes nothing rather than clearing what is there.
+
+**What write-once costs, and what pays for it.** Because there is no second chance, the first write
+has to be validated against the league rather than merely against itself. ESPN's first poll after
+pick 1 can catch the board mid-write: round one's last slots come back with `team_id: null` while
+the later rounds already name every team, so `[1, 6, 5, 4]` reads as a perfectly well-formed
+four-team order — distinct, more than two entries, and completely wrong for a six-team league. Stored
+permanently, `_espn_order` would discard it for wrong length on every load and `store_draft_order`
+would refuse the good board on the next poll and every restart after it. One flaky read would
+re-arm the exact bug this entry exists to remove, behind a single log line. So `_store_order` refuses
+a first round shorter than the number of distinct teams the board itself names — a count the later
+rounds carry even while round one is still filling in — and a refusal leaves the write available for
+a whole board.
+
+And because two readings agreeing is the *only* property this design protects, a second reading that
+disagrees is logged with both orders. Write-once means nothing changes on screen when that happens,
+which is correct and is also exactly why it must not happen in silence: the log line is the only way
+a person can find out that ESPN told us two different things about who picks when.
+
+**The cheaper fix that was rejected.** Passing the loop's already-computed `upcoming` window into
+`advise` is a two-line change and it is wrong: it makes the card's label schedule-derived while the
+page stays arithmetic-derived, and a card labelled from a different source than the page reads as
+stale on every turn — the bug the entry above removed. One source, read by all three, is the whole
+point. For the same reason `DraftLoop._upcoming_from_schedule` is gone: the loop now reads the
+league like everything else, and `_schedule` survives only as the "already read this process" guard.
+
+**How this was missed.** The divergence path had never been exercised, because the fake ESPN client's
+default `draft_schedule` was built by snaking the same identity order the placeholder holds — so the
+two sources had literally never disagreed in any test. `draft_fixtures.SHUFFLED_DRAFT_ORDER` and
+`DIVERGENT_SCHEDULE` exist so they do, and `test_draft_order_source.py` opens with a test whose only
+job is to fail if they ever agree again.
+
+**The league page reads it too.** `teams.draft_slot` is re-seeded from the stale pre-draft
+`pickOrder` by every sync, so a "Draft order" heading over that column would have `/league` visibly
+contradicting `/draft` about which pick is hers — with "Your team" beside the row she is most likely
+to believe. `_league_context` renders the stored order when there is one and calls the numbers
+provisional when there is not.
+
+**Residual gap, and the two things done about it.** The order is only readable once the draft is
+running, so between the draft opening and the first pick landing every component still shows the
+placeholder. Nothing can close that window inside hal-mary without caching a pre-draft board, which
+is the lie this avoids — but the window is sharper than "a few seconds of stale numbers". If ESPN
+draws Caroline **first overall**, the placeholder puts her next pick at 6, five away and outside
+`draft.advise_within_picks`, so she gets **no advice card at all** for her opening pick while the
+page says four picks out. That is the worst moment available to have nothing on screen.
+
+A `/sync` after the draft opens closes it, because `pickOrder` has been drawn for real by then. So
+that sync is an unconditional first step in `docs/SETUP.md` rather than a fallback for when
+something looks wrong, and `partials/turn.html` says the numbers are provisional, and what to tap.
+A person reading the page should not have to have read the runbook.
+
+**And that note is gated on `turn.order_drawn`, not on `turn.started`.** "The draft has started" is
+not what makes the numbers trustworthy; hal-mary having read ESPN's board and stored the drawn order
+is. The two come apart in precisely the case the no-ESPN contingency exists for — picks entered by
+hand, nothing polling ESPN, the order never written — where the placeholder is in charge for the
+whole night. A note gated on `started` would disappear at pick 1 there, leaving numbers nobody has
+any reason to doubt and nothing on course to correct them: the silently-wrong class this entire
+entry exists to remove, reintroduced by its own mitigation. Gated on the stored order, the note says
+"provisional" exactly while the numbers are provisional. Past the first pick it also says something
+plainer, because by then the order should have been readable and was not, and the sentence must not
+promise a fix that is not coming.

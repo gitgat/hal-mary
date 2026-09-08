@@ -145,12 +145,22 @@ def _turn(
     league: LeagueContext | None,
     teams: dict[int, str],
     next_pick: int,
+    order_drawn: bool = True,
 ) -> dict[str, Any]:
     """Whose pick it is, and how many until hers.
 
     **Gated on ``my_upcoming_picks`` being non-empty.** ``picks_until_mine``
     treats the draft as running forever, so without the gate this page counts
     down past the last pick of the draft and keeps telling her to get ready.
+
+    ``order_drawn`` is what makes every number here trustworthy: hal-mary having
+    read ESPN's own draft board and stored the order it drew. It is deliberately
+    **not** ``started``. Those two come apart in exactly the case the no-ESPN
+    contingency exists for — picks entered by hand, nothing polling ESPN, the
+    drawn order never written — and there the placeholder is in charge for the
+    whole night while a note gated on ``started`` would have disappeared at pick
+    1. That is the silently-wrong class this whole design removes, so the caveat
+    is gated on the thing that actually clears it.
     """
     if league is None:
         return {"known": False, "over": False, "next_overall_pick": next_pick}
@@ -173,6 +183,7 @@ def _turn(
         "picks_until_mine": until,
         "my_next_picks": upcoming[:3],
         "started": next_pick > 1,
+        "order_drawn": order_drawn,
     }
 
 
@@ -489,7 +500,7 @@ def draft_context(
     board = store.load_board(conn)
     teams = _teams(conn)
     next_pick = store.next_overall_pick(conn)
-    turn = _turn(league, teams, next_pick)
+    turn = _turn(league, teams, next_pick, bool(store.stored_draft_order(conn)))
     her_next_pick = (turn.get("my_next_picks") or [None])[0]
     advice = _advice_card(_latest_advice(conn), her_next_pick, bool(turn.get("over")))
 
