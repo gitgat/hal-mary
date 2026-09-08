@@ -112,6 +112,52 @@
   {% endif %}
 </div>
 
+{# What Cowork was told to do, and what it did. Bryan chose to let irreversible
+   actions run unattended, so this card is how he finds out a drop happened. #}
+<div class="card">
+  <h2>What Cowork did</h2>
+  {% if not mcp_enabled %}
+    <p class="muted">MCP_TOKEN is not set, so the Cowork connector is closed and nothing
+    can reach hal-mary through it.</p>
+  {% endif %}
+  {% if actions %}
+    {% for action in actions %}
+      <div class="row">
+        <span class="label">{{ action['kind'] }} {{ action['player_name'] }}{% if action['slot'] %} ({{ action['slot'] }}){% endif %}</span>
+        <span class="value">
+          <span class="chip {{ 'ok' if action['status'] == 'done' else ('warn' if action['status'] in ('pending', 'skipped') else 'bad') }}">{{ action['status'] }}</span>
+          {{ age_in_words(action['reported_at'] or action['created_at']) }}
+        </span>
+      </div>
+      <p class="small muted">
+        {{ action['reason'] }}
+        {%- if not action['reversible'] %} <strong>This cannot be undone.</strong>{% endif %}
+      </p>
+      {% if action['outcome_detail'] %}<p class="small muted">{{ action['outcome_detail'] }}</p>{% endif %}
+    {% endfor %}
+  {% else %}
+    <p class="muted">Cowork has not been given anything to do yet.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Recent connector calls</h2>
+  {% if mcp_calls %}
+    {% for call in mcp_calls %}
+      <div class="row">
+        <span class="label">{{ call['tool'] }}</span>
+        <span class="value">
+          <span class="chip {{ 'ok' if call['outcome'] == 'ok' else 'bad' }}">{{ call['outcome'] }}</span>
+          {{ age_in_words(call['created_at']) }}
+        </span>
+      </div>
+      {% if call['detail'] %}<p class="small muted">{{ call['detail'] }}</p>{% endif %}
+    {% endfor %}
+  {% else %}
+    <p class="muted">Cowork has not called the connector yet.</p>
+  {% endif %}
+</div>
+
 <form method="post" action="/logout">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <button class="quiet" type="submit">Sign out</button>

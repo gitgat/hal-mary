@@ -233,6 +233,12 @@ def test_no_route_escapes_the_password_by_accident(db_path: Path):
     nothing would fail.
     """
     public = {"/login", "/healthz", "/static"}
+    # `/mcp` is the one route that is deliberately not on the session router: it
+    # carries its own bearer token, and a session cookie must not open it. That
+    # is not an exemption from being guarded — tests/unit/test_mcp.py proves it
+    # rejects a missing token, a wrong token, the web password and a valid
+    # session cookie, and refuses to serve at all when MCP_TOKEN is unset.
+    other_door = {"/mcp"}
     app = build_app(db_path)
     routes = flatten_routes(app)
 
@@ -257,11 +263,19 @@ def test_no_route_escapes_the_password_by_accident(db_path: Path):
     } <= found, (
         f"the route walk found only {sorted(found)}"
     )
+    # And the one route that is excluded above really is there to be excluded,
+    # so a rename cannot turn this into a silent hole.
+    assert other_door <= found, f"the route walk found only {sorted(found)}"
 
     with TestClient(app, follow_redirects=False) as client:
         for route in routes:
             path = getattr(route, "path", None)
-            if path is None or path in public or path.startswith("/static"):
+            if (
+                path is None
+                or path in public
+                or path in other_door
+                or path.startswith("/static")
+            ):
                 continue
             for method in sorted(getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}):
                 response = client.request(method, path)
@@ -1269,3 +1283,65 @@ def test_run_server_hands_the_bound_to_uvicorn(monkeypatch, db_path: Path):
     serve_module.run_server(host="0.0.0.0", port=8080, reload=False, shutdown_timeout_s=7)
 
     assert seen["timeout_graceful_shutdown"] == 7
+
+# --- what Cowork did, on the dashboard ---------------------------------------
+
+
+def seed_cowork_activity(db_path: Path) -> None:
+    """One irreversible action performed unattended, and the call that did it."""
+    conn = open_conn(db_path)
+    with db.transaction(conn):
+        conn.execute(
+            """
+            INSERT INTO actions
+                (created_at, kind, player_name, slot, paired_player_name, reason, sequence,
+                 reversible, source_job, status, outcome_detail, reported_at)
+            VALUES ('2026-10-04T15:30:00+00:00', 'drop', 'Chase Brown', NULL, NULL,
+                    'He has not played a snap in a month and the roster spot is needed.',
+                    1, 0, 'waiver_scan', 'done', 'Dropped; waiver window opened.',
+                    '2026-10-04T15:31:00+00:00')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO mcp_calls (created_at, tool, arguments_json, outcome, detail, duration_ms)
+            VALUES ('2026-10-04T15:31:00+00:00', 'report_action',
+                    '{"id": 1, "outcome": "done"}', 'ok', 'outcome=done', 42)
+            """
+        )
+    conn.close()
+
+
+def test_the_status_page_shows_what_cowork_did(db_path: Path):
+    """The only way Bryan learns a drop happened.
+
+    He chose to let irreversible actions run unattended, so the log is not
+    instrumentation — it is the product's report back to him. A log nobody can
+    see without an SSH session and a sqlite3 prompt is not one he will read.
+    """
+    seed_cowork_activity(db_path)
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/status").text
+
+    assert "Chase Brown" in text
+    assert "drop" in text
+    assert "report_action" in text
+    assert "not played a snap" in text
+
+
+def test_an_irreversible_action_is_marked_as_one(db_path: Path):
+    seed_cowork_activity(db_path)
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/status").text
+
+    assert "cannot be undone" in text.lower()
+
+
+def test_the_status_page_says_so_when_cowork_has_done_nothing(db_path: Path):
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/status").text
+
+    assert "Cowork" in text

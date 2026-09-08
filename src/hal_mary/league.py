@@ -93,6 +93,11 @@ class LeagueContext:
     rounds: int
     my_team_id: int
     my_draft_slot: int
+    #: Which NFL week ESPN thinks it is, from the synced ``league_settings`` row.
+    #: ``None`` before the first sync, and there is no config fallback on
+    #: purpose: a hand-written week goes stale in seven days and would have the
+    #: lineup jobs reasoning about a week that has already been played.
+    current_week: int | None = None
     roster_slots: dict[str, int] = field(default_factory=dict)
     draft_order: list[int] = field(default_factory=list)
     draft_order_labels: list[str] = field(default_factory=list)
@@ -377,12 +382,30 @@ def load_league_context(conn: sqlite3.Connection, settings: Settings) -> LeagueC
         draft_date=(row["draft_date"] if row is not None else None) or config.draft_date,
         pick_clock_s=_pick_clock(raw) or config.pick_clock_s,
         rounds=rounds,
+        current_week=_current_week(row),
         my_team_id=my_team_id,
         my_draft_slot=my_slot,
         roster_slots=roster_slots,
         draft_order=order,
         draft_order_labels=labels,
     )
+
+
+def _current_week(row: sqlite3.Row | None) -> int | None:
+    """The synced NFL week, or None when nothing has synced yet.
+
+    Read defensively: the column arrives in migration 004, and a caller holding
+    a connection to a database migrated by an older process would otherwise get
+    an IndexError out of the league context rather than "we do not know the
+    week yet", which is the honest answer and the one every caller handles.
+    """
+    if row is None:
+        return None
+    try:
+        value = row["current_week"]
+    except (IndexError, KeyError):  # pragma: no cover - an unmigrated database
+        return None
+    return int(value) if value is not None else None
 
 
 def _resolve_me(

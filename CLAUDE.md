@@ -2,8 +2,17 @@
 
 `hal-mary` is a Claude-powered fantasy football advisor. It watches Caroline's ESPN league,
 researches the live internet through the local `claude` binary, and tells her — in plain English,
-assuming zero football knowledge — who to draft, start, and claim. **She makes every click in ESPN
-herself. This application never writes to ESPN.**
+assuming zero football knowledge — who to draft, start, and claim.
+
+**This application still never writes to ESPN itself.** For the draft that is the whole story:
+Caroline makes every click. For in-season lineup and waiver changes it is now the front half of a
+split — hal-mary decides and emits an *action*, and Claude Cowork's browser performs it in ESPN's own
+interface through the MCP endpoint at `/mcp`. **hal-mary decides, Cowork executes, Cowork reports
+back; Cowork never chooses.** That is a security boundary, not a tidy separation: Cowork's browser
+reads pages five other league members write into, so an executor with no discretion gives injected
+text nothing to redirect. See
+[`docs/superpowers/specs/2026-09-07-cowork-manager-design.md`](docs/superpowers/specs/2026-09-07-cowork-manager-design.md)
+and [`docs/COWORK.md`](docs/COWORK.md).
 
 Read [`docs/superpowers/specs/2026-09-07-hal-mary-design.md`](docs/superpowers/specs/2026-09-07-hal-mary-design.md)
 for the design of record and [`docs/DECISIONS.md`](docs/DECISIONS.md) for why things are the way they
@@ -57,6 +66,9 @@ uv run hal-mary serve          # web app + draft loop on the LAN; --reload for d
 uv run hal-mary sync           # pull league state and draft picks from ESPN
 uv run hal-mary espn-check     # are the cookies still good? exits nonzero when not
 uv run hal-mary job <name>     # run one job on demand (board_build)
+
+uv run hal-mary cowork-config  # Cowork's scheduled tasks, rendered for this league; --json
+uv run hal-mary job <name>     # run one job on demand
 ```
 
 ## Architecture in one paragraph
@@ -129,7 +141,9 @@ empty for exactly that reason.
 - **The ESPN fixtures in `tests/fixtures/espn/` are synthetic** until someone runs
   `uv run python scripts/record_espn_fixtures.py` with real cookies — the one exception is
   `draft_detail_prepopulated_real_league.json`, built field for field from the real pre-draft
-  payload. No test may reach the network; `tests/conftest.py` blocks both HTTP stacks.
+  payload. No test may reach the network; `tests/conftest.py` blocks all **three** HTTP stacks in
+  play — `httpx` (our raw ESPN reads), `requests` (what `espn-api` uses) and `httpx2` (which arrives
+  with the `mcp` SDK). Adding a dependency that brings a fourth means adding it there too.
 - **`memory/league.md` is generated, gitignored, and contains real people.**
   `hal-mary sync` rewrites it from the live ESPN payload: real leaguemates' names and the league
   id. Only the placeholder `memory/league.example.md` is tracked. Never `git add -f` it, never
@@ -153,6 +167,56 @@ empty for exactly that reason.
   the loop stopped for good, on the one night the manual path exists for, with nothing on the page
   saying so. `record_manual_pick` uses `store.next_overall_pick` and upserts, and the cadence counts
   picks (`store.picks_made`) rather than reading the highest number. Both locks matter; keep both.
+
+- **`/mcp` has its own key, and it is not `WEB_PASSWORD`.** `MCP_TOKEN` opens the MCP endpoint and
+  nothing else; a session cookie does not open `/mcp` and the MCP token does not open the dashboard.
+  Two doors, because the tunnel exposes `/mcp` to the internet and the dashboard is LAN-only. With
+  `MCP_TOKEN` unset the endpoint answers 503 — **absent never means open** — and
+  `tests/unit/test_mcp.py` pins all of it.
+- **The MCP tool descriptions are part of the product.** They are the only instructions Cowork ever
+  gets. Edit them like user-facing copy, and never write one that asks Cowork to choose between
+  options; a test walks every description looking for exactly that.
+- **`memory.TRUSTED_SOURCE_JOBS` is an allowlist, and everything else is quarantined.**
+  `build_context` runs *two* complementary queries: the trusted one asks for that set and nothing
+  else, and the untrusted one asks for everything that is not on it — including a note with no
+  `source_job` at all — rendering them under their own heading with their own smaller budget so a
+  flood cannot crowd out real research. **That split is the boundary; the tag is only how it is
+  recognised.** It is an allowlist rather than a blocklist so a mistyped or unregistered tag fails
+  *closed*: under a blocklist, `Cowork-Browser` and `cowork_browser` were both "not the constant" and
+  landed in the trusted section. A new job whose notes would be quarantined fails a test in
+  `test_memory.py` rather than going quiet.
+- **Every value that reaches a prompt goes through `hal_mary.prompt_text.one_line`.** Not just the
+  ones that look dangerous. It collapses on all Unicode whitespace, because a value carrying
+  `\n\n## What you always know` closes its own section and opens a forged one in the most trusted
+  part of the prompt. This boundary has now been dropped **three times, by three different
+  renderers**: `memory._render_note` dropped `source_job`; it then collapsed `text` and appended
+  `source_url` raw (caller-supplied by `report_observation`); and `espn.sync._league_memory_body`
+  interpolated team names, abbreviations, owners and the league name straight into
+  `memory/league.md`, which `standing_memory()` reads whole into section one. **A leaguemate renames
+  their team and it syncs into standing memory** — team names are the first example in this
+  project's own threat statement. The collapser lives in its own module so the next renderer
+  inherits the defence instead of remembering it, and every test of it asserts on the **whole**
+  rendered output: a test that asserts on a slice reads as though it checks everything and checks
+  only the half its author was thinking about.
+- **The MCP reporting tools cap their inputs** (`MAX_OBSERVATION_CHARS`, `MAX_DETAIL_CHARS`,
+  `MAX_URL_CHARS`) and refuse with a `ToolError`, which is the only exception type whose message the
+  SDK puts in front of Cowork — anything else becomes "Error executing tool <name>" and a cap the
+  caller cannot read is one it keeps hitting. Unbounded, one observation produced a 2.5 MB memory
+  block, and a prompt that size on a 90-second pick clock is a draft nobody gets advice in.
+- **Every emitted action carries a deadline, and it is the end of that NFL week.** Without one there
+  is no expiry *and* no other revocation path: `expire_stale` only touches rows that have a deadline,
+  so an instruction emitted in week 5 would still be pending in week 7 and an executor that had been
+  offline would come back and bench a healthy starter. `[actions].week_boundary_*` sets the
+  rollover, and the same boundary scopes emission equivalence — the same bench twice on a Sunday is
+  one click, the same bench next Saturday is a new decision about a new situation.
+- **Cowork's scheduled prompts live in `cowork/tasks.toml`, not in code.** A Cowork scheduled task is
+  a saved prompt on a cadence, so the prompt *is* the cron job. Every prompt there is static and
+  generic — no player, no week, no strategy — and `mode = "read_only"` is enforced: the loader
+  refuses a read-only task that lists `report_action` *or* `pending_actions`. `docs/COWORK.md`
+  carries the same prompts, generated by `scripts/render_cowork_doc.py`, and a test re-runs it with
+  `--check` so the two cannot drift. Note what `ACTING_TOOLS` does **not** cover: the browser that
+  same session is holding, which is logged into ESPN. The read-only prompts therefore say hal-mary
+  has given them no tool that changes anything, rather than claiming they are incapable of it.
 - **This league's flex slot is spelled `RB/WR/TE`, not `FLEX`.** Prose that explains "a FLEX slot"
   defines a term that appears nowhere on Caroline's screen.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export
