@@ -37,6 +37,7 @@ from starlette.concurrency import run_in_threadpool
 
 from hal_mary import chat
 from hal_mary.config import Settings
+from hal_mary.markdown_safe import render as markdown_render
 
 __all__ = ["Answering", "chat_context", "chat_event_stream"]
 
@@ -187,6 +188,7 @@ async def chat_event_stream(
             if conn is not None:
                 conn.close()
 
+    answer: list[str] = []
     task = asyncio.ensure_future(run_in_threadpool(consume))
     task.add_done_callback(_log_failure)
 
@@ -204,8 +206,15 @@ async def chat_event_stream(
             if isinstance(item, str):
                 yield item
             elif item.kind == "text" and item.text:
+                answer.append(item.text)
                 yield _frame("chunk", {"text": item.text})
-        yield _frame("done", {})
+        # The finished answer, rendered by the same server-side renderer the
+        # page uses. The chunks arrived as plain text and were appended with
+        # textContent, so the bubble is readable the whole way through; this
+        # swaps in the Markdown once there is a whole answer to render. Sending
+        # it rather than rendering in the browser keeps one renderer: two would
+        # mean two escaping behaviours, and only one of them would be audited.
+        yield _frame("done", {"html": str(markdown_render("".join(answer)))})
     finally:
         # The phone went away. The worker checks this between chunks; it cannot
         # interrupt a read already blocked on the subprocess, so the call it has

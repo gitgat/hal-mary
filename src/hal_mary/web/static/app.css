@@ -571,3 +571,34 @@ input[type="text"], select {
    what she has already done — and undo a tick she did not mean. */
 .advice-item--done { opacity: 0.55; }
 .advice-item--done .advice-item-head h3 { text-decoration: line-through; }
+
+/* Markdown inside a chat answer. The renderer emits only these tags, so this
+   is the whole list; anything else on the page did not come from `markdown`. */
+.msg-text > :first-child { margin-top: 0; }
+.msg-text > :last-child { margin-bottom: 0; }
+.msg-text p { margin: 0 0 0.6em; }
+.msg-text h2, .msg-text h3, .msg-text h4, .msg-text h5, .msg-text h6 {
+  margin: 0.8em 0 0.35em;
+  font-size: 1em;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.msg-text ul, .msg-text ol { margin: 0 0 0.6em; padding-left: 1.35em; }
+.msg-text li { margin: 0.15em 0; }
+.msg-text code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.16);
+}
+.msg-text pre {
+  margin: 0 0 0.6em;
+  padding: 0.6em 0.75em;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.16);
+  /* Wide output scrolls inside the bubble instead of stretching the page. */
+  overflow-x: auto;
+}
+.msg-text pre code { padding: 0; background: none; }
+.msg-text a { text-decoration: underline; }

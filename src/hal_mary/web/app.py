@@ -64,6 +64,7 @@ from hal_mary.config import Settings
 from hal_mary.draft import loop as draft_loop
 from hal_mary.draft import store as draft_store
 from hal_mary.espn.sync import last_sync
+from hal_mary.markdown_safe import render as markdown_render
 from hal_mary.mcp.server import MCP_PATH, build_endpoint
 from hal_mary.memory import standing_memory_files
 from hal_mary.web.chat_page import Answering, chat_context, chat_event_stream
@@ -488,6 +489,10 @@ def create_app(
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
     templates.env.globals["age_in_words"] = age_in_words
     templates.env.filters["advice_body"] = advice_body
+    # One renderer for chat Markdown, server side. The stream sends the same
+    # rendered HTML on `done`, so the bubble cannot escape text one way while
+    # the page escapes it another.
+    templates.env.filters["markdown"] = markdown_render
 
     # The MCP endpoint is built before the app because its session manager needs
     # a lifespan, and FastAPI takes that at construction. It is a separate door
