@@ -292,3 +292,85 @@ def test_a_stored_order_that_does_not_fit_the_league_is_ignored(tmp_path, caplog
 
     assert league.draft_order == REAL_DRAFT_ORDER, "back to the placeholder, not an exception"
     assert "3" in caplog.text and "6" in caplog.text
+
+
+# --- and when ESPN's board is only half there --------------------------------
+
+
+def board_missing_the_end_of_round_one() -> list[dict]:
+    """ESPN's board with round one's last two slots not yet attributed.
+
+    A real shape, not a contrived one: the loop reads the board on the first
+    poll that sees a real pick, which is the moment ESPN is busiest, and the
+    later rounds carry every team's id while round one is still filling in.
+    """
+    slots = [dict(slot) for slot in DIVERGENT_SCHEDULE]
+    for slot in slots:
+        if slot["round_num"] == 1 and slot["round_pick"] > 4:
+            slot["team_id"] = None
+    return slots
+
+
+async def test_a_first_round_shorter_than_the_league_is_refused_and_does_not_burn_the_write(
+    tmp_path, caplog
+):
+    """The one thing between this fix and a silent no-op.
+
+    A short first round is *distinct* and has more than two entries, so a check
+    for duplicates waves it through — and a four-team order for a six-team league
+    is then stored permanently. ``league._espn_order`` discards it for wrong
+    length on every load, and the write-once rule refuses the good board on the
+    next poll and every restart after it. The net result for the whole night is
+    the placeholder, one log line, and nothing on screen: exactly the bug this
+    task exists to kill, re-armed by one flaky read.
+
+    So the length is checked against the teams the board itself names, and a
+    refusal must leave the write still available.
+    """
+    conn, settings, loop, _, _ = divergent_draft(
+        tmp_path, schedule=board_missing_the_end_of_round_one()
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await loop.run_once()
+
+    assert store.stored_draft_order(conn) == [], "a four-team order is not this league's order"
+    assert "unusable first round" in caplog.text
+    assert "4" in caplog.text and "6" in caplog.text, "the warning names both counts"
+    assert load_league_context(conn, settings).draft_order == REAL_DRAFT_ORDER
+
+    # And the write is still there to be made: the next poll sees a whole board.
+    recovered = DraftLoop(
+        conn,
+        settings,
+        FakeEspnClient(picks_through(1, SHUFFLED_DRAFT_ORDER), schedule=DIVERGENT_SCHEDULE),
+        FakeRunner(settings, [ok_result(ADVICE) for _ in range(4)]),
+        RecordingBus(),
+    )
+    await recovered.run_once()
+
+    assert store.stored_draft_order(conn) == SHUFFLED_DRAFT_ORDER, "the refusal cost nothing"
+    assert load_league_context(conn, settings).draft_order == SHUFFLED_DRAFT_ORDER
+
+
+def test_a_second_reading_that_disagrees_with_the_stored_order_says_so(tmp_path, caplog):
+    """The single property this task protects is that two readings agree.
+
+    Write-once is deliberate — moving her pick window while she is looking at it
+    is worse than a stale reading — but a disagreement that nothing records is a
+    disagreement nobody can act on. The stored order stands; the log names both.
+    """
+    conn = open_db(tmp_path)
+    assert store.store_draft_order(conn, SHUFFLED_DRAFT_ORDER) is True
+
+    with caplog.at_level(logging.WARNING):
+        assert store.store_draft_order(conn, [2, 3, 4, 5, 6, 1]) is False
+
+    assert store.stored_draft_order(conn) == SHUFFLED_DRAFT_ORDER, "the first reading stands"
+    assert str(SHUFFLED_DRAFT_ORDER) in caplog.text, "the warning names the stored order"
+    assert str([2, 3, 4, 5, 6, 1]) in caplog.text, "and the one that disagreed"
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        assert store.store_draft_order(conn, SHUFFLED_DRAFT_ORDER) is False
+    assert caplog.text == "", "a reading that agrees is not news"

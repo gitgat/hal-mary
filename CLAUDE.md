@@ -93,7 +93,11 @@ empty for exactly that reason.
   `DraftLoop._read_schedule` writes round one of ESPN's board to the **`draft_order` table**, once,
   and `league._espn_order` prefers it from then on. It is its own table rather than a
   `league_settings` column because that row is rewritten wholesale by every sync — a column there
-  would be erased, mid-draft, by the `/sync` button.
+  would be erased, mid-draft, by the `/sync` button. That write happens **once**, so it is validated
+  before it happens: a first round shorter than the number of teams the board itself names is
+  refused, because ESPN's first poll after pick 1 can catch the board mid-write and a distinct
+  four-team order for a six-team league would then be stored permanently, discarded on every load,
+  and lock out the good board for the rest of the night.
 - **The draft page, the advisor and the draft loop read one draft order, through
   `LeagueContext.draft_order`.** Never hand one of them a pick window computed somewhere else. All
   three run the same snake arithmetic over the same list, so when that list is wrong they are wrong
@@ -103,7 +107,15 @@ empty for exactly that reason.
   `docs/DECISIONS.md` already records. `tests/unit/test_draft_order_source.py` pins all three
   against a fixture where ESPN's board and the stored `pickOrder` genuinely disagree — that fixture
   is the point of the test, because before it existed the fake client's default schedule *was* the
-  snake and the divergence had never once been exercised.
+  snake and the divergence had never once been exercised. The **league page reads it too** —
+  `teams.draft_slot` is the pre-draft placeholder, re-seeded by every sync, so rendering that column
+  under a "Draft order" heading would put one screen in visible contradiction with another.
+- **Until the first pick lands, the order on screen is the placeholder, and the page says so.**
+  ESPN's board can only be read once a real pick exists, so the window between the draft opening and
+  pick 1 is uncorrected — and if Caroline was drawn first overall the placeholder puts her opening
+  pick five away, past `draft.advise_within_picks`, so no card is written for the pick she is on. A
+  `/sync` after the draft opens closes it, which is why `docs/SETUP.md` makes that step
+  unconditional and `partials/turn.html` says "provisional" while `turn.started` is false.
 - **Never poll a live draft through `espn-api`.** `refresh_draft()` appends to a list cleared only
   in the constructor, and `_fetch_draft` returns early unless `draftDetail.drafted` is true — a flag
   that may only be set once the draft is over. `hal_mary.espn.client.draft_picks()` reads the raw

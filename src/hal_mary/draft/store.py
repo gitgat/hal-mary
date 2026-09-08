@@ -17,10 +17,13 @@ drafted. A drafted row always has a timestamp; that is the invariant.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from typing import Any
 
 from hal_mary import db
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     "all_picks",
@@ -280,9 +283,28 @@ def store_draft_order(conn: sqlite3.Connection, team_ids: list[int]) -> bool:
     An empty list writes nothing rather than clearing what is there: "ESPN
     returned a board we could not read" must never demote a good stored order
     back to the placeholder.
+
+    A second reading that **disagrees** is refused like any other, and logged.
+    The single property this whole design protects is that the page, the card
+    and the loop are reading the same order; when the source itself gives two
+    answers, that is the one moment the property is in doubt, and it must not
+    pass in silence. The warning names both orders so a person can tell which
+    one ESPN's draft room agrees with — the stored one is what every screen is
+    showing.
     """
     ids = [int(team_id) for team_id in team_ids]
-    if not ids or stored_draft_order(conn):
+    if not ids:
+        return False
+    already = stored_draft_order(conn)
+    if already:
+        if already != ids:
+            log.warning(
+                "ESPN's draft board now reads %s, but the order stored when the draft opened "
+                "is %s; keeping the stored one, which is what the draft page and the advice "
+                "card are using",
+                ids,
+                already,
+            )
         return False
     now = db.utc_now()
     with db.transaction(conn):

@@ -530,6 +530,37 @@ def test_the_turn_counter_does_not_render_after_the_last_pick(db_path: Path, set
     assert "draft is finished" in body
 
 
+def test_the_page_says_the_draft_order_is_provisional_until_the_first_pick(
+    db_path: Path, settings
+):
+    """The residual gap in Task 15, said out loud on the page.
+
+    ESPN draws the order when the draft opens, and hal-mary can only read it off
+    the board once a real pick has landed. In between, every number on this page
+    comes from the pre-draft placeholder — and if ESPN drew Caroline first
+    overall, the placeholder puts her next pick five away, past the advisor's
+    window, so she gets no card at all for her opening pick while the page says
+    four picks out. That is the worst possible moment to have nothing, and a
+    person reading the page should not have to have read the runbook.
+    """
+    seed_league(db_path)
+    with signed_in(db_path, settings) as client:
+        body = text_of(client.get("/draft").text).lower()
+
+    assert "provisional" in body
+    assert "sync" in body, "and what to do about it"
+
+
+def test_that_note_goes_away_once_the_draft_is_running(db_path: Path, settings):
+    """A caveat that never clears is a caveat nobody reads."""
+    seed_league(db_path)
+    seed_picks(db_path, [(1, 1, "Player 1")])
+    with signed_in(db_path, settings) as client:
+        body = text_of(client.get("/draft").text).lower()
+
+    assert "provisional" not in body
+
+
 def test_the_page_works_when_the_league_is_unknown(db_path: Path, settings):
     """No sync, no [league] config: there is no turn to report, but a page."""
     conn = open_conn(db_path)

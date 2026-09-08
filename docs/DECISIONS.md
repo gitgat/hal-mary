@@ -731,6 +731,23 @@ ESPN is unofficial enough that a second answer could differ; moving her pick win
 looking at it is worse than keeping a slightly older reading. `store.store_draft_order` refuses to
 overwrite, and an empty or malformed first round writes nothing rather than clearing what is there.
 
+**What write-once costs, and what pays for it.** Because there is no second chance, the first write
+has to be validated against the league rather than merely against itself. ESPN's first poll after
+pick 1 can catch the board mid-write: round one's last slots come back with `team_id: null` while
+the later rounds already name every team, so `[1, 6, 5, 4]` reads as a perfectly well-formed
+four-team order — distinct, more than two entries, and completely wrong for a six-team league. Stored
+permanently, `_espn_order` would discard it for wrong length on every load and `store_draft_order`
+would refuse the good board on the next poll and every restart after it. One flaky read would
+re-arm the exact bug this entry exists to remove, behind a single log line. So `_store_order` refuses
+a first round shorter than the number of distinct teams the board itself names — a count the later
+rounds carry even while round one is still filling in — and a refusal leaves the write available for
+a whole board.
+
+And because two readings agreeing is the *only* property this design protects, a second reading that
+disagrees is logged with both orders. Write-once means nothing changes on screen when that happens,
+which is correct and is also exactly why it must not happen in silence: the log line is the only way
+a person can find out that ESPN told us two different things about who picks when.
+
 **The cheaper fix that was rejected.** Passing the loop's already-computed `upcoming` window into
 `advise` is a two-line change and it is wrong: it makes the card's label schedule-derived while the
 page stays arithmetic-derived, and a card labelled from a different source than the page reads as
@@ -744,7 +761,21 @@ two sources had literally never disagreed in any test. `draft_fixtures.SHUFFLED_
 `DIVERGENT_SCHEDULE` exist so they do, and `test_draft_order_source.py` opens with a test whose only
 job is to fail if they ever agree again.
 
-**Residual gap, stated deliberately.** The order is only readable once the draft is running, so
-between the draft opening and the first pick landing every component still shows the placeholder. The
-loop corrects it within one `poll_seconds` (5) of pick 1. Nothing can close that window without
-caching a pre-draft board, which is the lie this avoids.
+**The league page reads it too.** `teams.draft_slot` is re-seeded from the stale pre-draft
+`pickOrder` by every sync, so a "Draft order" heading over that column would have `/league` visibly
+contradicting `/draft` about which pick is hers — with "Your team" beside the row she is most likely
+to believe. `_league_context` renders the stored order when there is one and calls the numbers
+provisional when there is not.
+
+**Residual gap, and the two things done about it.** The order is only readable once the draft is
+running, so between the draft opening and the first pick landing every component still shows the
+placeholder. Nothing can close that window inside hal-mary without caching a pre-draft board, which
+is the lie this avoids — but the window is sharper than "a few seconds of stale numbers". If ESPN
+draws Caroline **first overall**, the placeholder puts her next pick at 6, five away and outside
+`draft.advise_within_picks`, so she gets **no advice card at all** for her opening pick while the
+page says four picks out. That is the worst moment available to have nothing on screen.
+
+A `/sync` after the draft opens closes it, because `pickOrder` has been drawn for real by then. So
+that sync is an unconditional first step in `docs/SETUP.md` rather than a fallback for when
+something looks wrong, and `partials/turn.html` says the numbers are provisional, and what to tap,
+while `turn.started` is false. A person reading the page should not have to have read the runbook.

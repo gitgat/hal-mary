@@ -58,6 +58,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from hal_mary import db
 from hal_mary.config import Settings
 from hal_mary.draft import loop as draft_loop
+from hal_mary.draft import store as draft_store
 from hal_mary.espn.sync import last_sync
 from hal_mary.memory import standing_memory_files
 from hal_mary.web.draft_page import draft_context
@@ -1087,13 +1088,41 @@ def _team_context(conn: sqlite3.Connection, settings: Settings) -> dict[str, Any
 
 
 def _league_context(conn: sqlite3.Connection, settings: Settings) -> dict[str, Any]:
+    """The league, and who picks when — from the same order the draft page uses.
+
+    ``teams.draft_slot`` is **not** that order. It is re-seeded from ESPN's
+    pre-draft ``pickOrder`` by every sync, and on this league — ``orderType`` is
+    ``DRAFT_START`` — that is a placeholder until the draft opens. Rendering it
+    under a heading that says "Draft order", with "Your team" beside one row,
+    would have this page contradicting the draft page about which pick is hers
+    for the whole night.
+
+    So the numbers come from :func:`stored_draft_order`, the order the draft loop
+    read off ESPN's own board, and the page says plainly when there is no such
+    order yet. A slot is left blank rather than guessed for a team the drawn
+    order does not name.
+    """
     league = _one(conn, "SELECT * FROM league_settings WHERE id = 1")
-    teams = _all(
+    rows = _all(
         conn,
         "SELECT team_id, name, owner, abbrev, draft_slot FROM teams"
         " ORDER BY CASE WHEN draft_slot IS NULL THEN 1 ELSE 0 END, draft_slot, team_id",
     )
-    return {"league": league, "teams": teams, "my_team_id": settings.team_id}
+
+    drawn = draft_store.stored_draft_order(conn)
+    slots = {team_id: slot for slot, team_id in enumerate(drawn, start=1)}
+    teams = [dict(row) for row in rows]
+    if drawn:
+        for team in teams:
+            team["draft_slot"] = slots.get(team["team_id"])
+        teams.sort(key=lambda team: (team["draft_slot"] is None, team["draft_slot"] or 0))
+
+    return {
+        "league": league,
+        "teams": teams,
+        "my_team_id": settings.team_id,
+        "order_is_final": bool(drawn),
+    }
 
 
 # --- the real-world defaults --------------------------------------------------

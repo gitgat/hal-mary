@@ -193,15 +193,28 @@ async def test_an_espn_exception_is_swallowed_and_the_loop_survives(tmp_path, ca
 
 
 async def test_run_forever_keeps_polling_and_stops_when_told(tmp_path):
+    """Waits for the second poll rather than for a fixed number of milliseconds.
+
+    A fixed ``asyncio.sleep`` here is a race the machine wins under load: this
+    test failed twice on a busy box while the code was fine. A flaky test on the
+    draft path teaches people to re-run instead of read, which is how a real
+    failure gets waved through on the night.
+    """
     _, loop, client, _, _ = loop_ready(
         tmp_path, picks=picks_through(1), replace={"poll_seconds = 5": "poll_seconds = 0"}
     )
     client.fail_next = EspnUnavailable("ESPN returned 503")
 
     task = asyncio.create_task(loop.run_forever())
-    await asyncio.sleep(0.05)
-    loop.stop()
-    await asyncio.wait_for(task, timeout=2)
+    try:
+        async with asyncio.timeout(5):
+            while client.draft_picks_calls <= 1:
+                await asyncio.sleep(0.005)
+    except TimeoutError:
+        pass  # let the assertion below say what was actually wrong
+    finally:
+        loop.stop()
+        await asyncio.wait_for(task, timeout=5)
 
     assert client.draft_picks_calls > 1, "the failure did not end the loop"
 

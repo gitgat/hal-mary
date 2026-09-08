@@ -486,6 +486,18 @@ class DraftLoop:
         Storing it would put two of her picks in one round, or none; the snake
         arithmetic over the placeholder is wrong in a smaller way than that.
 
+        **"Short" is measured against the league, not against two.** ESPN is
+        unofficial and the first poll after pick 1 catches it mid-write: a round
+        one whose last slots have no ``team_id`` yet reads as a perfectly
+        well-formed four-team order for a six-team league. Distinct, more than
+        two, and completely wrong. Storing it would be the worst outcome
+        available — :func:`hal_mary.league._espn_order` discards a stored order
+        of the wrong length on every load, and the write happens once, so the
+        good board on the next poll is refused and the placeholder stands for the
+        whole night behind a single log line. The count to beat is the number of
+        distinct teams the board itself names across every round, which the later
+        rounds carry even while round one is still filling in.
+
         Never fatal: this runs on the pick-clock path, and a card built on the
         old order beats no card.
         """
@@ -496,12 +508,24 @@ class DraftLoop:
             for slot in self._schedule
             if slot.get("round_num") == 1 and slot.get("team_id") is not None
         ]
-        if len(first_round) != len(set(first_round)) or len(first_round) < 2:
+        on_the_board = {
+            slot["team_id"] for slot in self._schedule if slot.get("team_id") is not None
+        }
+        if len(first_round) != len(set(first_round)):
             log.warning(
-                "ESPN's draft board has an unusable first round (%d slot(s), %d distinct "
-                "team(s)); keeping the pick order the sync stored",
+                "ESPN's draft board has an unusable first round: %d slot(s) naming only %d "
+                "distinct team(s); keeping the pick order the sync stored",
                 len(first_round),
                 len(set(first_round)),
+            )
+            return
+        if len(first_round) < max(2, len(on_the_board)):
+            log.warning(
+                "ESPN's draft board has an unusable first round: %d slot(s) attributed of the "
+                "%d team(s) the board names; keeping the pick order the sync stored and "
+                "leaving the write for a whole board",
+                len(first_round),
+                len(on_the_board),
             )
             return
         try:

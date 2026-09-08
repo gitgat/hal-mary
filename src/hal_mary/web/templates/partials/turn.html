@@ -26,5 +26,17 @@
         Your picks after this one: {{ turn.my_next_picks[1:]|join(' and ') }}.
       {% endif %}
     </p>
+    {% if not turn.started %}
+      {# ESPN draws the draft order when the draft opens, and hal-mary can only
+         read it once a real pick has landed. Until then every number above is
+         the pre-draft placeholder — and if she was drawn first overall, the
+         placeholder puts her opening pick five away, past the advisor's window,
+         so no card is written for the pick she is actually on. Sync re-reads the
+         drawn order, and she should not have to have read the runbook to know
+         that. #}
+      <p class="small muted"><strong>The pick numbers above are provisional</strong> until the
+        first pick is made — ESPN sets the draft order when the draft opens. Tap
+        <strong>Sync from ESPN now</strong> on the status page once the draft room opens.</p>
+    {% endif %}
   {% endif %}
 </div>

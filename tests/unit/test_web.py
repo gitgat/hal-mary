@@ -584,6 +584,50 @@ def test_league_page_shows_the_draft_order(db_path: Path):
     assert '<span class="pick">6</span>' in next(row for row in rows if "Your team" in row)
 
 
+def test_the_league_page_shows_the_order_espn_drew_not_the_placeholder(db_path: Path):
+    """`teams.draft_slot` is the pre-draft placeholder, re-seeded by every sync.
+
+    ESPN draws the real order when the draft opens, and the draft loop stores it
+    the first time it reads the board. If this page kept rendering `draft_slot`
+    under a heading that says "Draft order", it would visibly contradict the
+    draft page while both were describing the same six teams — and the one with
+    "Your team" beside it is the row she is most likely to believe.
+    """
+    from hal_mary.draft import store as draft_store
+
+    populate_league(db_path)
+    conn = open_conn(db_path)
+    draft_store.store_draft_order(conn, [1, 6, 5, 4, 3, 2])
+    conn.close()
+
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/league").text
+
+    rows = league_rows(text)
+    picks = [re.search(r'<span class="pick">([^<]*)</span>', row).group(1) for row in rows]
+    assert picks == ["1", "2", "3", "4", "5", "6"], "still listed in order of who picks when"
+    hers = next(row for row in rows if "Your team" in row)
+    assert '<span class="pick">2</span>' in hers, "she picks second under the order ESPN drew"
+    assert "provisional" not in text.lower(), "this order is the one that was drawn"
+
+
+def test_the_league_page_calls_the_order_provisional_until_the_draft_opens(db_path: Path):
+    """Before the draft there is no drawn order, and saying so is the whole point.
+
+    This league's `orderType` is DRAFT_START: everything on this page before the
+    first pick is ESPN's placeholder. A number under a bare "Draft order"
+    heading reads as a fact.
+    """
+    populate_league(db_path)
+    with client_for(db_path) as client:
+        login(client)
+        text = client.get("/league").text
+
+    assert "provisional" in text.lower()
+    assert "draft opens" in text.lower(), "and say when it stops being provisional"
+
+
 # --- /status ----------------------------------------------------------------
 
 
