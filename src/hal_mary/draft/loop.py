@@ -89,7 +89,7 @@ PHASE_LIVE = "live"
 PHASE_DONE = "done"
 
 
-def draft_phase(*, picks_made: int, total_slots: int | None) -> str:
+def draft_phase(*, picks_made: int, total_slots: int | None, board_settled: bool = False) -> str:
     """Which of the three phases the draft is in, from the board alone.
 
     **The board decides, and only the board.** ``draftDetail`` also carries
@@ -115,8 +115,29 @@ def draft_phase(*, picks_made: int, total_slots: int | None) -> str:
     ``total_slots`` is ESPN's own row count, or the league's ``rounds x teams``
     when there is no ESPN. ``None`` or zero means nobody knows how long the draft
     is, and an unknowable end is never treated as a finished one.
+
+    ``board_settled`` is the **second** ending, and it exists because the first
+    one is not the only way a draft finishes. This league's real draft stopped
+    89 picks into a 96-slot board — seven slots nobody ever filled — so "every
+    slot has a player in it" never became true, the arithmetic fell through to
+    ``live``, and the loop polled every five seconds for as long as it was left
+    running. The caller computes it from two facts that have to hold *together*
+    (:meth:`DraftLoop._board_settled`): ESPN's ``drafted`` flag is set, **and**
+    the pick count has not moved for ``draft.settled_after_seconds``.
+
+    Requiring both is what keeps the recorded decision about ``drafted`` intact
+    rather than reversing it. The fear there was a flag set early stopping the
+    loop mid-draft, which costs picks — the one direction worth being careful
+    in. It cannot: while picks are still landing the count keeps moving, so the
+    board is never settled and the flag alone decides nothing. And a long pause
+    with the flag unset — a stalled room, a paused draft — cannot end it either.
+    A pick count of zero is never settled at all, which matters more than it
+    looks: ESPN publishes nothing during a live draft, so an empty board is the
+    state the loop sits in for the whole of draft night.
     """
     if total_slots and picks_made >= total_slots:
+        return PHASE_DONE
+    if picks_made > 0 and board_settled:
         return PHASE_DONE
     if picks_made > 0:
         return PHASE_LIVE
@@ -453,6 +474,13 @@ class DraftLoop:
         self._live_since: float | None = None
         self._picks_seen = 0
         self._flagged_disagreement = False
+        #: The pick count as of the last tick, and when it last *changed*, on
+        #: :attr:`_clock`. A board that has stopped growing is how a draft that
+        #: ended short of a full board is recognised; see :func:`draft_phase`.
+        #: ``-1`` rather than ``0`` so the very first read of an empty board is
+        #: still a change, and stamps a starting point to measure from.
+        self._settled_count = -1
+        self._count_changed_at: float | None = None
         #: ``rounds x teams`` from the league, filled in by :meth:`_maybe_advise`.
         #: Only used when ESPN reports no board of its own, which is the no-ESPN
         #: contingency: without some total, a finished draft can never be told
@@ -573,6 +601,20 @@ class DraftLoop:
             status.get("slots"),
         )
 
+    def _board_settled(self, status: dict[str, Any] | None, picks_made: int) -> bool:
+        """Has ESPN finished *and* stopped changing its mind?
+
+        Both, never either. See :func:`draft_phase` for why the pairing is the
+        point: the flag on its own is the one the recorded decision refuses, and
+        stillness on its own would end a draft that is merely paused.
+        """
+        if picks_made <= 0 or not (status or {}).get("drafted"):
+            return False
+        if self._count_changed_at is None:
+            return False
+        quiet = self._clock.monotonic() - self._count_changed_at
+        return quiet >= self.settings.draft.settled_after_seconds
+
     def _update_phase(self, picks_made: int) -> str:
         """Recompute the cadence from what this tick already read.
 
@@ -589,8 +631,18 @@ class DraftLoop:
         # transient read of zero must not reset the "ESPN is publishing" proof.
         self._picks_seen = max(self._picks_seen, picks_made)
         total = (status or {}).get("slots") or self._total_picks
-        phase = draft_phase(picks_made=picks_made, total_slots=total)
+        if picks_made != self._settled_count:
+            self._settled_count = picks_made
+            self._count_changed_at = self._clock.monotonic()
+        settled = self._board_settled(status, picks_made)
+        phase = draft_phase(picks_made=picks_made, total_slots=total, board_settled=settled)
         reason = f"{picks_made} of {total} slots on ESPN's board have a player in them"
+        if settled:
+            reason = (
+                f"ESPN says the draft is over and its board has not changed from "
+                f"{picks_made} of {total} slots for "
+                f"{int(self.settings.draft.settled_after_seconds)}s"
+            )
         if phase == PHASE_IDLE and self._forced_live():
             # The override, and the only place it is applied. Between the draft
             # opening and pick 1 ESPN's board is genuinely empty, so the board

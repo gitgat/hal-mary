@@ -205,6 +205,7 @@ class DraftConfig(_Frozen):
     #: her. Long enough that a slow first pick is not a false alarm; short
     #: enough to matter on a 90-second clock.
     silent_after_seconds: int = 240
+    settled_after_seconds: int = 900
     live_override_seconds: int = 3600
     advise_within_picks: int
     #: How many players the pre-draft research job is asked to rank.
