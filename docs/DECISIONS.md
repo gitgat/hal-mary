@@ -1931,9 +1931,10 @@ above rather than from the hope that was there before.
 ## 2026-09-09 — A draft also ends when the board stops moving, not only when it fills
 
 Found live, hours after the entry above was written, by looking at what the loop was actually doing:
-**200 polls in three minutes**, on the five-second draft-night cadence, with the draft long over.
-Left alone it would have run at that rate indefinitely — 17,280 requests a day, which is the exact
-number `config.toml` cites as the reason the phase machine exists.
+it was still reading ESPN **every five seconds** — measured gaps of 5.0s between consecutive
+polls — with the draft long over. Left alone it would have run at that rate indefinitely: 17,280
+requests a day, which is the exact number `config.toml` cites as the reason the phase machine
+exists.
 
 The cause is one line of arithmetic meeting one fact about real drafts. `draft_phase` ended a draft
 on `picks_made >= total_slots`, and this draft ended **89 picks into a 96-slot board** — seven slots
