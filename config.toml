@@ -158,6 +158,13 @@ season_days = 150
 # asked before it shut, got "still drafting", and did not ask again for a day.
 # `draft_live` schedules nothing at all, so week one's Wednesday news sweep was
 # not late, it was never registered. Asking costs a comparison.
+#
+# The `:20` is load-bearing now in a way `04:20` never was. `apply_phase` re-adds
+# every job with `replace_existing=True`, which recomputes its next fire from
+# now — harmless, and verified harmless, except for a replace landing on the
+# exact instant a job is due, which steps over that run. Once an hour the check
+# brushes past every cadence on the calendar, so it must not share a minute with
+# any of them; every `[jobs.*].cron` here fires on the hour. Pinned by a test.
 phase_cron = "20 * * * *"
 # Every cadence below is read in this zone, not UTC. The jobs are timed against
 # NFL kickoffs, and "Sunday morning" in UTC is 2am Pacific.

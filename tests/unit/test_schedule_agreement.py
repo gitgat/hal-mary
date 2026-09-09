@@ -238,3 +238,55 @@ def test_the_phase_check_catches_up_before_the_first_in_season_job(tmp_path):
         f"until {flips_at} — so {whose} at {earliest} comes due while hal-mary "
         f"still believes it is drafting, and is never scheduled at all"
     )
+
+
+def test_the_phase_check_never_fires_at_the_same_moment_as_a_job(tmp_path):
+    """``apply_phase`` re-adds every job with ``replace_existing=True``, and a
+    replacement recomputes the job's next fire from *now*.
+
+    That is harmless — verified: re-adding a cron job twenty-four times leaves
+    its next fire time exactly where it was, because a cron's next occurrence
+    does not depend on the trigger's history. It stops being harmless in one
+    case: a replace landing on the very instant a job is due recomputes "next
+    after now" past the fire it was standing on, and that run is skipped.
+
+    Nothing collided while the phase was checked once a day. Now that it is
+    checked every hour it brushes past every job on the calendar, so the ``:20``
+    is doing work the ``04:20`` never had to: it is the offset that keeps the
+    check and the jobs off the same minute. That is worth pinning, because it is
+    invisible in both files — ``phase_cron`` and every ``[jobs.*].cron`` look
+    independently reasonable, and a later edit moving either onto the other's
+    minute would break one job, silently, once a week.
+    """
+    from apscheduler.triggers.cron import CronTrigger
+
+    from hal_mary.jobs.registry import PHASES, specs_for_phase
+
+    settings = make_settings(tmp_path)
+    zone = scheduler_timezone(settings)
+
+    def fires(cron: str, count: int) -> set:
+        trigger = CronTrigger.from_crontab(cron, timezone=zone)
+        out, previous, cursor = set(), None, FROM
+        for _ in range(count):
+            moment = trigger.get_next_fire_time(previous, cursor)
+            out.add(moment)
+            previous, cursor = moment, moment
+        return out
+
+    # A fortnight of phase checks: hourly is 336, and every job cadence here is
+    # weekly or daily, so a fortnight sees each of them at least twice.
+    checks = fires(settings.scheduler.phase_cron, 336)
+
+    for phase in PHASES:
+        for spec in specs_for_phase(phase):
+            config = settings.jobs.get(spec.name)
+            if config is None or not config.enabled:
+                continue
+            for cron in config.crons:
+                clash = checks & fires(cron, 28)
+                assert not clash, (
+                    f"{spec.name} ({cron}) fires at {min(clash)}, which is also "
+                    f"a phase check ({settings.scheduler.phase_cron}) — the re-add "
+                    f"can step over that run and skip it"
+                )
