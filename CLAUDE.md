@@ -357,6 +357,16 @@ ESPN does not publish. Keep the reader — it is what makes the post-draft sync 
   Both fail by producing a correct-looking empty result.
 - **This league's flex slot is spelled `RB/WR/TE`, not `FLEX`.** Prose that explains "a FLEX slot"
   defines a term that appears nowhere on Caroline's screen.
+- **Never compare a stored timestamp against SQLite's `datetime('now', ...)`.** Timestamps here are
+  ISO-8601 with a `T` and an offset (`2026-09-09T02:10:27+00:00`); `datetime('now','-3 minutes')`
+  returns `2026-09-09 02:11:28` — a space, no offset. These are compared as **strings**, `'T'`
+  sorts after `' '`, so `started_at > datetime('now', ...)` is true for *every* row of that date.
+  It does not error and it does not look wrong: an ad-hoc "how many polls in the last three
+  minutes" returned the whole table, and that number reached a commit message and a decision entry
+  before the arithmetic was checked against it. The application never does this — `actions._moment`
+  normalises on the way in for the same reason — so this is a warning about the queries you type at
+  the box, which is exactly where nothing is reviewing you. Measure a rate from consecutive rows
+  (`lag(started_at) OVER (ORDER BY rowid)`), not from a clock comparison.
 - **Database on local disk, never on NFS.** In this homelab `/var/data` is a TrueNAS NFS export
   mounted on every node, and SQLite on NFS corrupts. The production VM keeps `hal.db` on its own
   disk.
@@ -452,7 +462,7 @@ ESPN does not publish. Keep the reader — it is what makes the post-draft sync 
   over a partly filled board keeps polling and logs the discrepancy — **until the board also stops
   moving**, which is the second ending. The real draft finished 89 picks into a 96-slot board, so
   "every slot filled" never arrived and the loop sat on the five-second cadence indefinitely; it was
-  still there, 200 polls in three minutes, hours after the last pick. `draft.settled_after_seconds`
+  still there hours after the last pick, reading ESPN every five seconds. `draft.settled_after_seconds`
   closes it, and it takes `drafted` **and** a still board together: the flag alone is what
   `docs/DECISIONS.md` refuses, and while picks keep landing the board is never settled, so the pair
   cannot stop a draft that is still running. Five seconds forever is
