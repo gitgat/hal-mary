@@ -113,6 +113,16 @@ draft the loop idles at `draft.idle_poll_seconds` and stops entirely once the bo
 pick-clock path is wrong; `tests/unit/test_advisor.py` asserts the `draft_advice` job's tool list is
 empty for exactly that reason.
 
+**And the pick feed that all of this was timed against does not exist.** Confirmed on the real
+draft, 8 September 2026: `mDraftDetail` was polled 494 times over the whole draft, HTTP 200 every
+time, and reported **zero** picks and zero rostered players throughout — then 89 picks and 96
+rostered the moment the draft ended. It is not a parsing bug; the same code stored all 89 correctly
+afterwards. So nothing on draft night may *depend* on a pick arriving: the loop's live cadence, the
+pick-counting advice trigger and `draft.advise_within_picks` are all real code standing on a feed
+ESPN does not publish. Keep the reader — it is what makes the post-draft sync work — and let
+`draft.silent_after_seconds` say so on the page. Zero advice cards were written that night. Read
+`docs/DECISIONS.md` before designing anything on-the-clock for next season.
+
 ## Gotchas
 
 - **The ESPN API is unofficial.** Cookies (`ESPN_S2`, `SWID`) expire. The status page checks auth
@@ -439,7 +449,13 @@ empty for exactly that reason.
   `drafted` and `inProgress` flags are reported by `EspnClient.draft_status()` and decide nothing**:
   `drafted` is set late (that is why the raw endpoint exists) so it cannot stop the loop, and
   `inProgress` describes the lobby, not picks, so it cannot start the fast clock. A `drafted: true`
-  over a partly filled board keeps polling and logs the discrepancy. Five seconds forever is
+  over a partly filled board keeps polling and logs the discrepancy — **until the board also stops
+  moving**, which is the second ending. The real draft finished 89 picks into a 96-slot board, so
+  "every slot filled" never arrived and the loop sat on the five-second cadence indefinitely; it was
+  still there, 200 polls in three minutes, hours after the last pick. `draft.settled_after_seconds`
+  closes it, and it takes `drafted` **and** a still board together: the flag alone is what
+  `docs/DECISIONS.md` refuses, and while picks keep landing the board is never settled, so the pair
+  cannot stop a draft that is still running. Five seconds forever is
   2,073,600 requests a season for a job that needs 2,160; see `docs/DECISIONS.md`.
 - **"The draft has started" is an override, never the mechanism.** `POST /draft/started` puts the
   loop on live cadence and syncs, but the loop still finds the draft on its own within one idle

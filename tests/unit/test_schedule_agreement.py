@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from draft_fixtures import make_settings, open_db
+from draft_fixtures import make_settings, open_db, seed_synced_league
 
 from hal_mary import cowork
 from hal_mary.jobs.scheduler import scheduler_timezone
@@ -168,3 +168,125 @@ def test_a_cowork_task_that_feeds_a_job_runs_before_it(tmp_path):
             f"{task_name} runs at {cowork_at} but {job_name} reads its notes at "
             f"{job_at}; the observations would be a week late to the decision"
         )
+
+
+# --- the phase check has to keep up with the windows it evaluates ------------
+
+
+def test_the_phase_check_catches_up_before_the_first_in_season_job(tmp_path):
+    """The defect: an evening draft leaves the phase stale for a whole extra day.
+
+    ``current_phase`` is exact — it compares the clock to the draft window every
+    time it is asked. But it is only *asked* on ``[scheduler].phase_cron``, and
+    nothing schedules a job between one asking and the next. So the resolution
+    of the whole phase machine is the cadence of that cron, not the precision of
+    the function.
+
+    A fantasy league drafts in the evening. With a 12-hour after-window that
+    closes mid-morning, a once-daily check that runs at 04:20 asks the question
+    *before* the window shuts, gets "still drafting", and does not ask again for
+    24 hours. ``draft_live`` schedules no jobs at all, so every in-season job due
+    in between is not merely late — it is never registered, and its fire is lost
+    in silence. On the real draft this ate week one's Wednesday news sweep, and
+    the Thursday lineup decision would have been made with no in-season research
+    behind it at all.
+
+    This is the same family as the two ordering bugs already recorded here: a
+    thing that must happen before another thing, with nothing comparing them.
+    """
+    from datetime import timedelta
+
+    from apscheduler.triggers.cron import CronTrigger
+
+    from hal_mary.jobs.registry import specs_for_phase
+    from hal_mary.jobs.scheduler import current_phase
+
+    settings = make_settings(tmp_path)
+    zone = scheduler_timezone(settings)
+    conn = open_db(tmp_path)
+
+    # 18:00 Pacific on a Tuesday — when this league actually drafted.
+    draft_at = datetime(2026, 9, 9, 1, 0, tzinfo=UTC)
+    seed_synced_league(conn, draft_date=draft_at.isoformat())
+    assert current_phase(conn, settings, now=draft_at) == "draft_live"
+
+    closes = draft_at + timedelta(hours=settings.scheduler.draft_window_after_hours)
+
+    # When the phase check next runs *and* sees that the draft is behind it.
+    trigger = CronTrigger.from_crontab(settings.scheduler.phase_cron, timezone=zone)
+    previous, cursor, flips_at = None, closes, None
+    for _ in range(200):
+        moment = trigger.get_next_fire_time(previous, cursor)
+        if current_phase(conn, settings, now=moment) == "in_season":
+            flips_at = moment
+            break
+        previous, cursor = moment, moment
+    assert flips_at is not None, "the phase never becomes in_season"
+
+    # The first in-season job due after the window shuts. It is only scheduled
+    # if the phase has already flipped, so this fire is the deadline.
+    earliest, whose = None, ""
+    for spec in specs_for_phase("in_season"):
+        for cron in settings.job(spec.name).crons:
+            fire = CronTrigger.from_crontab(cron, timezone=zone).get_next_fire_time(None, closes)
+            if earliest is None or fire < earliest:
+                earliest, whose = fire, spec.name
+
+    assert earliest is not None, "no in-season job has a cadence"
+    assert flips_at <= earliest, (
+        f"the draft window shuts at {closes}, but the phase is not re-checked "
+        f"until {flips_at} — so {whose} at {earliest} comes due while hal-mary "
+        f"still believes it is drafting, and is never scheduled at all"
+    )
+
+
+def test_the_phase_check_never_fires_at_the_same_moment_as_a_job(tmp_path):
+    """``apply_phase`` re-adds every job with ``replace_existing=True``, and a
+    replacement recomputes the job's next fire from *now*.
+
+    That is harmless — verified: re-adding a cron job twenty-four times leaves
+    its next fire time exactly where it was, because a cron's next occurrence
+    does not depend on the trigger's history. It stops being harmless in one
+    case: a replace landing on the very instant a job is due recomputes "next
+    after now" past the fire it was standing on, and that run is skipped.
+
+    Nothing collided while the phase was checked once a day. Now that it is
+    checked every hour it brushes past every job on the calendar, so the ``:20``
+    is doing work the ``04:20`` never had to: it is the offset that keeps the
+    check and the jobs off the same minute. That is worth pinning, because it is
+    invisible in both files — ``phase_cron`` and every ``[jobs.*].cron`` look
+    independently reasonable, and a later edit moving either onto the other's
+    minute would break one job, silently, once a week.
+    """
+    from apscheduler.triggers.cron import CronTrigger
+
+    from hal_mary.jobs.registry import PHASES, specs_for_phase
+
+    settings = make_settings(tmp_path)
+    zone = scheduler_timezone(settings)
+
+    def fires(cron: str, count: int) -> set:
+        trigger = CronTrigger.from_crontab(cron, timezone=zone)
+        out, previous, cursor = set(), None, FROM
+        for _ in range(count):
+            moment = trigger.get_next_fire_time(previous, cursor)
+            out.add(moment)
+            previous, cursor = moment, moment
+        return out
+
+    # A fortnight of phase checks: hourly is 336, and every job cadence here is
+    # weekly or daily, so a fortnight sees each of them at least twice.
+    checks = fires(settings.scheduler.phase_cron, 336)
+
+    for phase in PHASES:
+        for spec in specs_for_phase(phase):
+            config = settings.jobs.get(spec.name)
+            if config is None or not config.enabled:
+                continue
+            for cron in config.crons:
+                clash = checks & fires(cron, 28)
+                assert not clash, (
+                    f"{spec.name} ({cron}) fires at {min(clash)}, which is also "
+                    f"a phase check ({settings.scheduler.phase_cron}) — the re-add "
+                    f"can step over that run and skip it"
+                )

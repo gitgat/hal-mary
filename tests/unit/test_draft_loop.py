@@ -46,6 +46,7 @@ from hal_mary.draft.loop import (
     PHASE_IDLE,
     PHASE_LIVE,
     DraftLoop,
+    draft_phase,
     record_manual_pick,
 )
 from hal_mary.espn.client import EspnUnavailable
@@ -874,3 +875,87 @@ async def test_the_override_expires_even_while_espn_is_failing(tmp_path):
     assert result["error"] is not None, "the sync did fail"
     assert loop.phase == PHASE_IDLE
     assert loop.poll_interval == 300
+
+
+# --- a draft that ends with its board unfilled -------------------------------
+#
+# Observed on the real draft, 8 September 2026: it finished 89 picks into a
+# 96-slot board. "Every slot is filled" was the only ending `draft_phase` knew,
+# so the loop fell through to `live` and stayed there — 200 polls in three
+# minutes, measured hours after the last pick, on the cadence whose own comment
+# in config.toml calls five seconds around the clock 17,280 requests a day
+# against an unofficial API on one household's cookies. The phases exist to
+# prevent exactly that, and an unfilled board walked straight past them.
+
+
+def test_a_draft_can_end_with_slots_nobody_ever_filled():
+    """The arithmetic alone cannot see the end of a short draft."""
+    assert draft_phase(picks_made=89, total_slots=96, board_settled=False) == PHASE_LIVE
+    assert draft_phase(picks_made=89, total_slots=96, board_settled=True) == PHASE_DONE
+    # A full board still ends it without anybody having to have settled.
+    assert draft_phase(picks_made=96, total_slots=96, board_settled=False) == PHASE_DONE
+    # An empty board that has "settled" is a draft that has not begun. ESPN
+    # publishes nothing during a live draft, so this is the state the loop is in
+    # for the whole of draft night, and reading it as finished would stop the
+    # loop before the first pick.
+    assert draft_phase(picks_made=0, total_slots=96, board_settled=True) == PHASE_IDLE
+
+
+async def test_the_loop_stops_once_espn_agrees_the_draft_is_over_and_the_board_is_still(tmp_path):
+    """Both facts, never either alone: the flag *and* a board that has stopped."""
+    _, loop, client, _, _ = loop_ready(tmp_path)
+    clock = FakeClock()
+    loop._clock = clock
+    client.slots = 10  # a board seven short of full, like the real one
+    client.picks = picks_through(6)
+    client.drafted = True
+
+    await loop.run_once()
+    assert loop.phase == PHASE_LIVE, "a board that only just stopped may yet move again"
+
+    clock.advance(loop.settings.draft.settled_after_seconds + 1)
+    await loop.run_once()
+    assert loop.phase == PHASE_DONE
+    assert loop.poll_interval is None, "a finished draft is not polled at all"
+
+
+async def test_a_quiet_board_never_stops_the_loop_while_espn_still_says_drafting(tmp_path):
+    """The expensive direction. Stopping early costs her picks; polling costs
+    requests. A long pause mid-draft — ESPN's room stalls, somebody's clock runs
+    out, the commissioner pauses it — must never be read as the end."""
+    _, loop, client, _, _ = loop_ready(tmp_path)
+    clock = FakeClock()
+    loop._clock = clock
+    client.slots = 10
+    client.picks = picks_through(6)
+    client.drafted = False
+
+    await loop.run_once()
+    clock.advance(loop.settings.draft.settled_after_seconds * 20)
+    await loop.run_once()
+
+    assert loop.phase == PHASE_LIVE, (
+        "ESPN has not said the draft is over, so however long the board has been "
+        "still, it is still being watched"
+    )
+
+
+async def test_a_pick_arriving_restarts_the_settling_clock(tmp_path):
+    """`drafted` set early is the failure the recorded decision feared. It is
+    disarmed by the count itself: while picks keep landing the board has not
+    settled, so the flag alone can never end the draft."""
+    _, loop, client, _, _ = loop_ready(tmp_path)
+    clock = FakeClock()
+    loop._clock = clock
+    client.slots = 10
+    client.drafted = True  # wrong, and set from the first tick
+    client.picks = picks_through(4)
+
+    await loop.run_once()
+    clock.advance(loop.settings.draft.settled_after_seconds - 1)
+    client.picks = picks_through(5)  # the draft is plainly still going
+    await loop.run_once()
+    clock.advance(loop.settings.draft.settled_after_seconds - 1)
+    await loop.run_once()
+
+    assert loop.phase == PHASE_LIVE, "the fifth pick restarted the clock"

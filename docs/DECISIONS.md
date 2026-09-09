@@ -1861,3 +1861,104 @@ loop uses picks when they appear, `record_manual_pick` needs no ESPN at all, and
 every five seconds while the draft moves without her. `scripts/watch-draft.py` prints the verdict in
 words on the night, and reads rosters precisely because an empty board on its own cannot tell "not
 started" from "not published".
+
+## 2026-09-09 — ESPN publishes no picks during a live draft, and the whole board the second it ends
+
+The question the entry above left open — *"both observations are mocks; Caroline's league is real,
+and it may well behave differently"* — was answered by the real draft, and the answer is that it
+does not behave differently.
+
+Her league drafted on the evening of 8 September 2026: six teams, sixteen rounds, ninety-six slots.
+The draft loop ran the whole way through on the five-second cadence.
+
+| | during the draft | ~20 minutes after it ended |
+|---|---|---|
+| `mDraftDetail` polls | **494**, all HTTP 200 | — |
+| picks with a real `playerId` | **0** | **89** |
+| players on any roster | **0** | **96** |
+| `drafted` | `false` | `true` |
+| `inProgress` | `true` | `false` |
+| advice cards written | **0** | — |
+
+**It is not our parser, and that is the one alternative worth ruling out.** The same endpoint, the
+same `draft_picks()`, the same league, on the same box: zero before, eighty-nine after — and the
+post-draft sync stored all eighty-nine correctly, pick 1 through pick 96, every name matched. Code
+that can read a full board from the payload afterwards is not code that miscounts the same payload
+shape beforehand. The endpoint was healthy and empty.
+
+So the claim is now the strong one, for a **real** league on `lm-api-reads`: nothing about a draft
+is readable until the draft is over.
+
+**What that means about what was built.** The five-second poll, the live cadence in `draft_phase`,
+and the advice trigger that counts picks are all built on a feed that does not exist. They cost 494
+requests and produced nothing. That is not a bug in any of them — each does exactly what it says —
+it is a foundation that was assumed rather than checked, and everything standing on it was sound
+and useless together.
+
+**The order in which that happened is the lesson, not the API.** The poll loop, the phase machine,
+the three cadences and the advice trigger were written first; the assumption underneath them was
+tested against a mock the night before the draft. When that mock returned zero picks, the result
+was read as *"mocks may differ from a real league"* — which is true, and which was also the
+comfortable reading of the only evidence there was. The uncomfortable reading was that the feed
+does not exist, and it was the right one. **An assumption that an entire feature rests on gets
+tested before the feature, not after; and when the one test of it comes back negative, the burden
+moves onto the feature rather than onto the test.**
+
+**What carried the night** was `board_build`: pre-draft research, on the page, read by a human. Its
+calls were good ones — a receiver's move to a new team, an injury promoting a teammate, the shape of
+the tight-end position, and the six-team quarterback maths — and the roster came out well. The
+research half of this project worked. The live half never ran.
+
+**The manual path is not a fallback here, it is the only path, and it was not fast enough.** Three
+picks are sitting in `unmatched_picks`, and one was lost outright to a one-letter misspelling of a
+player's first name on a ninety-second clock. A path that only exists for a night like this one has
+to be built for typing under time pressure — fuzzy matching, a visible candidate list, and forgiving
+input — none of which it has.
+
+**`draft.silent_after_seconds` did the one thing it was for.** It shipped the night before, and the
+page told her ESPN was publishing nothing rather than implying it was watching on her behalf. A
+feature that is broken and says so is a different thing from one that is broken and reassuring.
+
+**This does not license deleting the polling.** What is established is this league, this season,
+this host. Keep the reader — it is what makes the post-draft sync work, and that is now its real
+job — but nothing on draft night may *depend* on a pick arriving. The idle cadence and the silence
+banner are the right resting state.
+
+**Not decided here:** what on-the-clock advice should be next season. It cannot be triggered by a
+pick feed. That is a design question for the off-season, and it starts from the fact recorded
+above rather than from the hope that was there before.
+
+## 2026-09-09 — A draft also ends when the board stops moving, not only when it fills
+
+Found live, hours after the entry above was written, by looking at what the loop was actually doing:
+**200 polls in three minutes**, on the five-second draft-night cadence, with the draft long over.
+Left alone it would have run at that rate indefinitely — 17,280 requests a day, which is the exact
+number `config.toml` cites as the reason the phase machine exists.
+
+The cause is one line of arithmetic meeting one fact about real drafts. `draft_phase` ended a draft
+on `picks_made >= total_slots`, and this draft ended **89 picks into a 96-slot board** — seven slots
+nobody ever filled. So the full-board ending never arrived, `picks_made > 0` fell through to `live`,
+and the loop was correct at every step and wrong overall. The board is still the only evidence, and
+the board simply has a second way of saying "finished" that nothing was reading.
+
+**The fix takes two facts together, and the pairing is the whole design.** `draft.settled_after_
+seconds` (15 minutes, ten pick clocks) ends the draft only when ESPN's `drafted` flag is set **and**
+the pick count has not moved for that long.
+
+This deliberately does not overturn the recorded decision that `drafted` decides nothing. That
+entry's fear is a flag set *early* stopping the loop mid-draft, which costs Caroline picks — the one
+direction worth being careful in. Pairing disarms it from both sides:
+
+* while picks are still landing, the count keeps moving and the board is never settled, so an early
+  flag decides nothing on its own;
+* a long pause with the flag unset — a stalled room, a paused draft — cannot end anything either;
+* a pick count of zero is never settled at all, which matters more than it looks, because the entry
+  above establishes that an empty board is the state the loop sits in for the *whole* of draft
+  night. A "quiet board" rule without that guard would have stopped the loop before pick one.
+
+**What this says about the night is worse than the polling.** `_note_flag_disagreement` had been
+logging this exact situation, in words, on purpose — *"ESPN says drafted is true, but only 89 of 96
+slots have a player in them; still watching, because that flag is set late"*. The log sentence
+describing the bug was written before the bug, as a deliberate piece of instrumentation, and it fired
+correctly. Nobody read it. Instrumentation that nothing looks at is not a safety net; the loop was
+still polling because it had been asked to, and it said so, and it went on for hours.
